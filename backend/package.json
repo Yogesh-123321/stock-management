@@ -1,0 +1,35 @@
+{
+  "name": "inventory-platform-backend",
+  "version": "1.0.0",
+  "description": "Material receiving, vendor registration, PO/invoice upload and stock entry API",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "seed": "node src/utils/seed.js",
+    "seed:vendors": "node src/utils/seedVendors.js",
+    "seed:parts": "node src/utils/seedParts.js",
+    "seed:part-vendors": "node src/utils/seedPartVendors.js",
+    "seed:parts:xlsx": "node src/utils/seedPartsFromExcel.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.5",
+    "docx": "^9.7.1",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-async-handler": "^1.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.5.1",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.15.0",
+    "streamifier": "^0.1.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

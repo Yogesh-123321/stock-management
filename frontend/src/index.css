@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design tokens — one system, no antd/Chakra resets to fight anymore.
+
+  Palette (named):
+    ink        #101828  primary text, sidebar surface
+    surface    #F4F5F7  app background
+    card       #FFFFFF  panel surface
+    steel      #1F3A5C  brand / primary action (circuit-trace blue)
+    copper     #B5620A  pending / accent (solder-copper)
+    signal     #157F3C  success / approved
+    alarm      #C0342C  destructive / rejected
+    line       #E2E5EA  borders
+    slate      #667085  muted text
+
+  Type:
+    display + labels -> IBM Plex Sans (technical, engineered feel)
+    body             -> Inter
+    part/reg numbers -> IBM Plex Mono, set in a bordered "silkscreen" chip
+*/
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 222 47% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 10%;
+
+    --primary: 209 48% 24%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 16% 93%;
+    --secondary-foreground: 222 47% 10%;
+
+    --muted: 220 16% 93%;
+    --muted-foreground: 220 9% 42%;
+
+    --accent: 32 87% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 57% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 148 70% 27%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 220 14% 89%;
+    --input: 220 14% 89%;
+    --ring: 209 48% 24%;
+    --radius: 0.5rem;
+
+    --sidebar: 222 47% 10%;
+    --sidebar-foreground: 220 20% 88%;
+    --sidebar-muted: 220 12% 60%;
+    --sidebar-active: 32 87% 38%;
+  }
+}
+
+* {
+  border-color: hsl(var(--border));
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: "IBM Plex Sans", "Inter", sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.font-mono-tech {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+/* Signature element: the mono "silkscreen" chip used for part numbers,
+   vendor registration numbers, and other printed-label identifiers. */
+.id-chip {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  background: hsl(220 20% 97%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.page-container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2.25rem 2rem 4rem;
+}
+
+/* thin scrollbar for dense tables */
+.thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: hsl(220 14% 82%);
+  border-radius: 999px;
+}

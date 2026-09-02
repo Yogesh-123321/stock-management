@@ -1,0 +1,3612 @@
+[
+  {
+    "ttUniquePartNumber": "TTAYFAN001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYFAN001",
+    "itemDescription": "iMoni Fan unit for ITI with 6 fans",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "FAN",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTAYPDU001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYPDU001",
+    "itemDescription": "PDU-GP with xA 1MCB, 5 Sockets",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "PDU",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTAYPDU002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYPDU002",
+    "itemDescription": "PDU-BLOCK with 2xMCB 1 input TB, 3+2 TB",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "PDU",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTAYSRMS01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYSRMS01",
+    "itemDescription": "iMoni Rack Controller (GP) for ITI",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTAYSRMS02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYSRMS02",
+    "itemDescription": "iMoni Rack Controller (Block) for ITI",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "02"
+  },
+  {
+    "ttUniquePartNumber": "TTAYSRMS03",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYSRMS03",
+    "itemDescription": "iMoni Rack Controller (GP)",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "03"
+  },
+  {
+    "ttUniquePartNumber": "TTAYSRMS04",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTAYSRMS04",
+    "itemDescription": "iMoni Rack Controller (Block)",
+    "companyCode": "TT",
+    "category": "AY",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "04"
+  },
+  {
+    "ttUniquePartNumber": "TTCN2WBS001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCN2WBS001",
+    "itemDescription": "2 Way Bakelite connector strips",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "2WBS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCN4WBS001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCN4WBS001",
+    "itemDescription": "4 Way Bakelite connector strips",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "4WBS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNCM00501",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCNCM00501",
+    "itemDescription": "Crimping Pins Molex, for 5.08mm coonector housing",
+    "companyCode": "TT",
+    "category": "CNC",
+    "partTypeBatchNo": "M005",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNMSD8001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CRD693072010801",
+    "itemDescription": "Connector_Card:microSD_HC_Wuerth_693072010801",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "MSD8",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNMSD9001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KSTC0599",
+    "itemDescription": "Micro SD Card Holder - SMD - Push Type - 9 Pin",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "MSD9",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPBR02201",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757242",
+    "itemDescription": "Connector_Phoenix_MSTB:PhoenixContact_MSTBA_2,5_2-G-5,08_1x02_P5.08mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR02",
+    "runningSerialNo": "201"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPCRSM01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCNPCRSM01",
+    "itemDescription": "Crimp for 3 Pin Female SM Connector",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PCR",
+    "runningSerialNo": "SM01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPM02501",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCNPM02501",
+    "itemDescription": "Connector Molex, 5.08mm 2 Pin wafer PCB Mount (MALE)",
+    "companyCode": "TT",
+    "category": "CNP",
+    "partTypeBatchNo": "M025",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPR02J001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B2B-XH-A RA",
+    "itemDescription": "Connector_JST:JST_XH_B2B-XH-A_1x02_P2.50mm_Horizantal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PR02",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPR03TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61300311021",
+    "itemDescription": "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PR03",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPR08J001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B8B-XH-A RA",
+    "itemDescription": "Connector_JST:JST_XH_B8B-XH-A_1x08_P2.50mm_Horizantal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PR08",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPRD09P01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "DB9MRPC",
+    "itemDescription": "Connector DSUB 9Pin DB9 Male R/A, PCB mount",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PRD09",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS02TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-102-09-G-S",
+    "itemDescription": "Header, 2x1, 2,54mm, VR, TH, Height 5.84mm/10.16mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS02",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS02TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61301211121",
+    "itemDescription": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS02",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS03J001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B3B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS03",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS03TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-103-07-F-S",
+    "itemDescription": "Header, 3x1, 2,54mm, VR, TH, Height 5.84mm/2.54mm - Shunt Fitted 1-2 by default",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS03",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS04J001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B4B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS04",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS04TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-105-07-G-D",
+    "itemDescription": "Header,2 x2, 2,54mm, VR, TH, Height 5.84mm/2.54mm - Shunt Fitted 1-2",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS04",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS05SM01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "FTSH-110-01-L-DV",
+    "itemDescription": "Header, 5x2, 1.27mm, VR, SMD, T=3.05mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS05",
+    "runningSerialNo": "SM01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS08J001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B8B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B8B-XH-A_1x08_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS08",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS206THB1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KSTC1021",
+    "itemDescription": "6 Pin Box Header Straight Male - 3 x 2 Pin",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS206",
+    "runningSerialNo": "THB1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS210THB1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KSTC0067",
+    "itemDescription": "20 Pin Box Header Straight Male - 10 x 2 Pin",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS210",
+    "runningSerialNo": "THB1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPS240SM01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KSTC1843",
+    "itemDescription": "Male Header Pins 40x2 Smd - 1.27mm Pitch - Brass",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PS240",
+    "runningSerialNo": "SM01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSD09C01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "DB9MS",
+    "itemDescription": "Connector DSUB 9Pin DB9 Male Straight, Solder Cup",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSD09",
+    "runningSerialNo": "C01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNRJ45L001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KRJ-CB4.2GYZNL",
+    "itemDescription": "RJ45 jack, single port, with LEDS, Metal shielded dip low profile",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "RJ45",
+    "runningSerialNo": "L001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSM02501",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCNSM02501",
+    "itemDescription": "Connector Molex 5.08mm 2 Pin wafer housing (FEMALE)",
+    "companyCode": "TT",
+    "category": "CNS",
+    "partTypeBatchNo": "M025",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSR03TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "613003143121",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_1x03_P2.54mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SR03",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSR04TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "613004143121",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SR04",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSRD09P01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "DB9FRPC",
+    "itemDescription": "Connector DSUB 9Pin DB9 R/A Straight, PCB mount",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SRD09",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS03SM01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCNSS03SM01",
+    "itemDescription": "3 PIN female SM Connector 2.5 mm Pitch",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS03",
+    "runningSerialNo": "SM01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS10X2TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-110-23-F-D",
+    "itemDescription": "Socket, 10x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS10X2",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS10X2TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61302021821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x10_P2.54mm_Vertical/3mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS10X2",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS15X2TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-115-23-F-D",
+    "itemDescription": "Socket, 15x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS15X2",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS15X2TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61303021821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x15_P2.54mm_Vertical/3mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS15X2",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS17X2TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-117-23-F-D",
+    "itemDescription": "Socket, 17x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS17X2",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS17X2TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61303421821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x17_P2.54mm_Vertical/3mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS17X2",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS8X2TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-108-23-F-D",
+    "itemDescription": "Socket, 8x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS8X2",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSS8X2TH02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61301621821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x08_P2.54mm_Vertical/3mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SS8X2",
+    "runningSerialNo": "TH02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSSD09C01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "DB9FS",
+    "itemDescription": "Connector DSUB 9Pin DB9 Female Straight, Solder Cup",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SSD09",
+    "runningSerialNo": "C01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNST03PV01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTCNST03PV01",
+    "itemDescription": "Screw Connector Terminal, 3 way, PVC",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "ST03",
+    "runningSerialNo": "PV01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR02301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1715721",
+    "itemDescription": "TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal PCB mount",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR02",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR03301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757255",
+    "itemDescription": "PhoenixContact_MSTBA_2,5_3-G-5,08_1x03_P5.08mm_Horizontal RA",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR03",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR04401",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757268",
+    "itemDescription": "PhoenixContact_MSTBA_2,5_4-G-5,08_1x04_P5.08mm_Horizontal RA",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR04",
+    "runningSerialNo": "401"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0402104D",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402KRX7R7BB104",
+    "itemDescription": "Capacitor, MLCC, 100nF, 16V, X7R, 10%, 0402, T=0.5mm, Capacitor, MLCC, 100nF, 16V, X7R, +10%, 0402, T=0.5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "104D"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0402105C",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM155R61E105KA12",
+    "itemDescription": "Capacitor, MLCC, 1uF, 6V3, X5R, 10%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "105C"
+  },
+  {
+    "ttUniquePartNumber": "TTCS04023R3G",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402BRNPO9BN3R3",
+    "itemDescription": "Capacitor, MLCC, 3.3pF, 50V, NPO, +0.1pF, 0402, T=0.5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "3R3G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0402471G",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402JRNPO9BN471",
+    "itemDescription": "Capacitor, MLCC, 470pF, 50V, NPO, 5%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "471G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS04025R6G",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402BRNPO9BN5R6",
+    "itemDescription": "Capacitor, MLCC, 5.6pF, 50V, NPO, 5%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "5R6G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603104C",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "C0603C104K9PACTU",
+    "itemDescription": "Capacitor, MLCC, 100nF, 6V3, X5R, +10%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "104C"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603105C",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603KRX5R5BB105",
+    "itemDescription": "Capacitor, MLCC, 1uF, 6V3, X5R, 10%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "105C"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603105F",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCS0603105F",
+    "itemDescription": "Capacitor, MLCC, 1uF 25V 10% 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "105F"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603106D",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCS0603106D",
+    "itemDescription": "Capacitor, MLCC, 10uF 16V 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "106D"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603106E",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM188R61A106KAAL",
+    "itemDescription": "Capacitor, MLCC, 10\u00b5F, 10V, X5R, 10%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "106E"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060310RG",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603JRNPO9BN100",
+    "itemDescription": "Capacitor, MLCC, 10pF, 50V, NPO, 5%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "10RG"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603225E",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603KRX5R6BB225",
+    "itemDescription": "Capacitor, MLCC, 2.2uF, 10V, X5R, 10%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "225E"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603475D",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM188R61C475KE11",
+    "itemDescription": "Capacitor, MLCC, 4.7uF, 16V, X5R, 20%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "475D"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603475E",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603MRX5R6BB475",
+    "itemDescription": "Capacitor, MLCC, 4.7uF, 10V, X5R, +20%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "475E"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603475F",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTCS0603475F",
+    "itemDescription": "Capacitor, MLCC, 4.7uF 25V 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "475F"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0805106F",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0805KRX5R8BB106",
+    "itemDescription": "Capacitor, MLCC, 10uF, 25V, X5R, 10%, 0805, T=0,85mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0805",
+    "runningSerialNo": "106F"
+  },
+  {
+    "ttUniquePartNumber": "TTCS1206102Z",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC1206KKX7RDBB102",
+    "itemDescription": "Capacitor, MLCC, 1nF, 2KV, X7R, 10%, 1206, T=1,25mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "102Z"
+  },
+  {
+    "ttUniquePartNumber": "TTCS1206104G",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1206B104J500CT",
+    "itemDescription": "Capacitor_100nF SMD:C_1206_3216Metric_Pad1.33x1.80mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "104G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS1206106E",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1206B106J100CT",
+    "itemDescription": "Capacitor_10uF SMD:C_1206_3216Metric_Pad1.33x1.80mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "106E"
+  },
+  {
+    "ttUniquePartNumber": "TTDS0603G001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LG Q396-PS-35",
+    "itemDescription": "LED Green, 0603 SMD, Forward Voltage Typ=2V, Max=2.5V",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "G001"
+  },
+  {
+    "ttUniquePartNumber": "TTDS0603R001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LS Q976-NR-1",
+    "itemDescription": "LED Red, 0603 SMD, Forward Voltage Typ=2V, Max=2.5V",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "R001"
+  },
+  {
+    "ttUniquePartNumber": "TTDS0603Y001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LY Q396-P1Q2-36",
+    "itemDescription": "LED Yellow, 0603 SMD, Forward Voltage min=1.7V, Typ=2V, Max=2.3V",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "Y001"
+  },
+  {
+    "ttUniquePartNumber": "TTDS12064148",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "TS4148/IN4148",
+    "itemDescription": "TS4148 Diode_SMD:D_1206_3216Metric_Pad1.42x1.75mm_",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "4148"
+  },
+  {
+    "ttUniquePartNumber": "TTDS1206G001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "150120RS75000",
+    "itemDescription": "LED G SMD:LED_1206_3216Metric_Pad1.42x1.75mm_",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "G001"
+  },
+  {
+    "ttUniquePartNumber": "TTDTIR05TH850",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTDTIR05TH850",
+    "itemDescription": "LED IR,5mm 850 nM Through Hole",
+    "companyCode": "TT",
+    "category": "DT",
+    "partTypeBatchNo": "IR05",
+    "runningSerialNo": "TH850"
+  },
+  {
+    "ttUniquePartNumber": "TTDTS05B001",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "SR560",
+    "itemDescription": "Diode Schottky , THT, 60V, 5A",
+    "companyCode": "TT",
+    "category": "DT",
+    "partTypeBatchNo": "S05",
+    "runningSerialNo": "B001"
+  },
+  {
+    "ttUniquePartNumber": "TTDTS06B001",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "SR660",
+    "itemDescription": "Diode Schottky , THT, 60V, 6A",
+    "companyCode": "TT",
+    "category": "DT",
+    "partTypeBatchNo": "S06",
+    "runningSerialNo": "B001"
+  },
+  {
+    "ttUniquePartNumber": "TTDTS10B001",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "SR1060",
+    "itemDescription": "Diode Schottky , THT, 60V, 10A",
+    "companyCode": "TT",
+    "category": "DT",
+    "partTypeBatchNo": "S10",
+    "runningSerialNo": "B001"
+  },
+  {
+    "ttUniquePartNumber": "TTIC020P02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ESDALC6V1-1U2",
+    "itemDescription": "ESD protection 6V1 TVS DIODE 3VWM ST0201,",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "020",
+    "runningSerialNo": "P02"
+  },
+  {
+    "ttUniquePartNumber": "TTICDFN01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "MT25QL128ABA1EW7",
+    "itemDescription": "MT25QL128ABA1EW7 Package_DFN_QFN:W-PDFN-8-1EP_6x5mm_P1.27mm_EP3x3mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "DFN",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTICDFN301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST1L05CPU33R",
+    "itemDescription": "LDO, 3.3V, 1.3A, Very low quiescent current BiCMOS voltage regulator, 6-DFN (3x3)",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "DFN",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTICDIP001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "APC-817D1-SL",
+    "itemDescription": "PC817 Package_DIP:DIP-4_W7.62mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "DIP",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICQFP301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "STM32H563ZIT6",
+    "itemDescription": "STM32H563ZIT6, LQFP144 package, 20x20",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "QFP",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTICS22501",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LD1117S50TR",
+    "itemDescription": "IC REG LDO 5V 0.8A SOT223",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "S22",
+    "runningSerialNo": "501"
+  },
+  {
+    "ttUniquePartNumber": "TTICS32P01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ESDALC6V1W5",
+    "itemDescription": "Dual Transil array for ESD protection",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "S32",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTICSO16001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST202ECDR",
+    "itemDescription": "ST202ExD Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SO16",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICSO23300",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "BAT54S",
+    "itemDescription": "BAT54S Package_TO_SOT_SMD:SOT-23",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SO23",
+    "runningSerialNo": "300"
+  },
+  {
+    "ttUniquePartNumber": "TTICSO2S01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "USBLC6-4SC6",
+    "itemDescription": "Very low capacitance ESD protection , 4 lines",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SO2",
+    "runningSerialNo": "S01"
+  },
+  {
+    "ttUniquePartNumber": "TTICSOC001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST3485EBDR",
+    "itemDescription": "ST3485EBDR Parts:SOIC127P600X175-8N",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SOC",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICSQFN701",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LAN8742A-CZ-TR",
+    "itemDescription": "10/100M RMII Ethernet transceiver, 24-SQFN (4x4)",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SQFN",
+    "runningSerialNo": "701"
+  },
+  {
+    "ttUniquePartNumber": "TTLS060300R",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "BLM18AG601SN1D",
+    "itemDescription": "Ferrite bead, 600R@100MHz, +25%, 500mA, 380mR, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "LS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "00R"
+  },
+  {
+    "ttUniquePartNumber": "TTLSSMDP01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KMS-1102NL",
+    "itemDescription": "Discrete Magnetic Transformer Module, 16 pins, SMT, 100 Base-TX",
+    "companyCode": "TT",
+    "category": "LS",
+    "partTypeBatchNo": "SMD",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEBPT001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEBPT001",
+    "itemDescription": "Bottom Plate, 2U iMoni Tray for ITI",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "BPT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEBPT002",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEBPT002",
+    "itemDescription": "Bottom Plate, 2U iMoni Tray for SR01,SR02",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "BPT",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTMECCL001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMECCL001",
+    "itemDescription": "Camera Clamp, , 2U iMoni Tray",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "CCL",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEDR50MM01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEDR50MM01",
+    "itemDescription": "DIN Rail Length 50 mm, width 35.5mm",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "DR50",
+    "runningSerialNo": "MM01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEEML001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEEML001",
+    "itemDescription": "EM Lock, 12V neck size (10.5mm)",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "EML",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEFAN001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEFAN001",
+    "itemDescription": "4\" AXIAL Fans, 12V DC, 105 CFM, 0.55Amp",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "FAN",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEFTP001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEFTP001",
+    "itemDescription": "2U Fan Tray, Powder coated RAL7035 for 6 Fans",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "FTP",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEGRSI0011",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEGRSI0011",
+    "itemDescription": "Groumate neck size (11mm), silicon",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "GRSI",
+    "runningSerialNo": "0011"
+  },
+  {
+    "ttUniquePartNumber": "TTMEGRSI0018",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEGRSI0018",
+    "itemDescription": "Groumate neck size (18mm), silicon",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "GRSI",
+    "runningSerialNo": "0018"
+  },
+  {
+    "ttUniquePartNumber": "TTMELSW001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMELSW001",
+    "itemDescription": "Limit switch, 1xNO 1xNC Pin xx mm",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "LSW",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMELUGTM01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMELUGTM01",
+    "itemDescription": "2.5 mm Twin LUG",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "LUG",
+    "runningSerialNo": "TM01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3HNMS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3HNMS01",
+    "itemDescription": "M3 Hex Nut ( TTFSMS001), MS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3HN",
+    "runningSerialNo": "MS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3LW0001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3LW0001",
+    "itemDescription": "M3 Leather Washer",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3LW",
+    "runningSerialNo": "0001"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3PWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3PWSS01",
+    "itemDescription": "M3 Plain washer, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3PW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3SCSS06",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3SCSS06",
+    "itemDescription": "M3x06 Screw, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3SC",
+    "runningSerialNo": "SS06"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3SCSS10",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3SCSS10",
+    "itemDescription": "M3x10 Screw, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3SC",
+    "runningSerialNo": "SS10"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3SPBR10",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3SPBR10",
+    "itemDescription": "M3 Brass Spacer (10MM)",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3SP",
+    "runningSerialNo": "BR10"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM3SWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM3SWSS01",
+    "itemDescription": "M3 Spring Cut washer (SS)",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M3SW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4HNSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4HNSS01",
+    "itemDescription": "M4 Hex Nut, SS, Outer Dia- 6.91mm, Thickness-2.7 mm, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4HN",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4PHSS12",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4PHSS12",
+    "itemDescription": "M4x12 screws length 12 mm, PH head, Full Thread, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4PH",
+    "runningSerialNo": "SS12"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4PWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4PWSS01",
+    "itemDescription": "M4 plain washer, SS, Outer Dia- 10.66mm, Thickness- 0.75mm",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4PW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SCSS10",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SCSS10",
+    "itemDescription": "M4x10 Screw, PH head (TTFSSS0004), SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SC",
+    "runningSerialNo": "SS10"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SCSS12",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SCSS12",
+    "itemDescription": "M4x12 screws length 12 mm, round head, Full Thread, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SC",
+    "runningSerialNo": "SS12"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SCSS18",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SCSS18",
+    "itemDescription": "M4x18 screws length 18 mm, round head, Full Thread, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SC",
+    "runningSerialNo": "SS18"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SCSS20",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SCSS20",
+    "itemDescription": "M4x20 screws length 20 mm, round head, Full Thread, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SC",
+    "runningSerialNo": "SS20"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SWSS01",
+    "itemDescription": "M4 Spring washer  (TTFSSS0006), SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM5PWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM5PWSS01",
+    "itemDescription": "M5 Plain Washer Outer Dia- 10.66mm, Thickness- 0.75mm SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M5PW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM6HNSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM6HNSS01",
+    "itemDescription": "M6 Hex Nut (TTFSSS000xx), SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M6HN",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM6PWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM6PWSS01",
+    "itemDescription": "M6 Plain washer, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M6PW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM8HNSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM8HNSS01",
+    "itemDescription": "M8 Hex Nut (TTFSSS0009), SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M8HN",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM8PWSS01",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM8PWSS01",
+    "itemDescription": "Washer-M8  SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M8PW",
+    "runningSerialNo": "SS01"
+  },
+  {
+    "ttUniquePartNumber": "TTMEPDP001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEPDP001",
+    "itemDescription": "DC PDU Mechanical Base Plate",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "PDP",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMETPT001",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMETPT001",
+    "itemDescription": "Top Plate, 2U iMoni Tray for ITI",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "TPT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMETPT002",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMETPT002",
+    "itemDescription": "Top Plate, 2U iMoni Tray for SR01,SR02",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "TPT",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTMSBAT12V1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSBAT12V1",
+    "itemDescription": "12V DC Battery, 2000+MAH 67x55x20 mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "BAT",
+    "runningSerialNo": "12V1"
+  },
+  {
+    "ttUniquePartNumber": "TTMSDIS001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RXEF025",
+    "itemDescription": "RXEF025 PolyFuse:RV_Disc_D7mm_W4.8mm_P5mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "DIS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSDISK01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "MOV-07D301K",
+    "itemDescription": "MOV-07D301K Varistor:RV_Disc_D7mm_W3.9mm_P5mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "DIS",
+    "runningSerialNo": "K01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSKB4001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSKB4001",
+    "itemDescription": "4x4 Keypad for ITI with 8 Pin header size mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "KB4",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSKB4002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSKB4002",
+    "itemDescription": "4x4 Keypad for ITI with 10 Pin header size mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "KB4",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTMSKB4003",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSKB4003",
+    "itemDescription": "4x4 Keypad for ITI with 10 Pin header",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "KB4",
+    "runningSerialNo": "003"
+  },
+  {
+    "ttUniquePartNumber": "TTMSMCB16A1",
+    "typeOfPart": "MS",
+    "manufacturerPartNumber": "TTMSMCB16A1",
+    "itemDescription": "MCB 1-Pole 16A",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "MCB",
+    "runningSerialNo": "16A1"
+  },
+  {
+    "ttUniquePartNumber": "TTMSPBT001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSPBT001",
+    "itemDescription": "Push button, Panel mount xx mm dia",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "PBT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSPBTS01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSS644S",
+    "itemDescription": "Push Button, NO, 0.05A, 12V, 2.6N, SMD, 9.0x6.2mm, T=7.3mm, changeable caps KTSC-6xx",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "PBT",
+    "runningSerialNo": "S01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSHU001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SNT-100-BK-G",
+    "itemDescription": "SHUNT 2.54mm BLACK",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "SHU",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSR03TH01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KCD1-102",
+    "itemDescription": "Rocker Switch SPDT ON-ON 3Pin Black Button Black Housing",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "SR03",
+    "runningSerialNo": "TH01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK001",
+    "itemDescription": "Front Sticker, , 2U iMoni Tray for ITI",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK002",
+    "itemDescription": "Serial Number Sticker iMoni Tray (Block)",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK003",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK003",
+    "itemDescription": "Serial Number Sticker DC PDU",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "003"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK004",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK004",
+    "itemDescription": "Serial Number Sticker AC PDU",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "004"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK005",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK005",
+    "itemDescription": "Serial Number Sticker (Fan Tray)",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "005"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK006",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK006",
+    "itemDescription": "Serial Number Sticker iMoni Tray (GP)",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "006"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTK007",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTK007",
+    "itemDescription": "Sticker Tested OK",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STK",
+    "runningSerialNo": "007"
+  },
+  {
+    "ttUniquePartNumber": "TTMSSTS001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSSTS001",
+    "itemDescription": "Single Pole, Double Throw, SPDT Toggle Switch, 3A 250V Solder",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "STS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSTIE100",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSTIE100",
+    "itemDescription": "Cable Tie 100mmX3.2mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "TIE",
+    "runningSerialNo": "100"
+  },
+  {
+    "ttUniquePartNumber": "TTMSTIE101",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSTIE101",
+    "itemDescription": "Cable tie (100mmX2.5 mm)",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "TIE",
+    "runningSerialNo": "101"
+  },
+  {
+    "ttUniquePartNumber": "TTPCBCPU001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PCB",
+    "itemDescription": "PCB iMoni CPU bare board Rev 1.00",
+    "companyCode": "TT",
+    "category": "PCB",
+    "partTypeBatchNo": "CPU",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTPCBGNSB001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PCB",
+    "itemDescription": "PCB GNSS interconnect bare board Rev 1.00",
+    "companyCode": "TT",
+    "category": "PCB",
+    "partTypeBatchNo": "GNSB",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTPCBGNSSB01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTPCBGNSSB01",
+    "itemDescription": "PCB GNSS Base bare Board Rev 1.01",
+    "companyCode": "TT",
+    "category": "PCB",
+    "partTypeBatchNo": "GNSS",
+    "runningSerialNo": "B01"
+  },
+  {
+    "ttUniquePartNumber": "TTPCBSRMS001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PCB",
+    "itemDescription": "PCB iMoni Base bare board Rev 1.00",
+    "companyCode": "TT",
+    "category": "PCB",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTPCBSRMS002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PCB",
+    "itemDescription": "PCB iMoni Base bare board Rev 1.01",
+    "companyCode": "TT",
+    "category": "PCB",
+    "partTypeBatchNo": "SRMS",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTRL12VS01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SRD-12VDC-SL-C",
+    "itemDescription": "Songle SRD-12VDC-SL-C Relay_THT:Relay_SPDT_Finder_36.11",
+    "companyCode": "TT",
+    "category": "RL",
+    "partTypeBatchNo": "12V",
+    "runningSerialNo": "S01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040200R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402JR-070RL",
+    "itemDescription": "Resistor, 0R, 0402, +5%, 1/16W, Resistor,0R,0402,5%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "00R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0402100K",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-07100KL",
+    "itemDescription": "Resistor,100K,0402,1%,1/16W, Resistor, 100K, 0402, +1%, 1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "100K"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040210K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0710KL",
+    "itemDescription": "Resistor,10K,0402,1%,1/16W, Resistor, 10K, 0402, +1%, 1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "10K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040212K1",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0712K1L",
+    "itemDescription": "Resistor,12K1,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "12K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS04021K00",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-071KL",
+    "itemDescription": "Resistor, 1K, 0402, +1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "1K00"
+  },
+  {
+    "ttUniquePartNumber": "TTRS04021K50",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-071K5L",
+    "itemDescription": "Resistor,1K5,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "1K50"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0402270R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-07270RL",
+    "itemDescription": "Resistor,270R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "270R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040227K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "TTRS040227K0",
+    "itemDescription": "Resistor SMD 27K 1% 0402",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "27K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040233R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0733RL",
+    "itemDescription": "Resistor,33R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "33R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0402470R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-07470RL",
+    "itemDescription": "Resistor,470R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "470R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040249R9",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0749R9L",
+    "itemDescription": "Resistor,49R9,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "49R9"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040275R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0775RL",
+    "itemDescription": "Resistor,75R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "75R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060300R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603JR-070RL",
+    "itemDescription": "Resistor,0R,0603,5%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "00R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0603100K",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-07100KL",
+    "itemDescription": "Resistor,100K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "100K"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060310K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-0710KL",
+    "itemDescription": "Resistor,10K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "10K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0603330K",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-07330KL",
+    "itemDescription": "Resistor,330K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "330K"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060347K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-0747KL",
+    "itemDescription": "Resistor,47K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "47K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060349K9",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-0749K9L",
+    "itemDescription": "Resistor,49K9,0603,1%",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "49K9"
+  },
+  {
+    "ttUniquePartNumber": "TTRS0603620R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0603FR-07620RL",
+    "itemDescription": "Resistor,620R,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "620R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120600R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC1206JR-070RP",
+    "itemDescription": "Resistor_0R SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "00R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1206100R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT100R",
+    "itemDescription": "Resistor_100 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "100R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120610K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT10K0",
+    "itemDescription": "Resistor_10k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "10K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1206120R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT120R",
+    "itemDescription": "Resistor_120 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "120R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1206165K",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "TTRS1206165K",
+    "itemDescription": "Resistor SMD 165K 1% 1206",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "165K"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12061K00",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT1K00",
+    "itemDescription": "Resistor_1k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "1K00"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120620K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT20K0",
+    "itemDescription": "Resistor_20k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "20K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120622R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT22R0",
+    "itemDescription": "Resistor_22 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "22R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120636K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT36K0",
+    "itemDescription": "Resistor_36k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "36K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120636K5",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "TTRS120636K5",
+    "itemDescription": "Resistor SMD 36K5 1% 1206",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "36K5"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1206470R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT470R",
+    "itemDescription": "Resistor_470 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "470R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12064K70",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT4K70",
+    "itemDescription": "Resistor_4.7K SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "4K70"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1206620R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT620R",
+    "itemDescription": "Resistor_620 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "620R"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120675K0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RMCF1206JT75K0",
+    "itemDescription": "Resistor_75K SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "75K0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS120678K7",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "TTRS120678K7",
+    "itemDescription": "Resistor SMD 78K7 1% 1206",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "1206",
+    "runningSerialNo": "78K7"
+  },
+  {
+    "ttUniquePartNumber": "TTRT5D0820R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "MF25 820",
+    "itemDescription": "Resistor 820 THT, 5% 1/4Watt",
+    "companyCode": "TT",
+    "category": "RT",
+    "partTypeBatchNo": "5D0",
+    "runningSerialNo": "820R"
+  },
+  {
+    "ttUniquePartNumber": "TTRT5F0100R",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RSPF1JT100R",
+    "itemDescription": "Resistor 100 THT, 5% 1Watt",
+    "companyCode": "TT",
+    "category": "RT",
+    "partTypeBatchNo": "5F0",
+    "runningSerialNo": "100R"
+  },
+  {
+    "ttUniquePartNumber": "TTSEDHT001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "DHT22 Module",
+    "itemDescription": "DHT22 (HUMIDITY SENSOR)",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "DHT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSEFLM001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "FLAME_SENSOR_MODULE",
+    "itemDescription": "FLAME SENSOR",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "FLM",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSENTC001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "NTC_10K_3Mtr",
+    "itemDescription": "NTC THERMISTOR WITH (3m) wire",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "NTC",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSESMO001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "MQ2 SmokeModule",
+    "itemDescription": "SMOKE SENSOR (MQ2)",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "SMO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSEWLE001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "TTSEWLE001",
+    "itemDescription": "WATER LEAKAGE",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "WLE",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSEWLO001",
+    "typeOfPart": "SE",
+    "manufacturerPartNumber": "TTSEWLO001",
+    "itemDescription": "WATER LOGGER",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "WLO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCAM001",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "TTSYCAM001",
+    "itemDescription": "Sparsh mini-IP Camera with IR",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CAM",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCAM002",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "TTSYCAM002",
+    "itemDescription": "Hi Focus Pin Hole IP Camera",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CAM",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCAM003",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "ESP32CAM  OV2640",
+    "itemDescription": "ESP32CAM with Camera and USB port",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CAM",
+    "runningSerialNo": "003"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCAM004",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "ESP32S3-SenseOV2640",
+    "itemDescription": "ESP32S3-Sense with OV2640 Camera and USB-C port",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CAM",
+    "runningSerialNo": "004"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCAM005",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "ARDUCAM B0400",
+    "itemDescription": "ARDUCAM B0400 Camera with SPI interface",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CAM",
+    "runningSerialNo": "005"
+  },
+  {
+    "ttUniquePartNumber": "TTSYCLO001",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYCLO001",
+    "itemDescription": "CRITICAL LOAD PCB Sub Assy",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "CLO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYESP32EKIT",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "ESP32-DevkitC-32E V4",
+    "itemDescription": "ESP32-DevkitC-32E V4 ESP32 Development board",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "ESP",
+    "runningSerialNo": "32EKIT"
+  },
+  {
+    "ttUniquePartNumber": "TTSYESPCAMN",
+    "typeOfPart": "CAM",
+    "manufacturerPartNumber": "B0G52XN4YX",
+    "itemDescription": "ESP32 CAM Lens OV3660 | Wide Angle 160 Degree | \nNight Vision 850nm | Camera Module",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "ESP",
+    "runningSerialNo": "CAMN"
+  },
+  {
+    "ttUniquePartNumber": "TTSYGNSS001",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYGNSS001",
+    "itemDescription": "GNSS Base Sub Assy with ESP32 Rev 1.01",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "GNSS",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYIAP001",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYIAP001",
+    "itemDescription": "IAP PCBA Assy for STM32 Rev 1.01",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "IAP",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPCB001",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPCB001",
+    "itemDescription": "iMONI Base Sensor Sub Assy Rev 1.00",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PCB",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPCB002",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPCB002",
+    "itemDescription": "iMONI Base Sensor Sub Assy Rev 1.01",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PCB",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPCB003",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPCB003",
+    "itemDescription": "iMONI CPU Sub Assy Rev 1.00",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PCB",
+    "runningSerialNo": "003"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPSU001",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPSU001",
+    "itemDescription": "220VAC-12V DC Power supply",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PSU",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPSU002",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPSU002",
+    "itemDescription": "48V DC-12V DC Power Supply",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PSU",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTSYPSU003",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "TTSYPSU003",
+    "itemDescription": "220VAC-12V DC Power supply Big heat Sink",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "PSU",
+    "runningSerialNo": "003"
+  },
+  {
+    "ttUniquePartNumber": "TTSYRS23TTL01",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "RS232TTLPatch",
+    "itemDescription": "Sub Assy: Mini RS232 to TTL Adapter Module",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "RS23",
+    "runningSerialNo": "TTL01"
+  },
+  {
+    "ttUniquePartNumber": "TTSYUSBBPA01",
+    "typeOfPart": "SY",
+    "manufacturerPartNumber": "USBPatch",
+    "itemDescription": "Sub Assy: Micro USB Type B Patch Plug Adapter",
+    "companyCode": "TT",
+    "category": "SY",
+    "partTypeBatchNo": "USBB",
+    "runningSerialNo": "PA01"
+  },
+  {
+    "ttUniquePartNumber": "TTTRPDTC11",
+    "typeOfPart": "TR",
+    "manufacturerPartNumber": "PDTC114ET,215",
+    "itemDescription": "PDTC114ET NPN Transistor Package_TO_SOT_SMD:TSOT-23",
+    "companyCode": "TT",
+    "category": "TR",
+    "partTypeBatchNo": "PDT",
+    "runningSerialNo": "C11"
+  },
+  {
+    "ttUniquePartNumber": "TTTRSO2R01",
+    "typeOfPart": "TR",
+    "manufacturerPartNumber": "BSR14",
+    "itemDescription": "NPN Bipolar Transistor",
+    "companyCode": "TT",
+    "category": "TR",
+    "partTypeBatchNo": "SO2",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHBAT001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHBAT001",
+    "itemDescription": "12V DC Battery Harness",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "BAT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHCLO001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHCLO001",
+    "itemDescription": "Non-Critical Load Harness 500 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "CLO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHEML001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHEML001",
+    "itemDescription": "EM Lock Harness 2100 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "EML",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHERTH01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHERTH01",
+    "itemDescription": "Earthing(O lug) Harness",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "ERTH",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHETH001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHETH001",
+    "itemDescription": "Ethernet cables cat 5, 2000 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "ETH",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHFAN001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHFAN001",
+    "itemDescription": "6x3 core Fan power wire harness",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "FAN",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHKPD001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHKPD001",
+    "itemDescription": "Keypad Harness 2000 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "KPD",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHLKG001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHLKG001",
+    "itemDescription": "Water Leakage Harness 1000 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "LKG",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHLOG001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHLOG001",
+    "itemDescription": "Water Logger Harness 2000 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "LOG",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHLSW001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHLSW001",
+    "itemDescription": "Limit Switch Harness 1000 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "LSW",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHPAC001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHPAC001",
+    "itemDescription": "Power Supply Harness (AC-PDU to iMoni PSU)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "PAC",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHPDC001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHPDC001",
+    "itemDescription": "Power Supply Harness (DC-PDU to iMoni PSU)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "PDC",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHPIM001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHPIM001",
+    "itemDescription": "Power Supply to iMoni Harness",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "PIM",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHR48501",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHR48501",
+    "itemDescription": "RS485 Harness 100 (mm)",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "R485",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHSMO001",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHSMO001",
+    "itemDescription": "Smoke+Flame Sensor Harness",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "SMO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWB1SM01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHWB1SM01",
+    "itemDescription": "Wire Black 1 Sq-mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WB1S",
+    "runningSerialNo": "M01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWL1SM01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHWL1SM01",
+    "itemDescription": "Wire Blue 1 Sq-mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WL1S",
+    "runningSerialNo": "M01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWR1SM01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHWR1SM01",
+    "itemDescription": "Wire RED 1 Sq-mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WR1S",
+    "runningSerialNo": "M01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWW1SM01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHWW1SM01",
+    "itemDescription": "Wire White 1 Sq-mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WW1S",
+    "runningSerialNo": "M01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWY1SM01",
+    "typeOfPart": "WH",
+    "manufacturerPartNumber": "TTWHWY1SM01",
+    "itemDescription": "Wire Yellow 1 Sq-mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WY1S",
+    "runningSerialNo": "M01"
+  },
+  {
+    "ttUniquePartNumber": "TTXS161032K7",
+    "typeOfPart": "X",
+    "manufacturerPartNumber": "NX1610SE-32.768KHZ-EXS00A-MU01499",
+    "itemDescription": "Crystal, 32.768kHz, 9pF, +20ppm, 70KR, 1.6x1mm",
+    "companyCode": "TT",
+    "category": "XS",
+    "partTypeBatchNo": "1610",
+    "runningSerialNo": "32K7"
+  },
+  {
+    "ttUniquePartNumber": "TTXS201625MZ",
+    "typeOfPart": "X",
+    "manufacturerPartNumber": "NX2016SA-25MHZ-EXS00A-CS11321",
+    "itemDescription": "Crystal 25MHz, 6pF, +-20ppm, 80ohms max, SMD",
+    "companyCode": "TT",
+    "category": "XS",
+    "partTypeBatchNo": "2016",
+    "runningSerialNo": "25MZ"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0402106D",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "CL21A106KOQNNNE/AVX 0402ZD106MAT2A",
+    "itemDescription": "Capacitor, Ceramic, 10 \u00b5F \u00b110% 16V, 0402",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "106D"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603226E",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "GRM188R61A226ME15D",
+    "itemDescription": "Capacitor, Ceramic, 22 \u00b5F \u00b120% 10V X5R, 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "226E"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603105D",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "CL10A105KO8NNWC/CC0603KRX5R9BB105",
+    "itemDescription": "Capacitor, Ceramic, 1 \u00b5F \u00b110% 16V X5R, 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "105D"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0402104G",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "GRM155R61H104KE14D/CC0402KRX7R8BB104",
+    "itemDescription": "Capacitor, Ceramic, 0.1 \u00b5F \u00b110% 50V X5R, 0402",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "104G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603224G",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "CL10B224KB8NNNC/0603B224K500NT",
+    "itemDescription": "Capacitor, Ceramic, 0.22 \u00b5F \u00b110% 50V X7R, 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "224G"
+  },
+  {
+    "ttUniquePartNumber": "TTCS0603106H",
+    "typeOfPart": "C",
+    "manufacturerPartNumber": "GRM188R6YA106MA73D/CL10A106MA8NRNC",
+    "itemDescription": "Capacitor, Ceramic, 10 \u00b5F \u00b120% 35V X5R, 0603",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "0603",
+    "runningSerialNo": "106H"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040205K1",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-135K1L",
+    "itemDescription": "Resistor SMD 5.1 kOhms \u00b11% 0.063W, 0402",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "05K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040202R0",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-072RL",
+    "itemDescription": "Resistor SMD 2 Ohms \u00b11% 0.063W, 0402",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "02R0"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040202K2",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-072K2P",
+    "itemDescription": "Resistor SMD 2.2 kOhms \u00b11% 0.063W, 0402",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "02K2"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040233K2",
+    "typeOfPart": "R",
+    "manufacturerPartNumber": "RC0402FR-0733K2L",
+    "itemDescription": "Resistor SMD 33.2 kOhms \u00b11% 0.063W, 0402",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "33K2"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPR07J001",
+    "typeOfPart": "CN",
+    "manufacturerPartNumber": "S7B-XH-A",
+    "itemDescription": "Connector_JST: HEADER S7B-XH-A R/A 7 POS 2.5mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PR07",
+    "runningSerialNo": "J001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSR24FC01",
+    "typeOfPart": "CN",
+    "manufacturerPartNumber": "687124149022",
+    "itemDescription": "Connector_FFC: BOTTOM 24POS 0.5MM R/A",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SR24",
+    "runningSerialNo": "FC01"
+  },
+  {
+    "ttUniquePartNumber": "TTCNSR22FC01",
+    "typeOfPart": "CN",
+    "manufacturerPartNumber": "687122149022",
+    "itemDescription": "Connector_FFC: BOTTOM 22POS 0.5MM R/A",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "SR22",
+    "runningSerialNo": "FC01"
+  },
+  {
+    "ttUniquePartNumber": "TTDS0402D5V0",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "TVSA04V05C006/SLESD8D5V0C",
+    "itemDescription": "Diode TVS, SMD 5VWM 17VC 0402",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "0402",
+    "runningSerialNo": "D5V0"
+  },
+  {
+    "ttUniquePartNumber": "TTDSS323D30V",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "BAT54WS-7-F/BAT46WS",
+    "itemDescription": "Diode Schottky, SMD 30V 100MA SOD323",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "S323",
+    "runningSerialNo": "D30V"
+  },
+  {
+    "ttUniquePartNumber": "TTDSSOT2D12V",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "ESDA14V2L",
+    "itemDescription": "Diode TVS, SMD 12VWM SOT23-3",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "SOT2",
+    "runningSerialNo": "D12V"
+  },
+  {
+    "ttUniquePartNumber": "TTDS214AD20V",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "SS32 / SS34",
+    "itemDescription": "Diode Schottky, SMD 20V 3A DO214AC",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "214A",
+    "runningSerialNo": "D20V"
+  },
+  {
+    "ttUniquePartNumber": "TTDSUFDND3V6",
+    "typeOfPart": "D",
+    "manufacturerPartNumber": "TPD4E02B04QDQARQ1",
+    "itemDescription": "Diode TVS, SMD 3.6VWM 8.8VC 10USON",
+    "companyCode": "TT",
+    "category": "DS",
+    "partTypeBatchNo": "UFDN",
+    "runningSerialNo": "D3V6"
+  },
+  {
+    "ttUniquePartNumber": "TTMSPBTS02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PTS810SJM250SMTR LFS",
+    "itemDescription": "Tactile Switch SPST-NO Top Actuated Surface Mount Push Button",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "PBT",
+    "runningSerialNo": "S02"
+  },
+  {
+    "ttUniquePartNumber": "TTCNUSBCR16",
+    "typeOfPart": "CN",
+    "manufacturerPartNumber": "12402012E212A",
+    "itemDescription": "Connector_USB: RCP USB 2.0 TYPE C 16P SMD R/A",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "USB",
+    "runningSerialNo": "CR16"
+  },
+  {
+    "ttUniquePartNumber": "TTMEM4SCSS14",
+    "typeOfPart": "ME",
+    "manufacturerPartNumber": "TTMEM4SCSS14",
+    "itemDescription": "M4x14 screws length 14 mm, round head, Full Thread, SS",
+    "companyCode": "TT",
+    "category": "ME",
+    "partTypeBatchNo": "M4SC",
+    "runningSerialNo": "SS14"
+  },
+  {
+    "ttUniquePartNumber": "TTCNJS3001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B3B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "JS3",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNJS4001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B4B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "JS4",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNJS8001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "B8B-XH-A",
+    "itemDescription": "Connector_JST:JST_XH_B8B-XH-A_1x08_P2.50mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "JS8",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNMSD001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CRD693072010801",
+    "itemDescription": "Connector_Card:microSD_HC_Wuerth_693072010801",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "MSD",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPFTSH011",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "FTSH-110-01-L-DV",
+    "itemDescription": "Header, 5x2, 1.27mm, VR, SMD, T=3.05mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PFT",
+    "runningSerialNo": "011"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPHH001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61300311021",
+    "itemDescription": "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PHH",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPHV001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61301211121",
+    "itemDescription": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PHV",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSH001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "613003143121",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_1x03_P2.54mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSH",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSSQ1081",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-108-23-F-D",
+    "itemDescription": "Socket, 8x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSS",
+    "runningSerialNo": "081"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSSQ1101",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-110-23-F-D",
+    "itemDescription": "Socket, 10x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSS",
+    "runningSerialNo": "101"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSSQ1151",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-115-23-F-D",
+    "itemDescription": "Socket, 15x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSS",
+    "runningSerialNo": "151"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSSQ1171",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SSQ-117-23-F-D",
+    "itemDescription": "Socket, 17x2, 2.54mm, VR, TH, T=8.51mm/10mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSS",
+    "runningSerialNo": "171"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSV001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61303021821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x15_P2.54mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSV",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPSV002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "61301621821",
+    "itemDescription": "Connector_PinSocket_2.54mm:PinSocket_2x08_P2.54mm_Vertical",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PSV",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPTS02GS1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-102-07-G-S",
+    "itemDescription": "Header, 2x1, 2,54mm, VR, TH, Height 5.84mm/2.54mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PTS",
+    "runningSerialNo": "GS1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPTS02GS2",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-102-07-G-S",
+    "itemDescription": "Header, 2x1, 2,54mm, VR, TH, Height 5.84mm/2.54mm - Shunt Fitted by default",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PTS",
+    "runningSerialNo": "GS2"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPTS03FS1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-103-07-F-S",
+    "itemDescription": "Header, 3x1, 2,54mm, VR, TH, Height 5.84mm/2.54mm - Shunt Fitted 1-2 by default",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PTS",
+    "runningSerialNo": "FS1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPTS05GD1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-105-07-G-D",
+    "itemDescription": "Header,2 x2, 2,54mm, VR, TH, Height 5.84mm/2.54mm - Shunt Fitted 1-2",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PTS",
+    "runningSerialNo": "GD1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNPTS09GS1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSW-102-09-G-S",
+    "itemDescription": "Header, 2x1, 2,54mm, VR, TH, Height 5.84mm/10.16mm",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "PTS",
+    "runningSerialNo": "GS1"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBH301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1715721",
+    "itemDescription": "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBH",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR201",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757242",
+    "itemDescription": "Connector_Phoenix_MSTB:PhoenixContact_MSTBA_2,5_2-G-5,08_1x02_P5.08mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR",
+    "runningSerialNo": "201"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757255",
+    "itemDescription": "Connector_Phoenix_MSTB:PhoenixContact_MSTBA_2,5_3-G-5,08_1x03_P5.08mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTCNTBR401",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1757268",
+    "itemDescription": "Connector_Phoenix_MSTB:PhoenixContact_MSTBA_2,5_4-G-5,08_1x04_P5.08mm_Horizontal",
+    "companyCode": "TT",
+    "category": "CN",
+    "partTypeBatchNo": "TBR",
+    "runningSerialNo": "401"
+  },
+  {
+    "ttUniquePartNumber": "TTCS040100N1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402KRX7R7BB104",
+    "itemDescription": "Capacitor, MLCC, 100nF, 16V, X7R, 10%, 0402, T=0.5mm, Capacitor, MLCC, 100nF, 16V, X7R, +10%, 0402, T=0.5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0N1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS040105K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM155R61E105KA12",
+    "itemDescription": "Capacitor, MLCC, 1uF, 6V3, X5R, 10%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "5K1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS040330P1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402BRNPO9BN3R3",
+    "itemDescription": "Capacitor, MLCC, 3.3pF, 50V, NPO, +0.1pF, 0402, T=0.5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0P1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS040470P1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402JRNPO9BN471",
+    "itemDescription": "Capacitor, MLCC, 470pF, 50V, NPO, 5%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0P1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS040560P1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0402BRNPO9BN5R6",
+    "itemDescription": "Capacitor, MLCC, 5.6pF, 50V, NPO, 5%, 0402, T=0,5mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0P1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060100N1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603JRNPO9BN100",
+    "itemDescription": "Capacitor, MLCC, 10pF, 50V, NPO, 5%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0N1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060104K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "C0603C104K9PACTU",
+    "itemDescription": "Capacitor, MLCC, 100nF, 6V3, X5R, +10%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "4K1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060105U1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603KRX5R5BB105",
+    "itemDescription": "Capacitor, MLCC, 1uF, 6V3, X5R, 10%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "5U1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060106K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM188R61A106KAAL",
+    "itemDescription": "Capacitor, MLCC, 10\u00b5F, 10V, X5R, 10%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "6K1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060225U1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603KRX5R6BB225",
+    "itemDescription": "Capacitor, MLCC, 2.2uF, 10V, X5R, 10%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "5U1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060475K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "GRM188R61C475KE11",
+    "itemDescription": "Capacitor, MLCC, 4.7uF, 16V, X5R, 20%, 0603, T=0,8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "5K1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS060475U1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0603MRX5R6BB475",
+    "itemDescription": "Capacitor, MLCC, 4.7uF, 10V, X5R, +20%, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "5U1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS080106U1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC0805KRX5R8BB106",
+    "itemDescription": "Capacitor, MLCC, 10uF, 25V, X5R, 10%, 0805, T=0,85mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "080",
+    "runningSerialNo": "6U1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS120102N1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "CC1206KKX7RDBB102",
+    "itemDescription": "Capacitor, MLCC, 1nF, 2KV, X7R, 10%, 1206, T=1,25mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "120",
+    "runningSerialNo": "2N1"
+  },
+  {
+    "ttUniquePartNumber": "TTCS1610SE01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "NX1610SE-32.768KHZ-EXS00A-MU01499",
+    "itemDescription": "Crystal, 32.768kHz, 9pF, +20ppm, 70KR, 1.6x1mm",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "161",
+    "runningSerialNo": "E01"
+  },
+  {
+    "ttUniquePartNumber": "TTCS2016SA01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "NX2016SA-25MHZ-EXS00A-CS11321\nReplacement XRCGB25M000F2P00R0",
+    "itemDescription": "Crystal 25MHz, 6pF, +-20ppm, 80ohms max, SMD",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "201",
+    "runningSerialNo": "A01"
+  },
+  {
+    "ttUniquePartNumber": "TTCSCNF001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1206B104J500CT",
+    "itemDescription": "Capacitor_100nF SMD:C_1206_3216Metric_Pad1.33x1.80mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "CNF",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCSCUF001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "1206B106J100CT",
+    "itemDescription": "Capacitor_10uF SMD:C_1206_3216Metric_Pad1.33x1.80mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "CUF",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCSDIO001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TS4148/IN4148",
+    "itemDescription": "TS4148 Diode_SMD:D_1206_3216Metric_Pad1.42x1.75mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "DIO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTCSLED001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "150120RS75000",
+    "itemDescription": "LED G SMD:LED_1206_3216Metric_Pad1.42x1.75mm_",
+    "companyCode": "TT",
+    "category": "CS",
+    "partTypeBatchNo": "LED",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTIC0201EP02",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ESDALC6V1-1U2",
+    "itemDescription": "ESD protection 6V1 TVS DIODE 3VWM ST0201,",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "020",
+    "runningSerialNo": "P02"
+  },
+  {
+    "ttUniquePartNumber": "TTICBAT001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "BAT54S",
+    "itemDescription": "BAT54S Package_TO_SOT_SMD:SOT-23",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "BAT",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICDFNU3301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST1L05CPU33R",
+    "itemDescription": "LDO, 3.3V, 1.3A, Very low quiescent current BiCMOS voltage regulator, 6-DFN (3x3)",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "DFN",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTICMT12801",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "MT25QL128ABA1EW7",
+    "itemDescription": "MT25QL128ABA1EW7 Package_DFN_QFN:W-PDFN-8-1EP_6x5mm_P1.27mm_EP3x3mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "MT1",
+    "runningSerialNo": "01"
+  },
+  {
+    "ttUniquePartNumber": "TTICPC817001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "APC-817D1-SL",
+    "itemDescription": "PC817 Package_DIP:DIP-4_W7.62mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "PC8",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICQFP56301",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "STM32H563ZIT6",
+    "itemDescription": "STM32H563ZIT6, LQFP144 package, 20x20",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "QFP",
+    "runningSerialNo": "301"
+  },
+  {
+    "ttUniquePartNumber": "TTICS223U501",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LD1117S50TR",
+    "itemDescription": "IC REG LDO 5V 0.8A SOT223",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "S22",
+    "runningSerialNo": "501"
+  },
+  {
+    "ttUniquePartNumber": "TTICS323EP01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ESDALC6V1W5",
+    "itemDescription": "Dual Transil array for ESD protection",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "S32",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTICSO234S01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "USBLC6-4SC6",
+    "itemDescription": "Very low capacitance ESD protection , 4 lines",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SO2",
+    "runningSerialNo": "S01"
+  },
+  {
+    "ttUniquePartNumber": "TTICSQFN8701",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "LAN8742A-CZ-TR",
+    "itemDescription": "10/100M RMII Ethernet transceiver, 24-SQFN (4x4)",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "SQF",
+    "runningSerialNo": "701"
+  },
+  {
+    "ttUniquePartNumber": "TTICST202001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST202ECDR",
+    "itemDescription": "ST202ExD Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "ST2",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTICST348001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "ST3485EBDR",
+    "itemDescription": "ST3485EBDR Parts:SOIC127P600X175-8N",
+    "companyCode": "TT",
+    "category": "IC",
+    "partTypeBatchNo": "ST3",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTLS06036001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "BLM18AG601SN1D",
+    "itemDescription": "Ferrite bead, 600R@100MHz, +25%, 500mA, 380mR, 0603, T=0.8mm",
+    "companyCode": "TT",
+    "category": "LS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTLSSMD16P01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KMS-1102NL",
+    "itemDescription": "Discrete Magnetic Transformer Module, 16 pins, SMT, 100 Base-TX",
+    "companyCode": "TT",
+    "category": "LS",
+    "partTypeBatchNo": "SMD",
+    "runningSerialNo": "P01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSKRJ45001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "KRJ-CB4.2GYZNL",
+    "itemDescription": "RJ45 jack, single port, with LEDS, Metal shielded dip low profile",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "KRJ",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSMV301K01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "MOV-07D301K",
+    "itemDescription": "MOV-07D301K Varistor:RV_Disc_D7mm_W3.9mm_P5mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "MV3",
+    "runningSerialNo": "K01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSNTBKG001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "SNT-100-BK-G",
+    "itemDescription": "SHUNT 2.54mm BLACK",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "NTB",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSPB644S01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TSS644S",
+    "itemDescription": "Push Button, NO, 0.05A, 12V, 2.6N, SMD, 9.0x6.2mm, T=7.3mm, changeable caps KTSC-6xx",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "PB6",
+    "runningSerialNo": "S01"
+  },
+  {
+    "ttUniquePartNumber": "TTMSPUB001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTMSPUB001",
+    "itemDescription": "Push button, Panel mount xx mm dia",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "PUB",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTMSRXE001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RXEF025",
+    "itemDescription": "RXEF025 PolyFuse:RV_Disc_D7mm_W4.8mm_P5mm",
+    "companyCode": "TT",
+    "category": "MS",
+    "partTypeBatchNo": "RXE",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040070R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402JR-070RL",
+    "itemDescription": "Resistor, 0R, 0402, +5%, 1/16W, Resistor,0R,0402,5%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040100K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-07100KL",
+    "itemDescription": "Resistor,100K,0402,1%,1/16W, Resistor, 100K, 0402, +1%, 1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS04021K01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-071KL",
+    "itemDescription": "Resistor, 1K, 0402, +1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "K01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS04021K51",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-071K5L",
+    "itemDescription": "Resistor,1K5,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "K51"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040233R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-0733RL",
+    "itemDescription": "Resistor,33R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "3R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040249R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-0749R9L",
+    "itemDescription": "Resistor,49R9,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "9R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040270R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-07270RL",
+    "itemDescription": "Resistor,270R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040275R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-0775RL",
+    "itemDescription": "Resistor,75R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "5R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040470R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-07470RL",
+    "itemDescription": "Resistor,470R,0402,1%,1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS04070R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402JR-070RL",
+    "itemDescription": "Solder Bridge 0402 0ohm",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS040710K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0402FR-0710KL",
+    "itemDescription": "Resistor,10K,0402,1%,1/16W, Resistor, 10K, 0402, +1%, 1/16W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "040",
+    "runningSerialNo": "0K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060100K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-07100KL",
+    "itemDescription": "Resistor,100K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS06030R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603JR-070RL",
+    "itemDescription": "Resistor,0R,0603,5%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060310K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-0710KL",
+    "itemDescription": "Resistor,10K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060330K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-07330KL",
+    "itemDescription": "Resistor,330K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060347K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-0747KL",
+    "itemDescription": "Resistor,47K,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "7K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060349K1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-0749K9L",
+    "itemDescription": "Resistor,49K9,0603,1%",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "9K1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060370R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603JR-070RL",
+    "itemDescription": "Solder Bridge ON",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS060620R1",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC0603FR-07620RL",
+    "itemDescription": "Resistor,620R,0603,1%,1/10W",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "060",
+    "runningSerialNo": "0R1"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12070R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RC1206JR-070RP",
+    "itemDescription": "Resistor_SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "120",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12100R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT100R",
+    "itemDescription": "Resistor_100 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "121",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1210K001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT10K0",
+    "itemDescription": "Resistor_10k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "121",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1210K002",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT4R70",
+    "itemDescription": "Resistor_10K SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "121",
+    "runningSerialNo": "002"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12120R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT120R",
+    "itemDescription": "Resistor_120 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "121",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS121K0001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT1K00",
+    "itemDescription": "Resistor_1k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "121",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1220K001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT20K0",
+    "itemDescription": "Resistor_20k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "122",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1222R001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT22R0",
+    "itemDescription": "Resistor_22 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "122",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1236K001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT36K0",
+    "itemDescription": "Resistor_36.5k SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "123",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12470R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT470R",
+    "itemDescription": "Resistor_470 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "124",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS124R7001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT75K0",
+    "itemDescription": "Resistor_4.7K SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "124",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRS12620R01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT620R",
+    "itemDescription": "Resistor_604 SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "126",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTRS1275K001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "RMCF1206JT10K0",
+    "itemDescription": "Resistor_78.7K SMD:R_1206_3216Metric_Pad1.30x1.75mm_",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "127",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTRSPDTC01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "PDTC114ET,215",
+    "itemDescription": "PDTC114ET Package_TO_SOT_SMD:TSOT-23",
+    "companyCode": "TT",
+    "category": "RS",
+    "partTypeBatchNo": "PDT",
+    "runningSerialNo": "C01"
+  },
+  {
+    "ttUniquePartNumber": "TTSECLO001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTSECLO001",
+    "itemDescription": "CRITICAL LOAD",
+    "companyCode": "TT",
+    "category": "SE",
+    "partTypeBatchNo": "CLO",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTTRSO23BR01",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "BSR14",
+    "itemDescription": "NPN Bipolar Transistor",
+    "companyCode": "TT",
+    "category": "TR",
+    "partTypeBatchNo": "SO2",
+    "runningSerialNo": "R01"
+  },
+  {
+    "ttUniquePartNumber": "TTWHENC001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTWHENC001",
+    "itemDescription": "Ethernet cables cat 5, 2000 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "ENC",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHKEY001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTWHKEY001",
+    "itemDescription": "Keypad harness 2100 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "KEY",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHLSH001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTWHLSH001",
+    "itemDescription": "Limit Switch Harness 500 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "LSH",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWLE001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTWHWLE001",
+    "itemDescription": "Water Leakage 750 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WLE",
+    "runningSerialNo": "001"
+  },
+  {
+    "ttUniquePartNumber": "TTWHWLO001",
+    "typeOfPart": "",
+    "manufacturerPartNumber": "TTWHWLO001",
+    "itemDescription": "Water Logger Harness 1350 mm",
+    "companyCode": "TT",
+    "category": "WH",
+    "partTypeBatchNo": "WLO",
+    "runningSerialNo": "001"
+  }
+]
