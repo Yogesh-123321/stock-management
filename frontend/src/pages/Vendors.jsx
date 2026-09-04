@@ -50,6 +50,7 @@ export default function Vendors() {
   const [inactiveReason, setInactiveReason] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [sortKey, setSortKey] = useState("companyName");
@@ -126,6 +127,28 @@ export default function Vendors() {
     }
   };
 
+  const downloadAllForms = async () => {
+    setDownloadingAll(true);
+    try {
+      const { data } = await api.get("/vendors/export/all-forms", {
+        params: search ? { search } : {},
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "All_Vendors_Supplier_Evaluation_Forms.docx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not generate the combined form — try again");
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   const setActiveStatus = async (vendor, activeStatus, reason) => {
     setSavingStatus(true);
     try {
@@ -185,6 +208,15 @@ export default function Vendors() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          <Button
+            variant="outline"
+            onClick={downloadAllForms}
+            disabled={downloadingAll || noMatches}
+            title="Download every listed vendor's Supplier Evaluation Form as one .docx"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {downloadingAll ? "Preparing..." : "Download all"}
+          </Button>
           <Button onClick={() => setRegisterOpen(true)}>
             <UserPlus className="h-4 w-4 mr-2" /> Register vendor
           </Button>

@@ -4,7 +4,7 @@ import Part from "../models/Part.js";
 /**
  * Admin-only editing of the parts master.
  *
- * Wire it in backend/src/routes/partRoutes.js (see WIRE-UP.md):
+ * Wired in backend/src/routes/partRoutes.js:
  *   router.patch("/:id", protect, requirePermission("part.approve"), updatePart);
  */
 

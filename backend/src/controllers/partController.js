@@ -103,3 +103,70 @@ export const adjustPartStock = asyncHandler(async (req, res) => {
   await part.save();
   res.json(part);
 });
+
+// GET /api/parts/duplicates
+// Groups active parts by manufacturer part number (trimmed, case-insensitive)
+// and returns only the groups that contain more than one TT part number —
+// i.e. the same manufacturer part accidentally entered under different rows.
+export const getDuplicateParts = asyncHandler(async (req, res) => {
+  const groups = await Part.aggregate([
+    {
+      $match: {
+        manufacturerPartNumber: { $exists: true, $nin: [null, ""] },
+      },
+    },
+    {
+      $addFields: {
+        _mfgKey: { $toUpper: { $trim: { input: "$manufacturerPartNumber" } } },
+      },
+    },
+    { $match: { _mfgKey: { $ne: "" } } },
+    {
+      $group: {
+        _id: "$_mfgKey",
+        partIds: { $push: "$_id" },
+        count: { $sum: 1 },
+      },
+    },
+    { $match: { count: { $gt: 1 } } },
+    { $sort: { count: -1, _id: 1 } },
+  ]);
+
+  const allIds = groups.flatMap((g) => g.partIds);
+  const parts = await Part.find({ _id: { $in: allIds } })
+    .populate("vendors", "companyName")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean();
+  const byId = new Map(parts.map((p) => [String(p._id), p]));
+
+  const duplicates = groups.map((g) => ({
+    manufacturerPartNumber: g._id,
+    count: g.count,
+    parts: g.partIds.map((id) => byId.get(String(id))).filter(Boolean),
+  }));
+
+  res.json(duplicates);
+});
+
+// DELETE /api/parts/:id
+export const deletePart = asyncHandler(async (req, res) => {
+  const part = await Part.findById(req.params.id);
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+
+  if (part.quantityInStock > 0) {
+    res.status(400);
+    throw new Error(
+      `Cannot delete ${part.ttUniquePartNumber} — it still has ${part.quantityInStock} unit(s) in stock. Zero out the stock first.`
+    );
+  }
+
+  // Keep the alternate-part linkage clean before removing the part.
+  await Part.updateMany({ alternateOf: part._id }, { $set: { alternateOf: null } });
+  await Part.updateMany({ alternateParts: part._id }, { $pull: { alternateParts: part._id } });
+
+  await part.deleteOne();
+  res.json({ message: "Part deleted", _id: part._id });
+});

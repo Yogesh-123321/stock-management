@@ -1,7 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { uploadFileToCloudinary } from "../config/cloudinary.js";
 import Vendor from "../models/Vendor.js";
-import { generateVendorFormDocx } from "../utils/generateVendorFormDocx.js";
+import { generateVendorFormDocx, generateAllVendorsFormDocx } from "../utils/generateVendorFormDocx.js";
 
 // Maps the multipart field name -> the vendor field that stores its URL.
 // Every one of these is optional.
@@ -107,6 +107,35 @@ export const downloadVendorForm = asyncHandler(async (req, res) => {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   );
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(buffer);
+});
+
+// GET /api/vendors/export/all-forms  (download every vendor's Supplier
+// Evaluation Form as one .docx, same format/fields as the single download,
+// each vendor starting on its own page). Honors the same ?search=&status=&
+// activeStatus= filters as the vendor list, so "download all" matches
+// whatever is currently on screen.
+export const downloadAllVendorForms = asyncHandler(async (req, res) => {
+  const { search, status, activeStatus } = req.query;
+  const filter = {};
+  if (status) filter.status = status;
+  if (activeStatus === "active") filter.activeStatus = { $ne: "inactive" };
+  else if (activeStatus === "inactive") filter.activeStatus = "inactive";
+  if (search) filter.companyName = { $regex: search, $options: "i" };
+
+  const vendors = await Vendor.find(filter).sort({ companyName: 1 });
+  if (!vendors.length) {
+    res.status(404);
+    throw new Error("No vendors to export");
+  }
+
+  const buffer = await generateAllVendorsFormDocx(vendors);
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="All_Vendors_Supplier_Evaluation_Forms.docx"`);
   res.send(buffer);
 });
 

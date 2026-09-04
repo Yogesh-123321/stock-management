@@ -4,6 +4,7 @@ import {
   checkVendorRegistered,
   getVendorById,
   downloadVendorForm,
+  downloadAllVendorForms,
   registerVendor,
   updateVendor,
   approveVendor,
@@ -26,6 +27,7 @@ const vendorDocFields = uploadVendorDoc.fields([
 
 router.get("/", getVendors);
 router.get("/check", checkVendorRegistered);
+router.get("/export/all-forms", downloadAllVendorForms);
 router.get("/:id/form", downloadVendorForm);
 router.get("/:id/items", getVendorItems);
 router.get("/:id", getVendorById);

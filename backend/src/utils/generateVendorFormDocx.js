@@ -11,6 +11,7 @@ import {
   AlignmentType,
   VerticalAlign,
   VerticalMergeType,
+  PageBreak,
 } from "docx";
 
 // Mirrors the TISPL / PLC "Supplier Evaluation Form" vendor registration
@@ -70,7 +71,11 @@ function fieldRow(label, value, { boldValue = false } = {}) {
   });
 }
 
-export async function generateVendorFormDocx(vendor) {
+// Builds the on-page content for a single vendor's Supplier Evaluation Form —
+// everything that goes inside one Document's section children, minus the
+// surrounding Document/section wrapper. Shared by the single-vendor download
+// and the "download all vendors" export so both produce identical output.
+function buildVendorFormBlocks(vendor) {
   const phoneEmail = [clean(vendor.phone), clean(vendor.email)].filter(Boolean).join(", ");
   const contactPerson = [clean(vendor.contactPersonName), clean(vendor.contactDesignation)]
     .filter(Boolean)
@@ -227,34 +232,66 @@ export async function generateVendorFormDocx(vendor) {
     ],
   });
 
+  return [
+    headerTable,
+    new Paragraph({ text: "", spacing: { after: 200 } }),
+    generalTable,
+    new Paragraph({ text: "", spacing: { after: 160 } }),
+    signatoryTable,
+    new Paragraph({ text: "", spacing: { after: 160 } }),
+    remarksTable,
+    new Paragraph({ text: "", spacing: { after: 160 } }),
+    new Paragraph({
+      children: [new TextRun({ text: "In-charge Comment:", bold: true, size: 20 })],
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: clean(vendor.approvalComment), size: 20 })],
+      spacing: { after: 160 },
+    }),
+    new Paragraph({ children: [new TextRun({ text: "Date:", bold: true, size: 20 })], spacing: { after: 240 } }),
+    new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      children: [new TextRun({ text: "SIGNATURE OF THE HEAD - PURCHASE", bold: true, size: 20 })],
+      spacing: { after: 200 },
+    }),
+    approvalBox,
+  ];
+}
+
+// Single vendor — same output as before, now just wraps buildVendorFormBlocks
+// in a one-section Document.
+export async function generateVendorFormDocx(vendor) {
   const doc = new Document({
     sections: [
       {
         properties: {},
-        children: [
-          headerTable,
-          new Paragraph({ text: "", spacing: { after: 200 } }),
-          generalTable,
-          new Paragraph({ text: "", spacing: { after: 160 } }),
-          signatoryTable,
-          new Paragraph({ text: "", spacing: { after: 160 } }),
-          remarksTable,
-          new Paragraph({ text: "", spacing: { after: 160 } }),
-          new Paragraph({
-            children: [new TextRun({ text: "In-charge Comment:", bold: true, size: 20 })],
-          }),
-          new Paragraph({
-            children: [new TextRun({ text: clean(vendor.approvalComment), size: 20 })],
-            spacing: { after: 160 },
-          }),
-          new Paragraph({ children: [new TextRun({ text: "Date:", bold: true, size: 20 })], spacing: { after: 240 } }),
-          new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            children: [new TextRun({ text: "SIGNATURE OF THE HEAD - PURCHASE", bold: true, size: 20 })],
-            spacing: { after: 200 },
-          }),
-          approvalBox,
-        ],
+        children: buildVendorFormBlocks(vendor),
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
+}
+
+// All vendors — one .docx with every vendor's Supplier Evaluation Form, each
+// starting on its own page, in the exact same format as the single-vendor
+// download.
+export async function generateAllVendorsFormDocx(vendors) {
+  const children = [];
+
+  vendors.forEach((vendor, i) => {
+    if (i > 0) {
+      // Force each vendor's form onto a fresh page.
+      children.push(new Paragraph({ children: [new PageBreak()] }));
+    }
+    children.push(...buildVendorFormBlocks(vendor));
+  });
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {},
+        children,
       },
     ],
   });
