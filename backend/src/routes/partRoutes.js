@@ -3,6 +3,7 @@ import {
   getParts,
   lookupPart,
   getPartById,
+  getPartHistory,
   createPart,
   adjustPartStock,
   getDuplicateParts,
@@ -19,6 +20,7 @@ router.get("/duplicates", getDuplicateParts);
 router.get("/", getParts);
 router.get("/lookup", lookupPart);
 router.get("/:id", getPartById);
+router.get("/:id/history", getPartHistory);
 router.post("/", createPart);
 router.patch("/:id/stock", adjustPartStock);
 

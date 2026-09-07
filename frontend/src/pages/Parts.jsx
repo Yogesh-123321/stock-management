@@ -35,6 +35,11 @@ import {
   Save,
   Plus,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  History,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from "lucide-react";
 
 /**
@@ -44,7 +49,7 @@ const COLUMNS = [
   {
     key: "ttUniquePartNumber",
     label: "TT part number",
-    width: "w-[120px]",
+    width: "w-[170px]",
     align: "left",
     sortValue: (p) => (p.ttUniquePartNumber || "").toLowerCase(),
   },
@@ -100,6 +105,17 @@ const COLUMNS = [
 const fmtDate = (d) =>
   d
     ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "—";
+
+const fmtDateTime = (d) =>
+  d
+    ? new Date(d).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
     : "—";
 
 
@@ -676,6 +692,7 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [editingReq, setEditingReq] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -727,42 +744,57 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
   return (
     <Card className="mb-6">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
-        <div>
-          <CardTitle className="text-base font-display flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-accent" />
-            Part number approvals
-            <Badge variant="outline">Admin</Badge>
-            {tab === "pending" && requests.length > 0 && (
-              <Badge variant="warning">{requests.length} waiting</Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            New and alternate part numbers raised during material receiving. Stock can only be
-            booked after the number is approved here.
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1">
-            {TABS.map((t) => (
-              <Button
-                key={t.key}
-                type="button"
-                size="sm"
-                variant={tab === t.key ? "default" : "outline"}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </Button>
-            ))}
-          </div>
-          {canRequest && (
-            <Button type="button" size="sm" onClick={onRequestNew}>
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              New part request
-            </Button>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? (
+            <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronUp className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
           )}
-        </div>
+          <div className="min-w-0">
+            <CardTitle className="text-base font-display flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-accent" />
+              Part number approvals
+              <Badge variant="outline">Admin</Badge>
+              {tab === "pending" && requests.length > 0 && (
+                <Badge variant="warning">{requests.length} waiting</Badge>
+              )}
+            </CardTitle>
+            <CardDescription>
+              New and alternate part numbers raised during material receiving. Stock can only be
+              booked after the number is approved here.
+            </CardDescription>
+          </div>
+        </button>
+        {!collapsed && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1">
+              {TABS.map((t) => (
+                <Button
+                  key={t.key}
+                  type="button"
+                  size="sm"
+                  variant={tab === t.key ? "default" : "outline"}
+                  onClick={() => setTab(t.key)}
+                >
+                  {t.label}
+                </Button>
+              ))}
+            </div>
+            {canRequest && (
+              <Button type="button" size="sm" onClick={onRequestNew}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                New part request
+              </Button>
+            )}
+          </div>
+        )}
       </CardHeader>
+      {!collapsed && (
       <CardContent>
         <Table className="table-fixed">
           <TableHeader>
@@ -905,6 +937,7 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
           </TableBody>
         </Table>
       </CardContent>
+      )}
 
       {editingReq && (
         <EditRequestDialog
@@ -1059,6 +1092,7 @@ const DETAIL_FIELDS = [
 function PartDetailsDialog({ partId, onClose }) {
   const [part, setPart] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1173,6 +1207,169 @@ function PartDetailsDialog({ partId, onClose }) {
                 {part.lastEditedBy && <span>Last edited by {part.lastEditedBy}</span>}
               </div>
             </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" onClick={() => setShowHistory(true)} disabled={!part}>
+            <History className="mr-1.5 h-3.5 w-3.5" />
+            History
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+
+      {showHistory && part && (
+        <PartHistoryDialog part={part} onClose={() => setShowHistory(false)} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Part history — a bank-statement style ledger of every time stock for
+ * this part moved: received from a vendor (live today) and, soon, issued
+ * out to whoever it was sent to. Each row shows a running balance the
+ * same way a bank statement does, newest activity on top.
+ * ------------------------------------------------------------------ */
+function PartHistoryDialog({ part, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .get(`/parts/${part._id}/history`)
+      .then(({ data }) => {
+        if (!cancelled) setData(data);
+      })
+      .catch((err) => {
+        toast.error(err.response?.data?.message || "Could not load part history");
+        onClose();
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [part._id]);
+
+  const entries = data?.entries || [];
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-semibold">Part history</h2>
+            <p className="break-all text-xs text-muted-foreground">
+              {part.ttUniquePartNumber} · {part.itemDescription}
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading && <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>}
+
+          {!loading && data && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-secondary/40 px-4 py-2.5 text-sm">
+                <div>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Current balance
+                  </span>
+                  <p className="font-mono-tech text-base font-semibold">
+                    {data.closingBalance ?? 0}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <ArrowDownToLine className="h-3.5 w-3.5" />
+                  Received (in)
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <ArrowUpFromLine className="h-3.5 w-3.5" />
+                  Issued (out) — coming soon
+                </div>
+              </div>
+
+              {entries.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No stock movements recorded for this part yet.
+                </p>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary/70">
+                      <tr className="border-b border-border">
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Date
+                        </th>
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          From / To
+                        </th>
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Reference
+                        </th>
+                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Qty
+                        </th>
+                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Balance
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
+                      {entries.map((e) => (
+                        <tr key={e._id} className="border-b border-border">
+                          <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
+                            {fmtDateTime(e.date)}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top">
+                            <div className="flex items-center gap-1.5">
+                              {e.direction === "out" ? (
+                                <ArrowUpFromLine className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                              ) : (
+                                <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                              )}
+                              <span>{e.party?.name || "—"}</span>
+                            </div>
+                            {e.remarks && (
+                              <p className="mt-0.5 text-xs text-muted-foreground">{e.remarks}</p>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
+                            {e.reference
+                              ? `${e.reference.type}${
+                                  e.reference.number ? ` #${e.reference.number}` : ""
+                                }`
+                              : "—"}
+                          </td>
+                          <td
+                            className={`px-2.5 py-1.5 align-top text-right font-mono-tech ${
+                              e.direction === "out" ? "text-destructive" : "text-emerald-600"
+                            }`}
+                          >
+                            {e.direction === "out" ? "−" : "+"}
+                            {e.quantity}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-right font-mono-tech font-semibold">
+                            {e.balance}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1717,18 +1914,29 @@ export default function Parts() {
                     className="cursor-pointer"
                     onClick={() => setViewingId(p._id)}
                   >
-                    <TableCell className="align-top py-2">
-                      <span className="id-chip">{p.ttUniquePartNumber}</span>
+                    <TableCell className="align-top py-1">
+                      <span
+                        className="id-chip block max-w-full truncate"
+                        title={p.ttUniquePartNumber}
+                      >
+                        {p.ttUniquePartNumber}
+                      </span>
                     </TableCell>
-                    <TableCell className="align-top whitespace-normal break-words py-2">
+                    <TableCell
+                      className="align-top truncate py-1"
+                      title={p.itemDescription}
+                    >
                       {p.itemDescription}
                     </TableCell>
-                    <TableCell className="align-top py-2 font-mono-tech text-xs text-muted-foreground">
+                    <TableCell
+                      className="align-top truncate py-1 font-mono-tech text-xs text-muted-foreground"
+                      title={p.manufacturerPartNumber || ""}
+                    >
                       {p.manufacturerPartNumber || "—"}
                     </TableCell>
-                    <TableCell className="align-top py-2 text-muted-foreground">{p.category}</TableCell>
+                    <TableCell className="align-top py-1 text-muted-foreground">{p.category}</TableCell>
                     <TableCell
-                      className="align-top whitespace-normal break-words py-2"
+                      className="align-top truncate py-1"
                       title={p.vendors?.map((v) => v.companyName).join(" / ")}
                     >
                       {p.vendors && p.vendors.length > 0 ? (
@@ -1737,10 +1945,10 @@ export default function Parts() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="align-top py-2 text-right font-mono-tech">
+                    <TableCell className="align-top py-1 text-right font-mono-tech">
                       {p.quantityInStock}
                     </TableCell>
-                    <TableCell className="align-top py-2">
+                    <TableCell className="align-top py-1">
                       {p.isAlternatePart ? (
                         <Badge variant="warning">Alternate</Badge>
                       ) : (
@@ -1748,7 +1956,7 @@ export default function Parts() {
                       )}
                     </TableCell>
                     {isApprover && (
-                      <TableCell className="align-top py-2 text-right">
+                      <TableCell className="align-top py-1 text-right">
                         <div
                           className="flex justify-end gap-1.5"
                           onClick={(e) => e.stopPropagation()}

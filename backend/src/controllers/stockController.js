@@ -5,11 +5,12 @@ import Part from "../models/Part.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import { generateNextPartNumber } from "../utils/generatePartNumber.js";
 
-// GET /api/stock-entries?purchaseOrder=&vendor=
+// GET /api/stock-entries?purchaseOrder=&vendor=&part=
 export const getStockEntries = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.purchaseOrder) filter.purchaseOrder = req.query.purchaseOrder;
   if (req.query.vendor) filter.vendor = req.query.vendor;
+  if (req.query.part) filter.part = req.query.part;
 
   const entries = await StockEntry.find(filter)
     .populate([
