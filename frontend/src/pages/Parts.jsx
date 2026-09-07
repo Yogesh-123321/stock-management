@@ -670,7 +670,7 @@ function MyPartRequests({ reloadKey, onRequestNew }) {
 /* ------------------------------------------------------------------ *
  * Approval queue — ADMIN ONLY (rendered only when can("part.approve"))
  * ------------------------------------------------------------------ */
-function PartApprovals({ onApproved }) {
+function PartApprovals({ onApproved, canRequest, onRequestNew }) {
   const [tab, setTab] = useState("pending"); // pending | approved | rejected
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -741,18 +741,26 @@ function PartApprovals({ onApproved }) {
             booked after the number is approved here.
           </CardDescription>
         </div>
-        <div className="flex gap-1">
-          {TABS.map((t) => (
-            <Button
-              key={t.key}
-              type="button"
-              size="sm"
-              variant={tab === t.key ? "default" : "outline"}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1">
+            {TABS.map((t) => (
+              <Button
+                key={t.key}
+                type="button"
+                size="sm"
+                variant={tab === t.key ? "default" : "outline"}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </Button>
+            ))}
+          </div>
+          {canRequest && (
+            <Button type="button" size="sm" onClick={onRequestNew}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              New part request
             </Button>
-          ))}
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -1628,10 +1636,18 @@ export default function Parts() {
         </div>
       </div>
 
-      {/* Approvals are visible to the admin only. */}
-      {isApprover && <PartApprovals onApproved={() => setReloadKey((k) => k + 1)} />}
+      {/* Approvals are visible to the admin only. The admin can also raise a
+          new part request straight from this section, so there's only one
+          panel (not a separate "my requests" one) for admins to deal with. */}
+      {isApprover && (
+        <PartApprovals
+          onApproved={() => setReloadKey((k) => k + 1)}
+          canRequest={canRequest}
+          onRequestNew={() => setShowNewPartRequest(true)}
+        />
+      )}
 
-      {/* Everyone who can raise a part request (but isn't an approver) gets a
+      {/* Everyone who can raise a part request but isn't an approver gets a
           compact panel to track what they've submitted. */}
       {canRequest && !isApprover && (
         <MyPartRequests
