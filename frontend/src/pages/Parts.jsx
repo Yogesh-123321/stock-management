@@ -662,10 +662,8 @@ function MyPartRequests({ reloadKey, onRequestNew }) {
                     >
                       {r.status === "pending"
                         ? "Awaiting approval"
-                        : r.status === "consumed"
+                        : r.status === "consumed" || r.status === "approved"
                         ? `Created ${r.createdPart?.ttUniquePartNumber || ""}`.trim()
-                        : r.status === "approved"
-                        ? "Approved"
                         : "Rejected"}
                     </Badge>
                     {r.reviewRemarks ? (
@@ -898,10 +896,8 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
                               : "success"
                           }
                         >
-                          {r.status === "consumed"
+                          {r.status === "consumed" || r.status === "approved"
                             ? `Created ${r.createdPart?.ttUniquePartNumber || ""}`.trim()
-                            : r.status === "approved"
-                            ? "Approved — awaiting stock"
                             : "Rejected"}
                         </Badge>
                         <p className="text-xs text-muted-foreground flex items-center justify-end gap-1">
@@ -984,6 +980,7 @@ function EditPartDialog({ part, onClose, onSaved }) {
     base.remarks = part?.remarks ?? "";
     return base;
   });
+  const [stockQty, setStockQty] = useState(String(part?.quantityInStock ?? 0));
   const [saving, setSaving] = useState(false);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -994,9 +991,27 @@ function EditPartDialog({ part, onClose, onSaved }) {
       toast.error("Description is required");
       return;
     }
+    const nextStock = Number(stockQty);
+    if (stockQty === "" || Number.isNaN(nextStock) || nextStock < 0) {
+      toast.error("Stock quantity must be zero or a positive number");
+      return;
+    }
     setSaving(true);
     try {
-      const { data } = await api.patch(`/parts/${part._id}`, form);
+      let data;
+      ({ data } = await api.patch(`/parts/${part._id}`, form));
+
+      // The stock quantity is a separate field on purpose — it's adjusted
+      // through its own endpoint (a delta), not the general part-edit one,
+      // so manual corrections here can never be confused with quantity
+      // that came from an actual stock entry.
+      const currentStock = Number(data.quantityInStock ?? part.quantityInStock ?? 0);
+      if (nextStock !== currentStock) {
+        const delta = nextStock - currentStock;
+        const res = await api.patch(`/parts/${part._id}/stock`, { quantity: delta });
+        data = { ...data, quantityInStock: res.data.quantityInStock };
+      }
+
       toast.success("Part updated");
       onSaved?.(data);
       onClose();
@@ -1037,6 +1052,22 @@ function EditPartDialog({ part, onClose, onSaved }) {
                 />
               </div>
             ))}
+
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Stock quantity
+              </label>
+              <Input
+                type="number"
+                min="0"
+                className="font-mono-tech"
+                value={stockQty}
+                onChange={(e) => setStockQty(e.target.value)}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Manually correct the quantity in stock. This does not go through a stock entry / tax invoice.
+              </p>
+            </div>
 
             <div className="sm:col-span-2">
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1084,12 +1115,11 @@ const DETAIL_FIELDS = [
   { key: "companyCode", label: "Company code" },
   { key: "category", label: "Category" },
   { key: "partTypeBatchNo", label: "Part type / batch no." },
-  { key: "runningSerialNo", label: "Running serial no." },
   { key: "hsnCode", label: "HSN code" },
   { key: "unit", label: "Unit" },
 ];
 
-function PartDetailsDialog({ partId, onClose }) {
+function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
   const [part, setPart] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
@@ -1222,7 +1252,14 @@ function PartDetailsDialog({ partId, onClose }) {
       </div>
 
       {showHistory && part && (
-        <PartHistoryDialog part={part} onClose={() => setShowHistory(false)} />
+        <PartHistoryDialog
+          part={part}
+          onClose={() => setShowHistory(false)}
+          onPartChanged={(updated) => {
+            setPart((p) => (p ? { ...p, ...updated } : p));
+            onPartUpdated?.(updated);
+          }}
+        />
       )}
     </div>
   );
@@ -1234,9 +1271,10 @@ function PartDetailsDialog({ partId, onClose }) {
  * out to whoever it was sent to. Each row shows a running balance the
  * same way a bank statement does, newest activity on top.
  * ------------------------------------------------------------------ */
-function PartHistoryDialog({ part, onClose }) {
+function PartHistoryDialog({ part, onClose, onPartChanged }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1260,6 +1298,38 @@ function PartHistoryDialog({ part, onClose }) {
   }, [part._id]);
 
   const entries = data?.entries || [];
+
+  const deleteEntry = async (entry) => {
+    const ok = window.confirm(
+      entry.stockApplied
+        ? `Delete this history line? ${entry.quantity} unit(s) will be removed from the current stock as well.`
+        : "Delete this history line? It was still pending (invoice not uploaded) so stock is unaffected."
+    );
+    if (!ok) return;
+    setDeletingId(entry._id);
+    try {
+      await api.delete(`/stock-entries/${entry._id}`);
+      toast.success("History entry deleted");
+      setData((d) => {
+        if (!d) return d;
+        const remainingEntries = d.entries.filter((e) => e._id !== entry._id);
+        const closingBalance = entry.stockApplied
+          ? Math.max(0, (d.closingBalance ?? 0) - entry.quantity)
+          : d.closingBalance ?? 0;
+        return { ...d, entries: remainingEntries, closingBalance };
+      });
+      onPartChanged?.({
+        _id: part._id,
+        quantityInStock: entry.stockApplied
+          ? Math.max(0, (data.closingBalance ?? 0) - entry.quantity)
+          : data.closingBalance ?? 0,
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not delete this history entry");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
@@ -1324,6 +1394,9 @@ function PartHistoryDialog({ part, onClose }) {
                         <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                           Balance
                         </th>
+                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {" "}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
@@ -1340,6 +1413,11 @@ function PartHistoryDialog({ part, onClose }) {
                                 <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                               )}
                               <span>{e.party?.name || "—"}</span>
+                              {e.type === "received" && !e.stockApplied && (
+                                <Badge variant="warning" className="ml-1">
+                                  Pending invoice
+                                </Badge>
+                              )}
                             </div>
                             {e.remarks && (
                               <p className="mt-0.5 text-xs text-muted-foreground">{e.remarks}</p>
@@ -1362,6 +1440,18 @@ function PartHistoryDialog({ part, onClose }) {
                           </td>
                           <td className="px-2.5 py-1.5 align-top text-right font-mono-tech font-semibold">
                             {e.balance}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-right">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title="Delete this history entry"
+                              disabled={deletingId === e._id}
+                              onClick={() => deleteEntry(e)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -1570,7 +1660,6 @@ const COMPARISON_FIELDS = [
   { key: "companyCode", label: "Company code" },
   { key: "category", label: "Category" },
   { key: "partTypeBatchNo", label: "Part type / batch no." },
-  { key: "runningSerialNo", label: "Running serial no." },
   { key: "hsnCode", label: "HSN code" },
   { key: "unit", label: "Unit" },
   {
@@ -1790,7 +1879,7 @@ export default function Parts() {
     );
   };
 
-  const colCount = COLUMNS.length + (isApprover ? 1 : 0);
+  const colCount = COLUMNS.length + 1 + (isApprover ? 1 : 0);
 
   const handleDelete = async (part) => {
     const ok = window.confirm(
@@ -1861,6 +1950,7 @@ export default function Parts() {
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[56px] text-left select-none">S.No</TableHead>
                 {COLUMNS.map((col) => (
                   <TableHead
                     key={col.key}
@@ -1908,12 +1998,15 @@ export default function Parts() {
                 </TableRow>
               )}
               {!loading &&
-                sortedParts.map((p) => (
+                sortedParts.map((p, idx) => (
                   <TableRow
                     key={p._id}
                     className="cursor-pointer"
                     onClick={() => setViewingId(p._id)}
                   >
+                    <TableCell className="align-top py-1 text-muted-foreground font-mono-tech">
+                      {idx + 1}
+                    </TableCell>
                     <TableCell className="align-top py-1">
                       <span
                         className="id-chip block max-w-full truncate"
@@ -2001,7 +2094,13 @@ export default function Parts() {
       )}
 
       {viewingId && (
-        <PartDetailsDialog partId={viewingId} onClose={() => setViewingId(null)} />
+        <PartDetailsDialog
+          partId={viewingId}
+          onClose={() => setViewingId(null)}
+          onPartUpdated={(updated) =>
+            setParts((list) => list.map((p) => (p._id === updated._id ? { ...p, ...updated } : p)))
+          }
+        />
       )}
 
       {showDuplicates && (

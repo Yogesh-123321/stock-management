@@ -1,5 +1,6 @@
 import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { notifyApprovers, notifyRequester } from "../utils/notify.js";
+import { createPartFromApprovedRequest } from "../utils/stockBooking.js";
 
 const partLabel = (doc) =>
   [doc.newPart?.itemDescription, doc.newPart?.manufacturerPartNumber]
@@ -177,6 +178,16 @@ export const approveRequest = async (req, res) => {
     doc.reviewedByUser = req.user?._id || null;
     doc.reviewRemarks = req.body.reviewRemarks || "";
     doc.reviewedAt = new Date();
+
+    // Put the part number straight into the Parts master the moment it's
+    // approved — it should not have to wait for someone to book a stock
+    // entry against it. Never runs on rejection. Skipped if a part was
+    // already created for this request (e.g. re-approving after an edit).
+    if (!doc.createdPart) {
+      const partDoc = await createPartFromApprovedRequest(doc);
+      doc.createdPart = partDoc._id;
+    }
+
     await doc.save();
 
     try {
@@ -187,7 +198,7 @@ export const approveRequest = async (req, res) => {
         title: "Part number approved",
         message: `${partLabel(doc)} was approved by ${
           doc.reviewedBy || "the admin"
-        }. You can now book the stock quantity.`,
+        } and added to the parts master. You can now book the stock quantity.`,
         link: "/receive",
         entityType: "part",
         entityId: doc._id,
@@ -196,9 +207,13 @@ export const approveRequest = async (req, res) => {
       console.error("part approval notification failed:", e.message);
     }
 
-    res.json(doc);
+    const populated = await PartApprovalRequest.findById(doc._id)
+      .populate("alternateOfPart", "ttUniquePartNumber itemDescription")
+      .populate("vendor", "companyName")
+      .populate("createdPart", "ttUniquePartNumber");
+    res.json(populated);
   } catch (err) {
-    res.status(500).json({ message: err.message || "Could not approve the request" });
+    res.status(err.status || 500).json({ message: err.message || "Could not approve the request" });
   }
 };
 
@@ -324,6 +339,14 @@ export const updateRequest = async (req, res) => {
       }
     }
 
+    // Same as approveRequest: a request moved to "approved" from here (the
+    // admin edit panel) should also get its part created immediately, not
+    // just one approved through the normal Approve button.
+    if (doc.status === "approved" && !doc.createdPart) {
+      const partDoc = await createPartFromApprovedRequest(doc);
+      doc.createdPart = partDoc._id;
+    }
+
     doc.markModified("newPart");
     await doc.save();
 
@@ -351,6 +374,6 @@ export const updateRequest = async (req, res) => {
       .populate("createdPart", "ttUniquePartNumber");
     res.json(populated);
   } catch (err) {
-    res.status(500).json({ message: err.message || "Could not update the request" });
+    res.status(err.status || 500).json({ message: err.message || "Could not update the request" });
   }
 };

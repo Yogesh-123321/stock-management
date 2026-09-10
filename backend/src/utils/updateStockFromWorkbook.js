@@ -18,7 +18,7 @@
        part number at all. Those are matched by (normalized) description
        against NO_CODE_PART_DEFAULTS below, which supplies a category +
        part type, and a proper TT part number is generated via the same
-       generateNextPartNumber() used by the receiving-flow "new part" step.
+       buildPartNumber() used by the receiving-flow "new part" step.
        Rows with no code AND no entry in that map are skipped with a
        warning — nothing is silently guessed.
 
@@ -36,7 +36,7 @@ import xlsx from "xlsx";
 import mongoose from "mongoose";
 import connectDB from "../config/db.js";
 import Part from "../models/Part.js";
-import { generateNextPartNumber } from "./generatePartNumber.js";
+import { buildPartNumber } from "./generatePartNumber.js";
 
 const filePath = process.argv[2];
 const sheetName = process.argv[3] || "Sheet1";
@@ -176,14 +176,9 @@ const run = async () => {
         skippedNoMapping.push(description);
         continue;
       }
-      const { ttUniquePartNumber, runningSerialNo } = await generateNextPartNumber(
-        "TT",
-        mapping.category,
-        mapping.partTypeBatchNo
-      );
+      const { ttUniquePartNumber } = await buildPartNumber("TT", mapping.category, mapping.partTypeBatchNo);
       await Part.create({
         ttUniquePartNumber,
-        runningSerialNo,
         companyCode: "TT",
         category: mapping.category,
         partTypeBatchNo: mapping.partTypeBatchNo,

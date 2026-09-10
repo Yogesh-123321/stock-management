@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 /*
   Mirrors the structure of the Master Part Database workbook:
-  TT UNIQUE PART NUMBER = COMPANY CODE + CATEGORY + PART TYPE/BATCH NO. + RUNNING SERIAL NO.
-  e.g. TT + AY + FAN + 001 => TTAYFAN001
+  TT UNIQUE PART NUMBER = COMPANY CODE + CATEGORY + PART TYPE/BATCH NO.
+  e.g. TT + AY + FAN => TTAYFAN
 */
 const partSchema = new mongoose.Schema(
   {
@@ -14,7 +14,10 @@ const partSchema = new mongoose.Schema(
     companyCode: { type: String, required: true, trim: true, uppercase: true }, // PART 1 - fixed (e.g. TT)
     category: { type: String, required: true, trim: true, uppercase: true }, // PART 2 - predefined list
     partTypeBatchNo: { type: String, required: true, trim: true, uppercase: true }, // PART 3 - predefined list
-    runningSerialNo: { type: String, required: true, trim: true }, // PART 4 - auto increment
+    // Historical field — the part number used to end in an auto-incrementing
+    // serial (PART 4). It no longer does (see utils/generatePartNumber.js);
+    // kept only so older rows imported before that change still show theirs.
+    runningSerialNo: { type: String, trim: true, default: "" },
 
     quantityInStock: { type: Number, default: 0, min: 0 },
 

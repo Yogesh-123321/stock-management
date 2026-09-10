@@ -1,7 +1,9 @@
 import express from "express";
 import {
   getParts,
+  getPartsCount,
   lookupPart,
+  suggestParts,
   getPartById,
   getPartHistory,
   createPart,
@@ -16,9 +18,11 @@ const router = express.Router();
 
 // Declared before "/:id" so it is never swallowed by the id route.
 router.get("/duplicates", getDuplicateParts);
+router.get("/count", getPartsCount);
 
 router.get("/", getParts);
 router.get("/lookup", lookupPart);
+router.get("/suggest", suggestParts);
 router.get("/:id", getPartById);
 router.get("/:id/history", getPartHistory);
 router.post("/", createPart);

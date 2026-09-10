@@ -25,6 +25,16 @@ const stockEntrySchema = new mongoose.Schema(
 
     enteredBy: { type: String, trim: true },
     remarks: { type: String, trim: true },
+
+    // A stock entry is logged the moment material is entered in Step 4 of the
+    // receiving wizard, but the quantity is only credited to the part's
+    // quantityInStock once the tax invoice for the same delivery arrives.
+    // Until then this line sits here as a "pending" record so nothing shows
+    // up in the parts master that hasn't been billed yet.
+    stockApplied: { type: Boolean, default: false },
+    appliedAt: { type: Date, default: null },
+    // The tax invoice whose upload caused this line to be credited to stock.
+    appliedVia: { type: mongoose.Schema.Types.ObjectId, ref: "TaxInvoice", default: null },
   },
   { timestamps: true }
 );

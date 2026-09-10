@@ -31,15 +31,15 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const [vendors, parts, pos] = await Promise.all([
+        const [vendors, partsCount, pos] = await Promise.all([
           api.get("/vendors"),
-          api.get("/parts"),
+          api.get("/parts/count"),
           api.get("/purchase-orders"),
         ]);
         setStats({
           vendors: vendors.data.length,
           pendingVendors: vendors.data.filter((v) => v.status === "pending").length,
-          parts: parts.data.length,
+          parts: partsCount.data.count,
           purchaseOrders: pos.data.length,
         });
       } catch {

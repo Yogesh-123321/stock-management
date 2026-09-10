@@ -1,9 +1,9 @@
 import asyncHandler from "express-async-handler";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
-import { generateNextPartNumber } from "../utils/generatePartNumber.js";
+import { buildPartNumber } from "../utils/generatePartNumber.js";
 
-// GET /api/parts?search=
+// GET /api/parts?search=&limit=
 export const getParts = asyncHandler(async (req, res) => {
   const { search } = req.query;
   const filter = {};
@@ -14,11 +14,32 @@ export const getParts = asyncHandler(async (req, res) => {
       { itemDescription: { $regex: search, $options: "i" } },
     ];
   }
+  // The parts master has no pagination UI — it lists everything that
+  // matches. 200 used to be hard-coded here, which silently cut the table
+  // (and anything that counts off this endpoint, like the dashboard) off
+  // at 200 parts once the database grew past that. Now it's a generous,
+  // overridable cap instead of a silent truncation.
+  const limit = Math.min(Number(req.query.limit) || 5000, 5000);
   const parts = await Part.find(filter)
     .populate("vendors", "companyName")
     .sort({ ttUniquePartNumber: 1 })
-    .limit(200);
+    .limit(limit);
   res.json(parts);
+});
+
+// GET /api/parts/count?search=  -> exact total, independent of any list limit
+export const getPartsCount = asyncHandler(async (req, res) => {
+  const { search } = req.query;
+  const filter = {};
+  if (search) {
+    filter.$or = [
+      { ttUniquePartNumber: { $regex: search, $options: "i" } },
+      { manufacturerPartNumber: { $regex: search, $options: "i" } },
+      { itemDescription: { $regex: search, $options: "i" } },
+    ];
+  }
+  const count = await Part.countDocuments(filter);
+  res.json({ count });
 });
 
 // GET /api/parts/lookup?partNumber=  -> used by stock entry to check for a match
@@ -36,6 +57,70 @@ export const lookupPart = asyncHandler(async (req, res) => {
   }).populate("alternateOf alternateParts vendors");
 
   res.json({ matched: !!part, part: part || null });
+});
+
+// Words too generic to be useful as a match signal on their own (units,
+// connectors, filler). Kept short and hand-picked rather than a full
+// stopword list — this only needs to skip the tokens that would otherwise
+// match almost everything in the parts master.
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "type", "size", "pcs", "pc", "no", "of", "a", "an", "in", "on",
+]);
+
+// Splits a free-text item description into the keywords worth matching on:
+// alphanumeric tokens of length >= 3, deduplicated, filler words dropped.
+// Kept in one place since both suggestParts and its ranking use it.
+const keywordsFrom = (text) =>
+  [
+    ...new Set(
+      String(text || "")
+        .toUpperCase()
+        .split(/[^A-Z0-9]+/)
+        .filter((w) => w.length >= 3 && !STOPWORDS.has(w.toLowerCase()))
+    ),
+  ];
+
+// GET /api/parts/suggest?description=&excludePartNumber=
+// Used by the "new part" entry screens (manual stock entry and the vendor
+// sheet import) to catch the case where a part is being re-entered as new
+// under a different manufacturer part number / spelling. Splits the typed
+// description into keywords and returns existing parts whose description
+// shares any of them, best (most-keywords-matched) first — a fuzzier net
+// than the exact "already in the master?" lookup at /parts/lookup.
+export const suggestParts = asyncHandler(async (req, res) => {
+  const { description, excludePartNumber } = req.query;
+  const keywords = keywordsFrom(description);
+  if (keywords.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  const filter = {
+    $or: keywords.map((kw) => ({
+      itemDescription: { $regex: kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" },
+    })),
+  };
+  if (excludePartNumber) {
+    filter.ttUniquePartNumber = { $ne: String(excludePartNumber).trim().toUpperCase() };
+  }
+
+  const candidates = await Part.find(filter)
+    .select("ttUniquePartNumber itemDescription manufacturerPartNumber quantityInStock")
+    .limit(50)
+    .lean();
+
+  const upperKeywords = keywords.map((k) => k.toUpperCase());
+  const scored = candidates
+    .map((p) => {
+      const hay = String(p.itemDescription || "").toUpperCase();
+      const score = upperKeywords.reduce((n, kw) => n + (hay.includes(kw) ? 1 : 0), 0);
+      return { ...p, matchedKeywords: score };
+    })
+    .filter((p) => p.matchedKeywords > 0)
+    .sort((a, b) => b.matchedKeywords - a.matchedKeywords)
+    .slice(0, 8);
+
+  res.json(scored);
 });
 
 // GET /api/parts/:id
@@ -97,13 +182,23 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     matchType: entry.matchType,
     enteredBy: entry.enteredBy || null,
     remarks: entry.remarks || null,
+    // Whether this line's quantity has actually been credited to
+    // quantityInStock yet — false while its tax invoice hasn't arrived.
+    stockApplied: !!entry.stockApplied,
   }));
 
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
+  // A line that hasn't been applied yet (tax invoice not uploaded) was
+  // never credited to quantityInStock, so it must not move the running
+  // balance — otherwise the ledger would show a balance the stock count
+  // doesn't actually have.
   let running = 0;
   const withBalance = movements.map((m) => {
-    running += m.direction === "out" ? -m.quantity : m.quantity;
+    const counts = m.type !== "received" || m.stockApplied;
+    if (counts) {
+      running += m.direction === "out" ? -m.quantity : m.quantity;
+    }
     return { ...m, balance: running };
   });
 
@@ -139,15 +234,16 @@ export const createPart = asyncHandler(async (req, res) => {
     throw new Error("itemDescription, companyCode, category and partTypeBatchNo are required");
   }
 
-  const { ttUniquePartNumber, runningSerialNo } = await generateNextPartNumber(
-    companyCode,
-    category,
-    partTypeBatchNo
-  );
+  let ttUniquePartNumber;
+  try {
+    ({ ttUniquePartNumber } = await buildPartNumber(companyCode, category, partTypeBatchNo));
+  } catch (err) {
+    res.status(err.status || 400);
+    throw err;
+  }
 
   const part = await Part.create({
     ttUniquePartNumber,
-    runningSerialNo,
     typeOfPart,
     manufacturerPartNumber,
     itemDescription,

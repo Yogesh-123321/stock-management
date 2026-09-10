@@ -9,6 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import api from "@/lib/api";
 import { fetchReceivedTotal } from "@/lib/receivedTotal";
+import ExcelImportPanel from "@/pages/receive/ExcelImportPanel";
+import PartDuplicateCheck from "@/components/PartDuplicateCheck";
+import PartNumberPreview from "@/components/PartNumberPreview";
 import {
   Search,
   PackageCheck,
@@ -24,6 +27,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Clock,
+  FileSpreadsheet,
 } from "lucide-react";
 
 // Entries logged in this session, shown either as a compact list or as a
@@ -45,7 +49,14 @@ function SessionLog({ entries, view }) {
             <p className="mt-1 text-xs text-muted-foreground line-clamp-2" title={e.part.itemDescription}>
               {e.part.itemDescription}
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">In stock now: {e.part.quantityInStock}</p>
+            {e.stockApplied ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">In stock now: {e.part.quantityInStock}</p>
+            ) : (
+              <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
+                <Clock className="h-3 w-3" />
+                Pending — added once the tax invoice is uploaded
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -59,7 +70,7 @@ function SessionLog({ entries, view }) {
           <TableHead className="w-[150px]">Part no.</TableHead>
           <TableHead>Description</TableHead>
           <TableHead className="w-[90px] text-right">Qty</TableHead>
-          <TableHead className="w-[100px] text-right">In stock</TableHead>
+          <TableHead className="w-[140px] text-right">Stock status</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -70,7 +81,16 @@ function SessionLog({ entries, view }) {
               {e.part.itemDescription}
             </TableCell>
             <TableCell className="text-right font-medium">+{e.quantityReceived}</TableCell>
-            <TableCell className="text-right text-muted-foreground">{e.part.quantityInStock}</TableCell>
+            <TableCell className="text-right">
+              {e.stockApplied ? (
+                <span className="text-muted-foreground">In stock: {e.part.quantityInStock}</span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-amber-600">
+                  <Clock className="h-3 w-3" />
+                  Pending invoice
+                </span>
+              )}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -291,7 +311,11 @@ export default function StockEntryStep({
         }
         loadApprovals();
       }
-      toast.success(`Stock updated for ${data.part.ttUniquePartNumber}`);
+      toast.success(
+        data.stockApplied
+          ? `Stock updated for ${data.part.ttUniquePartNumber}`
+          : `Logged ${data.part.ttUniquePartNumber} — will be added to stock once the tax invoice is uploaded`
+      );
       setSessionEntries((prev) => [...prev, data]);
       resetLine();
     } catch (err) {
@@ -409,6 +433,19 @@ export default function StockEntryStep({
     });
   };
 
+  // Bulk import ("Import from vendor sheet") hands back the same shape the
+  // single-line endpoint returns for booked entries, plus any newly-raised
+  // approval requests — fold both into the session state the same way a
+  // manual line would.
+  const handleImported = (data) => {
+    if (data?.createdEntries?.length) {
+      setSessionEntries((prev) => [...prev, ...data.createdEntries]);
+    }
+    if (data?.createdApprovals?.length) {
+      loadApprovals();
+    }
+  };
+
   const term = searchTerm.trim();
   const termMatches = (r) => {
     if (!term) return true;
@@ -417,6 +454,33 @@ export default function StockEntryStep({
     } ${r.searchTerm || ""}`.toLowerCase();
     return hay.includes(term.toLowerCase());
   };
+
+  if (phase === "excel-import") {
+    return (
+      <div className="space-y-4">
+        <ExcelImportPanel
+          vendor={vendor}
+          purchaseOrder={purchaseOrder}
+          enteredBy={enteredBy}
+          onImported={handleImported}
+          onClose={() => setPhase("lookup")}
+        />
+        {sessionEntries.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">
+              Logged this session ({sessionEntries.length} {sessionEntries.length === 1 ? "line" : "lines"})
+            </Label>
+            <SessionLog entries={sessionEntries} view={logView} />
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button variant={sessionEntries.length > 0 ? "default" : "outline"} onClick={handleFinish}>
+            Finish stock entry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -427,11 +491,24 @@ export default function StockEntryStep({
             Start typing a part number or any keyword from the description — matching parts appear as you type.
             Pick the part, then enter the quantity received. A part number that is not in the master (new or an
             alternate) must be approved in the Parts section before its quantity can be booked.
+            <span className="mt-1 block text-amber-600">
+              Quantity logged here is kept pending — it only appears in the parts master once the tax invoice
+              for this delivery is uploaded in the next step.
+            </span>
           </CardDescription>
         </CardHeader>
 
         {phase === "lookup" && (
           <CardContent>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <p className="text-xs text-muted-foreground">
+                Or import a whole delivery at once from the vendor's own stock sheet.
+              </p>
+              <Button type="button" size="sm" variant="outline" onClick={() => setPhase("excel-import")}>
+                <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+                Import from vendor sheet
+              </Button>
+            </div>
             <div ref={boxRef} className="relative z-40">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -608,6 +685,31 @@ export default function StockEntryStep({
                   </p>
                 </div>
               </div>
+              {newPart.itemDescription &&
+                newPart.itemDescription.trim().toLowerCase() !== matchedPart.itemDescription.trim().toLowerCase() && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div className="space-y-1.5 min-w-0">
+                      <p className="break-words">
+                        <span className="font-mono bg-white/70 rounded px-1.5 py-0.5">
+                          {matchedPart.ttUniquePartNumber}
+                        </span>{" "}
+                        already exists with a different description than what you'd typed. The pre-existing
+                        description above will be used — nothing new is being added.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="rounded border border-amber-200 bg-white/60 p-1.5 min-w-0">
+                          <p className="font-medium">Existing description (will be used)</p>
+                          <p className="break-words">{matchedPart.itemDescription}</p>
+                        </div>
+                        <div className="rounded border border-amber-200 bg-white/60 p-1.5 min-w-0">
+                          <p className="font-medium">You had typed</p>
+                          <p className="break-words">{newPart.itemDescription}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               <div className="space-y-1.5 max-w-xs">
                 <Label>Quantity received</Label>
                 <Input
@@ -749,6 +851,16 @@ export default function StockEntryStep({
                     onChange={(e) => setNewPart({ ...newPart, manufacturerPartNumber: e.target.value })}
                   />
                 </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <PartDuplicateCheck
+                    manufacturerPartNumber={newPart.manufacturerPartNumber}
+                    itemDescription={newPart.itemDescription}
+                    onUseExisting={(part) => {
+                      pickPart(part);
+                      toast.success(`Using existing part ${part.ttUniquePartNumber} instead`);
+                    }}
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <Label>Type of part (optional)</Label>
                   <Input
@@ -779,6 +891,17 @@ export default function StockEntryStep({
                     value={newPart.partTypeBatchNo}
                     onChange={(e) => setNewPart({ ...newPart, partTypeBatchNo: e.target.value })}
                     placeholder="FAN"
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <PartNumberPreview
+                    companyCode={newPart.companyCode}
+                    category={newPart.category}
+                    partTypeBatchNo={newPart.partTypeBatchNo}
+                    onUseExisting={(part) => {
+                      pickPart(part);
+                      toast.success(`Using existing part ${part.ttUniquePartNumber} instead`);
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">

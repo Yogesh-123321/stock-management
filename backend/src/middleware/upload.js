@@ -26,3 +26,8 @@ export const uploadBuyerDoc = makeUploader();
 export const uploadPODoc = makeUploader();
 
 export const uploadTaxInvoiceDoc = makeUploader();
+
+// Vendor "inward stock" workbooks (e.g. the KKTRON sheet) used by the
+// Stock Entry -> "Import from vendor sheet" utility. Kept in memory only
+// long enough to be parsed — never written to disk or Cloudinary.
+export const uploadStockSheet = makeUploader();

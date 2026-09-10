@@ -1,31 +1,39 @@
 import Part from "../models/Part.js";
 
 /*
-  Builds the next TT UNIQUE PART NUMBER for a given companyCode + category +
-  partTypeBatchNo combination, by finding the highest existing running serial
-  number for that combination and incrementing it (zero-padded to 3 digits,
-  matching the Master Database convention, e.g. TTAYFAN001, TTAYFAN002 ...).
+  Builds the TT UNIQUE PART NUMBER for a company code + category + part
+  type/batch no. combination:
+
+    TT UNIQUE PART NUMBER = COMPANY CODE + CATEGORY + PART TYPE/BATCH NO.
+    e.g. TT + AY + FAN  =>  TTAYFAN
+
+  There is no running serial number appended anymore. Each
+  company-code/category/batch-no combination now IS the part number, so it
+  can only ever belong to one part — if that exact combination is already
+  in the master, this is a real conflict (not a case for auto-incrementing
+  a suffix onto it), so it throws instead of silently generating the "next"
+  number.
 */
-export const generateNextPartNumber = async (companyCode, category, partTypeBatchNo) => {
-  const prefix = `${companyCode}${category}${partTypeBatchNo}`.toUpperCase();
+export class DuplicatePartNumberError extends Error {
+  constructor(ttUniquePartNumber, existingPart) {
+    super(
+      `Part number ${ttUniquePartNumber} already exists${
+        existingPart?.itemDescription ? ` (${existingPart.itemDescription})` : ""
+      }. Choose a different company code, category or part type/batch no. — or use the existing part instead of creating a new one.`
+    );
+    this.name = "DuplicatePartNumberError";
+    this.status = 409;
+    this.ttUniquePartNumber = ttUniquePartNumber;
+  }
+}
 
-  const existing = await Part.find({
-    companyCode: companyCode.toUpperCase(),
-    category: category.toUpperCase(),
-    partTypeBatchNo: partTypeBatchNo.toUpperCase(),
-  }).sort({ runningSerialNo: -1 });
+export const buildPartNumber = async (companyCode, category, partTypeBatchNo) => {
+  const ttUniquePartNumber = `${companyCode}${category}${partTypeBatchNo}`.toUpperCase();
 
-  let nextSerial = 1;
-  if (existing.length > 0) {
-    const serials = existing
-      .map((p) => parseInt(p.runningSerialNo, 10))
-      .filter((n) => !Number.isNaN(n));
-    if (serials.length > 0) nextSerial = Math.max(...serials) + 1;
+  const existing = await Part.findOne({ ttUniquePartNumber }).select("itemDescription");
+  if (existing) {
+    throw new DuplicatePartNumberError(ttUniquePartNumber, existing);
   }
 
-  const paddedSerial = String(nextSerial).padStart(3, "0");
-  return {
-    ttUniquePartNumber: `${prefix}${paddedSerial}`,
-    runningSerialNo: paddedSerial,
-  };
+  return { ttUniquePartNumber };
 };

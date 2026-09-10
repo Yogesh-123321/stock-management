@@ -86,6 +86,11 @@ export default function TaxInvoiceStep({
         headers: { "Content-Type": "multipart/form-data" },
       });
       toast.success("Tax invoice uploaded");
+      if (data?.stockApplied?.count > 0) {
+        toast.success(
+          `${data.stockApplied.totalQuantity} unit(s) across ${data.stockApplied.count} line(s) added to stock`
+        );
+      }
       const rec = data?.reconciliation;
       if (rec?.documentsClosed) {
         toast.success("Quantities matched — PO/PI closed automatically");

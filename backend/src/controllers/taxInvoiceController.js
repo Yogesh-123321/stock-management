@@ -5,6 +5,7 @@ import TaxInvoice from "../models/TaxInvoice.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import Vendor from "../models/Vendor.js";
 import StockEntry from "../models/StockEntry.js";
+import Part from "../models/Part.js";
 
 // GET /api/tax-invoices?purchaseOrder=&vendor=
 export const getTaxInvoices = asyncHandler(async (req, res) => {
@@ -176,6 +177,53 @@ export const reconcileDelivery = async (primaryDoc, invoiceQuantity) => {
   };
 };
 
+/*
+  Credits stock for a delivery once its tax invoice has arrived.
+
+  Material entered in Step 4 of the receiving wizard is logged as a
+  StockEntry right away, but is deliberately kept OUT of the part's
+  quantityInStock (stockApplied: false) until this point — the parts master
+  should only ever reflect quantity that has actually been billed.
+
+  Finds every not-yet-applied StockEntry for this delivery — matched the
+  same way getTaxInvoiceStockEntries matches them (by PO/PI id, and its
+  cross-linked sibling, or by vendor when neither document exists) — credits
+  each entry's quantity to its part, and marks the entry applied.
+*/
+const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId) => {
+  const docIds = [];
+  if (poDoc) {
+    docIds.push(poDoc._id);
+    const sibling =
+      (poDoc.linkedDocument && (await PurchaseOrder.findById(poDoc.linkedDocument))) ||
+      (await PurchaseOrder.findOne({ linkedDocument: poDoc._id }));
+    if (sibling) docIds.push(sibling._id);
+  }
+
+  const filter =
+    docIds.length > 0
+      ? { purchaseOrder: { $in: docIds }, stockApplied: false }
+      : { vendor: vendorId, purchaseOrder: null, stockApplied: false };
+
+  const pending = await StockEntry.find(filter).populate("part");
+
+  const appliedEntries = [];
+  for (const entry of pending) {
+    if (entry.part) {
+      await Part.findByIdAndUpdate(entry.part._id, {
+        $inc: { quantityInStock: Number(entry.quantityReceived) || 0 },
+      });
+    }
+    entry.stockApplied = true;
+    entry.appliedAt = new Date();
+    entry.appliedVia = invoiceId;
+    await entry.save();
+    appliedEntries.push(entry);
+  }
+
+  return appliedEntries;
+};
+
 // POST /api/tax-invoices (upload the tax invoice for a delivery, after stock entry)
 export const uploadTaxInvoice = asyncHandler(async (req, res) => {
   const { vendor, purchaseOrder, invoiceNumber, invoiceDate, notes, invoiceQuantity } = req.body;
@@ -217,9 +265,17 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
     originalFileName: req.file.originalname,
   });
 
+  // The invoice has now arrived — credit every stock entry for this
+  // delivery that was still pending, into the parts master.
+  const appliedEntries = await applyPendingStockForInvoice(poDoc, vendor, invoice._id);
+  const stockApplied = {
+    count: appliedEntries.length,
+    totalQuantity: appliedEntries.reduce((sum, e) => sum + (Number(e.quantityReceived) || 0), 0),
+  };
+
   // Close the PO/PI automatically when everything lines up, else leave open.
   const reconciliation = await reconcileDelivery(poDoc, invoiceQuantity);
 
   const populated = await invoice.populate("vendor purchaseOrder");
-  res.status(201).json({ ...populated.toObject(), reconciliation });
+  res.status(201).json({ ...populated.toObject(), reconciliation, stockApplied });
 });

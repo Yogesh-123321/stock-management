@@ -1,9 +1,9 @@
 import asyncHandler from "express-async-handler";
-import mongoose from "mongoose";
 import StockEntry from "../models/StockEntry.js";
-import Part from "../models/Part.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
-import { generateNextPartNumber } from "../utils/generatePartNumber.js";
+import Part from "../models/Part.js";
+import PartApprovalRequest from "../models/PartApprovalRequest.js";
+import { bookExistingPart, bookNewPart, BookingError } from "../utils/stockBooking.js";
 
 // GET /api/stock-entries?purchaseOrder=&vendor=&part=
 export const getStockEntries = asyncHandler(async (req, res) => {
@@ -43,6 +43,10 @@ export const getStockEntries = asyncHandler(async (req, res) => {
        (with an auto-generated TT unique part number) and stocked.
     3. New part is flagged as an alternate of an existing part -> new part
        record is created, linked via alternateOf/alternateParts, and stocked.
+
+  The actual booking logic lives in utils/stockBooking.js so the bulk
+  Excel-import endpoints (see stockImportController.js) book stock exactly
+  the same way a manually-entered line does.
 */
 export const createStockEntry = asyncHandler(async (req, res) => {
   const {
@@ -55,6 +59,7 @@ export const createStockEntry = asyncHandler(async (req, res) => {
     existingPartId,
     alternateOfPartId,
     newPart,
+    approvedRequestId,
   } = req.body;
 
   if (!vendor || !quantityReceived || !matchType) {
@@ -72,96 +77,79 @@ export const createStockEntry = asyncHandler(async (req, res) => {
     }
   }
 
-  let partDoc;
-  let alternateOfPart = null;
-
-  if (matchType === "existing_part_number") {
-    if (!existingPartId) {
-      res.status(400);
-      throw new Error("existingPartId is required for matchType existing_part_number");
-    }
-    partDoc = await Part.findById(existingPartId);
-    if (!partDoc) {
-      res.status(404);
-      throw new Error("Matched part not found");
-    }
-    partDoc.quantityInStock += Number(quantityReceived);
-    // Same part, possibly a new vendor this time — append (deduped) rather
-    // than overwrite, so the parts master shows "VendorA / VendorB".
-    partDoc.vendors.addToSet(vendor);
-    await partDoc.save();
-  } else if (matchType === "new_part_number" || matchType === "alternate_part") {
-    if (!newPart || !newPart.itemDescription || !newPart.companyCode || !newPart.category || !newPart.partTypeBatchNo) {
-      res.status(400);
-      throw new Error("newPart details (itemDescription, companyCode, category, partTypeBatchNo) are required");
-    }
-
-    if (matchType === "alternate_part") {
-      if (!alternateOfPartId) {
+  let populated;
+  try {
+    if (matchType === "existing_part_number") {
+      if (!existingPartId) {
         res.status(400);
-        throw new Error("alternateOfPartId is required for matchType alternate_part");
+        throw new Error("existingPartId is required for matchType existing_part_number");
       }
-      alternateOfPart = await Part.findById(alternateOfPartId);
-      if (!alternateOfPart) {
-        res.status(404);
-        throw new Error("Original part to alternate against was not found");
-      }
+      populated = await bookExistingPart({
+        vendor,
+        purchaseOrder: poDoc ? poDoc._id : null,
+        quantityReceived,
+        enteredBy,
+        remarks,
+        existingPartId,
+      });
+    } else if (matchType === "new_part_number" || matchType === "alternate_part") {
+      // The part itself was already created in the master when the request
+      // was approved — look it up so bookNewPart reuses it instead of
+      // minting a second TT number for the same approval.
+      const approvedRequest = approvedRequestId
+        ? await PartApprovalRequest.findById(approvedRequestId)
+        : null;
+
+      populated = await bookNewPart({
+        vendor,
+        purchaseOrder: poDoc ? poDoc._id : null,
+        quantityReceived,
+        enteredBy,
+        remarks,
+        newPart,
+        isAlternate: matchType === "alternate_part",
+        alternateOfPartId,
+        approvedRequest,
+      });
+    } else {
+      res.status(400);
+      throw new Error("Invalid matchType");
     }
-
-    const { ttUniquePartNumber, runningSerialNo } = await generateNextPartNumber(
-      newPart.companyCode,
-      newPart.category,
-      newPart.partTypeBatchNo
-    );
-
-    partDoc = await Part.create({
-      ttUniquePartNumber,
-      runningSerialNo,
-      typeOfPart: newPart.typeOfPart,
-      manufacturerPartNumber: newPart.manufacturerPartNumber,
-      itemDescription: newPart.itemDescription,
-      companyCode: newPart.companyCode.toUpperCase(),
-      category: newPart.category.toUpperCase(),
-      partTypeBatchNo: newPart.partTypeBatchNo.toUpperCase(),
-      quantityInStock: Number(quantityReceived),
-      vendors: [vendor],
-      isAlternatePart: matchType === "alternate_part",
-      alternateOf: matchType === "alternate_part" ? alternateOfPart._id : null,
-    });
-
-    if (matchType === "alternate_part") {
-      alternateOfPart.alternateParts.addToSet(partDoc._id);
-      await alternateOfPart.save();
+  } catch (err) {
+    if (err instanceof BookingError || err.status) {
+      res.status(err.status || 400);
+      throw new Error(err.message);
     }
-  } else {
-    res.status(400);
-    throw new Error("Invalid matchType");
+    throw err;
   }
 
-  const entry = await StockEntry.create({
-    vendor,
-    purchaseOrder: poDoc ? poDoc._id : null,
-    part: partDoc._id,
-    quantityReceived,
-    matchType,
-    alternateOfPart: alternateOfPart ? alternateOfPart._id : null,
-    enteredBy,
-    remarks,
-  });
-
-  if (poDoc) {
-    poDoc.status = "stock_entry_in_progress";
-    await poDoc.save();
-    if (poDoc.linkedDocument) {
-      await PurchaseOrder.findByIdAndUpdate(poDoc.linkedDocument, { status: "stock_entry_in_progress" });
-    }
-  }
-
-  const populated = await entry.populate([
-    { path: "part", populate: { path: "vendors", select: "companyName" } },
-    { path: "vendor" },
-    { path: "purchaseOrder" },
-    { path: "alternateOfPart" },
-  ]);
   res.status(201).json(populated);
+});
+
+/*
+  DELETE /api/stock-entries/:id
+  Removes one line from a part's history (used from the "Part history"
+  ledger in the Parts master). If the line had already been credited to
+  stock (its tax invoice had arrived), that quantity is deducted back off
+  the part first so the parts master stays correct; a still-pending line
+  (invoice not yet uploaded) is simply removed since it was never added to
+  stock in the first place.
+*/
+export const deleteStockEntry = asyncHandler(async (req, res) => {
+  const entry = await StockEntry.findById(req.params.id);
+  if (!entry) {
+    res.status(404);
+    throw new Error("Stock entry not found");
+  }
+
+  if (entry.stockApplied && entry.part) {
+    const partDoc = await Part.findById(entry.part);
+    if (partDoc) {
+      partDoc.quantityInStock = Math.max(0, partDoc.quantityInStock - Number(entry.quantityReceived || 0));
+      await partDoc.save();
+    }
+  }
+
+  await entry.deleteOne();
+  res.json({ message: "History entry deleted", _id: entry._id, partId: entry.part });
 });
