@@ -35,6 +35,16 @@ const stockEntrySchema = new mongoose.Schema(
     appliedAt: { type: Date, default: null },
     // The tax invoice whose upload caused this line to be credited to stock.
     appliedVia: { type: mongoose.Schema.Types.ObjectId, ref: "TaxInvoice", default: null },
+
+    // Lot code in WW/YY format (ISO week / 2-digit year), stamped on once
+    // the tax invoice arrives and this entry is applied to stock — see
+    // utils/batchCode.js. Built from the invoice's own invoiceDate, never
+    // from when this entry was keyed in or applied, so it always reflects
+    // when the delivery was actually billed. Stays empty while the entry
+    // is still pending (stockApplied: false). Not to be confused with a
+    // part's own partTypeBatchNo, which identifies a part *type*, not a
+    // delivery lot. Reserved for later use when issuing kit stock.
+    batchCode: { type: String, trim: true, default: "" },
   },
   { timestamps: true }
 );

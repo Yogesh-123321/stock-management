@@ -16,6 +16,8 @@ import {
   UserCog,
   LogOut,
   KeyRound,
+  PackageOpen,
+  Layers,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
@@ -28,6 +30,8 @@ const navItems = [
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
+  { to: "/kits", label: "Kits", icon: Layers, permission: "kit.manage" },
+  { to: "/issue-kit", label: "Issue kit", icon: PackageOpen, permission: "kit.issue" },
   { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: true },

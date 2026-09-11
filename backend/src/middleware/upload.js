@@ -31,3 +31,8 @@ export const uploadTaxInvoiceDoc = makeUploader();
 // Stock Entry -> "Import from vendor sheet" utility. Kept in memory only
 // long enough to be parsed — never written to disk or Cloudinary.
 export const uploadStockSheet = makeUploader();
+
+// Kit / BOM workbooks (e.g. the iMoniCAM BOM template) used by the
+// Kits -> "Import from Excel" utility. Kept in memory only long enough to
+// be parsed — never written to disk or Cloudinary.
+export const uploadKitSheet = makeUploader();

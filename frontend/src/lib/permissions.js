@@ -28,6 +28,8 @@ export const PERMISSIONS = [
   },
   { key: "receive.manage", group: "Operations", label: "Receive material / book stock" },
   { key: "documents.view", group: "Operations", label: "View PO / PI / invoice documents" },
+  { key: "kit.manage", group: "Kits", label: "Create / edit kit templates", adminOnly: true },
+  { key: "kit.issue", group: "Kits", label: "Issue kits to a vendor" },
   {
     key: "users.manage",
     group: "Administration",

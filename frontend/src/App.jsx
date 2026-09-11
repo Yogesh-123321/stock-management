@@ -5,6 +5,8 @@ import ReceiveMaterial from "@/pages/ReceiveMaterial";
 import Vendors from "@/pages/Vendors";
 import Buyers from "@/pages/Buyers";
 import Parts from "@/pages/Parts";
+import Kits from "@/pages/Kits";
+import IssueKit from "@/pages/IssueKit";
 import Documents from "@/pages/Documents";
 import PiGenerator from "@/pages/PiGenerator";
 import PoGenerator from "@/pages/PoGenerator";
@@ -35,6 +37,8 @@ export default function App() {
           <Route path="/vendors" element={guard("vendor.create", <Vendors />)} />
           <Route path="/buyers" element={guard("buyer.create", <Buyers />)} />
           <Route path="/parts" element={<Parts />} />
+          <Route path="/kits" element={guard("kit.manage", <Kits />)} />
+          <Route path="/issue-kit" element={guard("kit.issue", <IssueKit />)} />
           <Route path="/documents" element={guard("documents.view", <Documents />)} />
           <Route path="/purchase-orders" element={<Navigate to="/documents" replace />} />
           <Route path="/pi-generator" element={guard("pi.create", <PiGenerator />)} />

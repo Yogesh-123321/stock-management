@@ -38,6 +38,13 @@ const partNumberOf = (part) =>
 const partDescriptionOf = (part) =>
   part?.itemDescription || part?.description || part?.name || "—";
 
+// Whether a file can be shown in an <iframe> preview — practically just
+// PDFs (Cloudinary can also hold the odd image/doc, which fall back to a
+// plain "open in a new tab" link instead of an inline preview).
+const isPdfFile = (invoice) =>
+  /\.pdf(\?|$)/i.test(invoice?.documentUrl || "") ||
+  /\.pdf$/i.test(invoice?.originalFileName || "");
+
 const fmtDate = (d) => {
   if (!d) return "—";
   try {
@@ -505,7 +512,11 @@ function GeneratedPiTable() {
 /* ------------------------------------------------------------------ */
 /* Tax invoices — uploaded against an OPEN PO / PI picked from a list  */
 /* ------------------------------------------------------------------ */
-/* Material booked into stock against one tax invoice */
+/* Side-by-side comparison for one tax invoice: the invoice file itself
+   (as uploaded, previewed inline for PDFs) on the left, and every stock
+   entry actually booked against it on the right — so what the paperwork
+   says and what was physically entered can be checked against each other
+   without switching screens. */
 function InvoiceStockDialog({ invoice, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -526,14 +537,16 @@ function InvoiceStockDialog({ invoice, onClose }) {
   }, [invoice?._id]);
 
   const entries = data?.entries || [];
+  const fileHref = fileUrl(invoice?.documentUrl);
+  const canPreview = isPdfFile(invoice);
 
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
+      <DialogContent className="flex h-[92vh] w-[95vw] max-w-6xl flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
-            <Boxes className="h-4 w-4" />
-            Material against {invoice?.invoiceNumber || "this invoice"}
+            <Receipt className="h-4 w-4" />
+            {invoice?.invoiceNumber || "Tax invoice"} — invoice vs. material entered
           </DialogTitle>
           <DialogDescription>
             {invoice?.vendor?.companyName || invoice?.vendor?.name || "Vendor"} ·{" "}
@@ -544,68 +557,113 @@ function InvoiceStockDialog({ invoice, onClose }) {
           </DialogDescription>
         </DialogHeader>
 
-        {loading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Loading stock entries…</p>
-        ) : entries.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            No stock was booked against this invoice yet.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <div className="max-h-[55vh] overflow-y-auto rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-muted/70 text-left">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Part no.</th>
-                    <th className="px-3 py-2 font-medium">Description</th>
-                    <th className="px-3 py-2 font-medium text-right">Qty</th>
-                    <th className="px-3 py-2 font-medium">Type</th>
-                    <th className="px-3 py-2 font-medium">Booked on</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e) => (
-                    <tr key={e._id} className="border-t odd:bg-muted/20">
-                      <td className="px-3 py-1.5 font-medium">
-                        {partNumberOf(e.part)}
-                        {e.alternateOfPart && (
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            (alt of {partNumberOf(e.alternateOfPart)})
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5">{partDescriptionOf(e.part)}</td>
-                      <td className="px-3 py-1.5 text-right">{e.quantityReceived}</td>
-                      <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                        {String(e.matchType || "").replace(/_/g, " ")}
-                      </td>
-                      <td className="px-3 py-1.5">{fmtDate(e.createdAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span className="text-muted-foreground">
-                {entries.length} stock {entries.length === 1 ? "entry" : "entries"}
-                {data?.matchedBy === "vendor_without_document" && " · matched by vendor (no PO / PI on record)"}
+        <div className="grid flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-2">
+          {/* Left: the invoice PDF itself, as uploaded */}
+          <div className="flex min-h-[45vh] flex-col overflow-hidden border-b border-border lg:min-h-0 lg:border-b-0 lg:border-r">
+            <div className="flex shrink-0 items-center justify-between border-b border-border bg-muted/50 px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <FileText className="h-3.5 w-3.5" />
+                Invoice file{invoice?.originalFileName ? ` · ${invoice.originalFileName}` : ""}
               </span>
-              <span className="font-medium">Total received: {data?.totalQuantity || 0}</span>
+              <Button variant="outline" size="sm" asChild>
+                <a href={fileHref} target="_blank" rel="noreferrer">
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Open
+                </a>
+              </Button>
+            </div>
+            <div className="flex-1 overflow-hidden bg-muted/20">
+              {canPreview ? (
+                <iframe title="Tax invoice PDF" src={fileHref} className="h-full w-full" />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+                  <FileText className="h-8 w-8" />
+                  <p>This file type can't be previewed inline.</p>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={fileHref} target="_blank" rel="noreferrer">
+                      Open in a new tab
+                    </a>
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right: what was actually entered into stock against it */}
+          <div className="flex min-h-[45vh] flex-col overflow-hidden lg:min-h-0">
+            <div className="flex shrink-0 items-center justify-between border-b border-border bg-muted/50 px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <Boxes className="h-3.5 w-3.5" />
+                Material entered{!loading ? ` (${entries.length})` : ""}
+              </span>
+              {!loading && (
+                <span className="text-xs font-medium">Total: {data?.totalQuantity || 0}</span>
+              )}
             </div>
 
-            {(data?.linkedDocuments || []).length > 0 && (
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Loading stock entries…</p>
+              ) : entries.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No stock was booked against this invoice yet.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted/70 text-left">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Part no.</th>
+                      <th className="px-3 py-2 font-medium">Description</th>
+                      <th className="px-3 py-2 font-medium text-right">Qty</th>
+                      <th className="px-3 py-2 font-medium">Type</th>
+                      <th className="px-3 py-2 font-medium">Batch</th>
+                      <th className="px-3 py-2 font-medium">Booked on</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((e) => (
+                      <tr key={e._id} className="border-t odd:bg-muted/20">
+                        <td className="px-3 py-1.5 font-medium">
+                          {partNumberOf(e.part)}
+                          {e.alternateOfPart && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              (alt of {partNumberOf(e.alternateOfPart)})
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5">{partDescriptionOf(e.part)}</td>
+                        <td className="px-3 py-1.5 text-right">{e.quantityReceived}</td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                          {String(e.matchType || "").replace(/_/g, " ")}
+                        </td>
+                        <td className="px-3 py-1.5 text-xs font-mono-tech text-muted-foreground">
+                          {e.batchCode || "—"}
+                        </td>
+                        <td className="px-3 py-1.5">{fmtDate(e.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {!loading && (data?.linkedDocuments || []).length > 0 && (
+              <div className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                 {data.linkedDocuments.map((d) => (
                   <span key={d._id} className="rounded-full border px-2 py-0.5">
                     {d.documentType} {d.documentNumber}
-                    {d.totalQuantity != null ? ` · declared ${d.totalQuantity}` : ""} · {d.lifecycleStatus}
+                    {d.totalQuantity != null ? ` · declared ${d.totalQuantity}` : ""} ·{" "}
+                    {d.lifecycleStatus}
                   </span>
                 ))}
               </div>
             )}
+            {!loading && data?.matchedBy === "vendor_without_document" && (
+              <p className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+                Matched by vendor — no PO / PI on record for this invoice.
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );

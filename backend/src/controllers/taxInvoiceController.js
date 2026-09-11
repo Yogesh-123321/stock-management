@@ -6,6 +6,7 @@ import PurchaseOrder from "../models/PurchaseOrder.js";
 import Vendor from "../models/Vendor.js";
 import StockEntry from "../models/StockEntry.js";
 import Part from "../models/Part.js";
+import { generateBatchCode } from "../utils/batchCode.js";
 
 // GET /api/tax-invoices?purchaseOrder=&vendor=
 export const getTaxInvoices = asyncHandler(async (req, res) => {
@@ -188,9 +189,14 @@ export const reconcileDelivery = async (primaryDoc, invoiceQuantity) => {
   Finds every not-yet-applied StockEntry for this delivery — matched the
   same way getTaxInvoiceStockEntries matches them (by PO/PI id, and its
   cross-linked sibling, or by vendor when neither document exists) — credits
-  each entry's quantity to its part, and marks the entry applied.
+  each entry's quantity to its part, marks the entry applied, and stamps it
+  with a batch code (WW/YY) built from the invoice's own invoiceDate — see
+  utils/batchCode.js. If the invoice didn't carry a date, invoiceDate is
+  null and no batch code is generated (left blank rather than guessed from
+  "today", since that would be exactly the stock-entry date this is meant
+  to be independent of).
 */
-const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId) => {
+const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId, invoiceDate) => {
   const docIds = [];
   if (poDoc) {
     docIds.push(poDoc._id);
@@ -206,6 +212,7 @@ const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId) => {
       : { vendor: vendorId, purchaseOrder: null, stockApplied: false };
 
   const pending = await StockEntry.find(filter).populate("part");
+  const batchCode = generateBatchCode(invoiceDate);
 
   const appliedEntries = [];
   for (const entry of pending) {
@@ -217,6 +224,7 @@ const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId) => {
     entry.stockApplied = true;
     entry.appliedAt = new Date();
     entry.appliedVia = invoiceId;
+    if (batchCode) entry.batchCode = batchCode;
     await entry.save();
     appliedEntries.push(entry);
   }
@@ -266,8 +274,14 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
   });
 
   // The invoice has now arrived — credit every stock entry for this
-  // delivery that was still pending, into the parts master.
-  const appliedEntries = await applyPendingStockForInvoice(poDoc, vendor, invoice._id);
+  // delivery that was still pending, into the parts master, and stamp
+  // each with a batch code derived from the invoice's own date.
+  const appliedEntries = await applyPendingStockForInvoice(
+    poDoc,
+    vendor,
+    invoice._id,
+    invoice.invoiceDate
+  );
   const stockApplied = {
     count: appliedEntries.length,
     totalQuantity: appliedEntries.reduce((sum, e) => sum + (Number(e.quantityReceived) || 0), 0),

@@ -94,6 +94,13 @@ const COLUMNS = [
     sortValue: (p) => Number(p.quantityInStock ?? 0),
   },
   {
+    key: "totalQtyInKits",
+    label: "Qty in kits",
+    width: "w-[100px]",
+    align: "right",
+    sortValue: (p) => Number(p.totalQtyInKits ?? 0),
+  },
+  {
     key: "isAlternatePart",
     label: "Alternate?",
     width: "w-[95px]",
@@ -1188,6 +1195,20 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
 
                 <div>
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Qty in kits
+                  </p>
+                  <p className="font-mono-tech text-sm">
+                    {part.totalQtyInKits ?? 0}
+                    {part.kitTemplateCount ? (
+                      <span className="ml-1.5 text-xs font-sans text-muted-foreground">
+                        issued via {part.kitTemplateCount} kit template(s)
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Vendor(s)
                   </p>
                   <p className="text-sm">
@@ -1299,28 +1320,43 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
 
   const entries = data?.entries || [];
 
+  // Receipt lines ("in") live in the stock-entries collection; kit issue
+  // lines ("out") live on a KitIssue document instead, so each entryType
+  // is deleted through its own endpoint. Both endpoints restore/undo the
+  // stock they had applied, mirroring what the ledger already shows.
   const deleteEntry = async (entry) => {
+    const isKitIssue = entry.entryType === "kit_issue";
     const ok = window.confirm(
-      entry.stockApplied
+      isKitIssue
+        ? `Undo this kit issue line? ${entry.quantity} unit(s) will be added back to the current stock.`
+        : entry.stockApplied
         ? `Delete this history line? ${entry.quantity} unit(s) will be removed from the current stock as well.`
         : "Delete this history line? It was still pending (invoice not uploaded) so stock is unaffected."
     );
     if (!ok) return;
     setDeletingId(entry._id);
     try {
-      await api.delete(`/stock-entries/${entry._id}`);
-      toast.success("History entry deleted");
+      if (isKitIssue) {
+        await api.delete(`/kits/issues/${entry.issueId}/lines/${entry.lineId}`);
+      } else {
+        await api.delete(`/stock-entries/${entry._id}`);
+      }
+      toast.success(isKitIssue ? "Kit issue line reverted — stock restored" : "History entry deleted");
       setData((d) => {
         if (!d) return d;
         const remainingEntries = d.entries.filter((e) => e._id !== entry._id);
-        const closingBalance = entry.stockApplied
+        const closingBalance = isKitIssue
+          ? (d.closingBalance ?? 0) + entry.quantity
+          : entry.stockApplied
           ? Math.max(0, (d.closingBalance ?? 0) - entry.quantity)
           : d.closingBalance ?? 0;
         return { ...d, entries: remainingEntries, closingBalance };
       });
       onPartChanged?.({
         _id: part._id,
-        quantityInStock: entry.stockApplied
+        quantityInStock: isKitIssue
+          ? (data.closingBalance ?? 0) + entry.quantity
+          : entry.stockApplied
           ? Math.max(0, (data.closingBalance ?? 0) - entry.quantity)
           : data.closingBalance ?? 0,
       });
@@ -1366,7 +1402,7 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
                 </div>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <ArrowUpFromLine className="h-3.5 w-3.5" />
-                  Issued (out) — coming soon
+                  Issued (out)
                 </div>
               </div>
 
@@ -1416,6 +1452,11 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
                               {e.type === "received" && !e.stockApplied && (
                                 <Badge variant="warning" className="ml-1">
                                   Pending invoice
+                                </Badge>
+                              )}
+                              {e.type === "received" && e.batchCode && (
+                                <Badge variant="secondary" className="ml-1 font-mono-tech">
+                                  Batch {e.batchCode}
                                 </Badge>
                               )}
                             </div>
@@ -2040,6 +2081,16 @@ export default function Parts() {
                     </TableCell>
                     <TableCell className="align-top py-1 text-right font-mono-tech">
                       {p.quantityInStock}
+                    </TableCell>
+                    <TableCell
+                      className="align-top py-1 text-right font-mono-tech text-muted-foreground"
+                      title={
+                        p.kitTemplateCount
+                          ? `Issued via ${p.kitTemplateCount} kit template(s)`
+                          : "Not yet issued in any kit"
+                      }
+                    >
+                      {p.totalQtyInKits ?? 0}
                     </TableCell>
                     <TableCell className="align-top py-1">
                       {p.isAlternatePart ? (

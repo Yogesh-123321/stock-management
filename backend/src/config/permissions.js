@@ -36,6 +36,9 @@ export const PERMISSIONS = [
   // Operations
   { key: "receive.manage", group: "Operations", label: "Receive material / book stock" },
   { key: "documents.view", group: "Operations", label: "View PO / PI / invoice documents" },
+  // Kits
+  { key: "kit.manage", group: "Kits", label: "Create / edit kit templates", adminOnly: true },
+  { key: "kit.issue", group: "Kits", label: "Issue kits to a vendor" },
   // Administration
   { key: "users.manage", group: "Administration", label: "Manage users & permissions", adminOnly: true },
   { key: "logs.view", group: "Administration", label: "View the activity log", adminOnly: true },
@@ -65,6 +68,7 @@ export const DEFAULT_PERMISSIONS = {
     "buyer.create",
     "receive.manage",
     "documents.view",
+    "kit.issue",
   ],
 };
 

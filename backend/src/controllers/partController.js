@@ -1,7 +1,63 @@
 import asyncHandler from "express-async-handler";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
+import KitIssue from "../models/KitIssue.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
+
+/*
+  Attaches, to each part, how much of it has actually gone out through
+  issued kits — NOT how much a kit template merely calls for. Creating or
+  editing a KitTemplate must never move this number: a template is just a
+  recipe, so it stays at 0 for every part until a kit built from it is
+  actually issued to someone (POST /api/kits/:id/issue), at which point
+  the issue's own lines (qtyIssued) are what count here.
+    - totalQtyInKits: sum of qtyIssued across every KitIssue line whose
+      ttUniquePartNumber matches this part
+    - kitTemplateCount: how many distinct kit templates this part has
+      actually been issued through (via KitIssue.kitTemplate)
+  Matched purely by ttUniquePartNumber (same convention KitTemplate itself
+  uses), computed fresh on every call since kit issues and the parts
+  master change independently of each other. Accepts either a single part
+  document or an array, mirroring what it's given back.
+*/
+async function attachKitDemand(parts) {
+  const list = Array.isArray(parts) ? parts : [parts];
+  const codes = [...new Set(list.map((p) => p.ttUniquePartNumber).filter(Boolean))];
+
+  let byCode = new Map();
+  if (codes.length) {
+    const agg = await KitIssue.aggregate([
+      { $unwind: "$lines" },
+      { $match: { "lines.ttUniquePartNumber": { $in: codes } } },
+      {
+        $group: {
+          _id: "$lines.ttUniquePartNumber",
+          totalQtyInKits: { $sum: "$lines.qtyIssued" },
+          kitTemplates: { $addToSet: "$kitTemplate" },
+        },
+      },
+      {
+        $project: {
+          totalQtyInKits: 1,
+          kitTemplateCount: {
+            $size: { $filter: { input: "$kitTemplates", as: "kt", cond: { $ne: ["$$kt", null] } } },
+          },
+        },
+      },
+    ]);
+    byCode = new Map(agg.map((a) => [a._id, a]));
+  }
+
+  const withDemand = list.map((p) => {
+    const obj = p.toObject ? p.toObject({ virtuals: true }) : { ...p };
+    const match = byCode.get(p.ttUniquePartNumber);
+    obj.totalQtyInKits = match ? match.totalQtyInKits : 0;
+    obj.kitTemplateCount = match ? match.kitTemplateCount : 0;
+    return obj;
+  });
+
+  return Array.isArray(parts) ? withDemand : withDemand[0];
+}
 
 // GET /api/parts?search=&limit=
 export const getParts = asyncHandler(async (req, res) => {
@@ -24,7 +80,7 @@ export const getParts = asyncHandler(async (req, res) => {
     .populate("vendors", "companyName")
     .sort({ ttUniquePartNumber: 1 })
     .limit(limit);
-  res.json(parts);
+  res.json(await attachKitDemand(parts));
 });
 
 // GET /api/parts/count?search=  -> exact total, independent of any list limit
@@ -130,7 +186,7 @@ export const getPartById = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Part not found");
   }
-  res.json(part);
+  res.json(await attachKitDemand(part));
 });
 
 /*
@@ -139,13 +195,13 @@ export const getPartById = asyncHandler(async (req, res) => {
   oldest first for the running-balance math, returned newest first so the
   most recent activity is on top.
 
-  Today the only movement type is a "receipt" (material coming in from a
-  vendor, backed by StockEntry). The response shape is deliberately generic
-  ("direction" + "party" + "reference" instead of receipt-only fields) so
-  that outgoing movements (parts issued/sent to someone) can be merged into
-  the same `entries` array later without changing this endpoint's contract
-  or the frontend that renders it — at that point an "issued" movement
-  would just push another normalized entry with direction: "out".
+  There are now two movement types: a "receipt" (material coming in from a
+  vendor, backed by StockEntry) and an "issued" (a kit sent out to a
+  vendor, backed by one line of a KitIssue). The response shape is
+  deliberately generic ("direction" + "party" + "reference" instead of
+  receipt-only fields) so both merge into one normalized `entries` array —
+  everything downstream (running balance, sort order) works off
+  `direction` alone, not the underlying record type.
 */
 export const getPartHistory = asyncHandler(async (req, res) => {
   const part = await Part.findById(req.params.id);
@@ -159,14 +215,19 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     .populate("purchaseOrder", "documentType documentNumber")
     .sort({ createdAt: 1 }); // oldest first, so the balance can be walked forward
 
-  // Normalize into a single ledger shape. When outgoing dispatches exist,
-  // they'd be loaded here too (e.g. from a future StockIssue model) and
-  // merged into `movements` before the sort-by-date-then-running-balance
-  // step below — everything downstream already works off `direction`.
-  const movements = receipts.map((entry) => ({
+  // Every kit issue with at least one line against this part. A single
+  // issue can carry lines for many different parts, so each matching line
+  // becomes its own ledger entry (entryType/issueId/lineId identify it for
+  // the "undo" action, which reverts one line, not the whole issue).
+  const kitIssuesForPart = await KitIssue.find({ "lines.part": part._id })
+    .populate("vendor", "companyName")
+    .sort({ createdAt: 1 });
+
+  // Normalize into a single ledger shape.
+  const receiptMovements = receipts.map((entry) => ({
     _id: entry._id,
     date: entry.createdAt,
-    direction: "in", // "in" | "out" (out reserved for future issued-to entries)
+    direction: "in", // "in" | "out"
     type: "received",
     quantity: entry.quantityReceived,
     party: entry.vendor
@@ -185,8 +246,40 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     // Whether this line's quantity has actually been credited to
     // quantityInStock yet — false while its tax invoice hasn't arrived.
     stockApplied: !!entry.stockApplied,
+    // WW/YY lot code stamped on once the tax invoice arrives — see
+    // utils/batchCode.js. Empty while the entry is still pending.
+    batchCode: entry.batchCode || null,
+    entryType: "stock_entry",
   }));
 
+  const kitMovements = [];
+  for (const issue of kitIssuesForPart) {
+    for (const line of issue.lines) {
+      if (String(line.part) !== String(part._id)) continue;
+      kitMovements.push({
+        _id: line._id,
+        date: issue.createdAt,
+        direction: "out",
+        type: "issued",
+        quantity: line.qtyIssued,
+        party: issue.vendor
+          ? { role: "vendor", id: issue.vendor._id, name: issue.vendor.companyName }
+          : null,
+        reference: { type: "Kit issue", number: issue.kitCode || issue.kitName, id: issue._id },
+        matchType: null,
+        enteredBy: issue.issuedBy || null,
+        remarks: issue.remarks || null,
+        // Kit issues deduct stock the instant they're created — there is
+        // no "pending an invoice" equivalent on the way out.
+        stockApplied: true,
+        entryType: "kit_issue",
+        issueId: issue._id,
+        lineId: line._id,
+      });
+    }
+  }
+
+  const movements = [...receiptMovements, ...kitMovements];
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was
