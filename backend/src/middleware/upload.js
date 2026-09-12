@@ -36,3 +36,10 @@ export const uploadStockSheet = makeUploader();
 // Kits -> "Import from Excel" utility. Kept in memory only long enough to
 // be parsed — never written to disk or Cloudinary.
 export const uploadKitSheet = makeUploader();
+
+// Whatever document a screen wants AI to read and suggest field values
+// from (POST /api/ai/extract-document). Kept in memory only long enough to
+// be sent to the AI provider — never written to disk or Cloudinary itself
+// (a screen that also needs the file stored uploads it separately through
+// its own existing endpoint, same as today).
+export const uploadForAiExtract = makeUploader();

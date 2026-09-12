@@ -19,6 +19,27 @@ const taxInvoiceSchema = new mongoose.Schema(
     documentUrl: { type: String, required: true },
     originalFileName: { type: String },
     notes: { type: String, trim: true },
+
+    // Cache of the AI line-item read of documentUrl, keyed to the
+    // "invoice vs. material entered" comparison dialog (see
+    // getTaxInvoiceLineMatch in controllers/taxInvoiceController.js).
+    // Populated lazily on first view of that dialog, not on upload — kept
+    // here so re-opening the dialog doesn't re-run the AI extraction
+    // every time, only when the person explicitly asks to re-run it.
+    extractedLines: {
+      type: [
+        {
+          partNumber: { type: String, default: null },
+          description: { type: String, default: "" },
+          quantity: { type: Number, default: null },
+          unitPrice: { type: Number, default: null },
+          amount: { type: Number, default: null },
+        },
+      ],
+      default: undefined,
+    },
+    lineExtractionModel: { type: String, default: null },
+    lineExtractedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

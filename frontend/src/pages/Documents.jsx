@@ -11,6 +11,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import {
   FileText,
   FileSpreadsheet,
@@ -21,6 +24,10 @@ import {
   Upload,
   Search,
   Boxes,
+  Sparkles,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 const API_ORIGIN = (api?.defaults?.baseURL || "").replace(/\/api\/?$/, "");
@@ -517,9 +524,25 @@ function GeneratedPiTable() {
    entry actually booked against it on the right — so what the paperwork
    says and what was physically entered can be checked against each other
    without switching screens. */
+// Score → badge color. >=85 clean match, 60-84 worth a glance, <60 flagged.
+function ScoreBadge({ score }) {
+  const cls =
+    score >= 85
+      ? "bg-emerald-100 text-emerald-700"
+      : score >= 60
+      ? "bg-amber-100 text-amber-800"
+      : "bg-red-100 text-red-700";
+  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}>{score}%</span>;
+}
+
 function InvoiceStockDialog({ invoice, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const [matchData, setMatchData] = useState(null);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchError, setMatchError] = useState(null);
+  const [activeTab, setActiveTab] = useState("matched");
 
   useEffect(() => {
     if (!invoice?._id) return;
@@ -540,9 +563,47 @@ function InvoiceStockDialog({ invoice, onClose }) {
   const fileHref = fileUrl(invoice?.documentUrl);
   const canPreview = isPdfFile(invoice);
 
+  // "Imply" the match automatically as soon as the dialog opens for a PDF
+  // invoice — no button to click first. runMatch(true) re-reads the PDF
+  // and re-runs matching from scratch (the "Re-analyze" action); the
+  // initial call lets the backend reuse its cached line-item read.
+  const runMatch = useCallback(
+    (refresh = false) => {
+      if (!invoice?._id || !canPreview) return;
+      setMatchLoading(true);
+      setMatchError(null);
+      api
+        .get(`/tax-invoices/${invoice._id}/line-match`, { params: refresh ? { refresh: true } : {} })
+        .then((r) => setMatchData(r.data))
+        .catch((err) => {
+          setMatchData(null);
+          setMatchError(err.response?.data?.message || "Couldn't match the invoice's line items");
+        })
+        .finally(() => setMatchLoading(false));
+    },
+    [invoice?._id, canPreview]
+  );
+
+  useEffect(() => {
+    setMatchData(null);
+    setMatchError(null);
+    setActiveTab(canPreview ? "matched" : "entered");
+    if (invoice?._id && canPreview) runMatch(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoice?._id]);
+
+  const matches = matchData?.matches || [];
+  const unmatchedInvoiceLines = matchData?.unmatchedInvoiceLines || [];
+  const unmatchedStockEntries = matchData?.unmatchedStockEntries || [];
+  const mismatchedMatches = matches.filter((m) => (m.differences || []).length > 0);
+  const differenceCount = unmatchedInvoiceLines.length + unmatchedStockEntries.length + mismatchedMatches.length;
+  const overallScore = matches.length
+    ? Math.round(matches.reduce((sum, m) => sum + m.score, 0) / matches.length)
+    : null;
+
   return (
     <Dialog open={!!invoice} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[92vh] w-[95vw] max-w-6xl flex-col overflow-hidden p-0">
+      <DialogContent className="flex h-[99vh] w-[99vw] max-w-none flex-col overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
             <Receipt className="h-4 w-4" />
@@ -588,63 +649,246 @@ function InvoiceStockDialog({ invoice, onClose }) {
             </div>
           </div>
 
-          {/* Right: what was actually entered into stock against it */}
+          {/* Right: what was actually entered into stock, matched against what the invoice PDF itself says */}
           <div className="flex min-h-[45vh] flex-col overflow-hidden lg:min-h-0">
-            <div className="flex shrink-0 items-center justify-between border-b border-border bg-muted/50 px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Boxes className="h-3.5 w-3.5" />
-                Material entered{!loading ? ` (${entries.length})` : ""}
-              </span>
-              {!loading && (
-                <span className="text-xs font-medium">Total: {data?.totalQuantity || 0}</span>
-              )}
-            </div>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-3 py-2">
+                <TabsList>
+                  <TabsTrigger value="matched" disabled={!canPreview}>
+                    Matched{matches.length ? ` (${matches.length})` : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="differences" disabled={!canPreview}>
+                    Differences{differenceCount ? ` (${differenceCount})` : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="entered">Entered{!loading ? ` (${entries.length})` : ""}</TabsTrigger>
+                </TabsList>
+                <div className="flex items-center gap-2">
+                  {overallScore != null && !matchLoading && <ScoreBadge score={overallScore} />}
+                  {!loading && <span className="text-xs font-medium">Total qty: {data?.totalQuantity || 0}</span>}
+                  {canPreview && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2"
+                      disabled={matchLoading}
+                      onClick={() => runMatch(true)}
+                      title="Re-read the PDF and re-run matching"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${matchLoading ? "animate-spin" : ""}`} />
+                    </Button>
+                  )}
+                </div>
+              </div>
 
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">Loading stock entries…</p>
-              ) : entries.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  No stock was booked against this invoice yet.
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-muted/70 text-left">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Part no.</th>
-                      <th className="px-3 py-2 font-medium">Description</th>
-                      <th className="px-3 py-2 font-medium text-right">Qty</th>
-                      <th className="px-3 py-2 font-medium">Type</th>
-                      <th className="px-3 py-2 font-medium">Batch</th>
-                      <th className="px-3 py-2 font-medium">Booked on</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.map((e) => (
-                      <tr key={e._id} className="border-t odd:bg-muted/20">
-                        <td className="px-3 py-1.5 font-medium">
-                          {partNumberOf(e.part)}
-                          {e.alternateOfPart && (
-                            <span className="ml-1 text-xs text-muted-foreground">
-                              (alt of {partNumberOf(e.alternateOfPart)})
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-1.5">{partDescriptionOf(e.part)}</td>
-                        <td className="px-3 py-1.5 text-right">{e.quantityReceived}</td>
-                        <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                          {String(e.matchType || "").replace(/_/g, " ")}
-                        </td>
-                        <td className="px-3 py-1.5 text-xs font-mono-tech text-muted-foreground">
-                          {e.batchCode || "—"}
-                        </td>
-                        <td className="px-3 py-1.5">{fmtDate(e.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+              {/* Matched: each invoice line item (as read from the PDF) paired with the
+                  stock entry it best corresponds to, with a correctness score. */}
+              <TabsContent value="matched" className="mt-0 flex-1 overflow-y-auto p-3">
+                {matchLoading ? (
+                  <p className="flex items-center justify-center gap-2 py-6 text-center text-sm text-muted-foreground">
+                    <Sparkles className="h-3.5 w-3.5 animate-pulse" /> Reading the invoice & matching line items…
+                  </p>
+                ) : matchError ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-sm text-muted-foreground">
+                    <AlertCircle className="h-5 w-5 text-amber-600" />
+                    <p>{matchError}</p>
+                    <Button variant="outline" size="sm" onClick={() => runMatch(true)}>
+                      Try again
+                    </Button>
+                  </div>
+                ) : matches.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    No line items could be matched between the invoice and what was entered.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>On the invoice</TableHead>
+                        <TableHead>Entered as</TableHead>
+                        <TableHead className="text-right">Invoice qty</TableHead>
+                        <TableHead className="text-right">Entered qty</TableHead>
+                        <TableHead className="text-right">Match score</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {matches.map((m, idx) => {
+                        const invQty = m.invoiceLine.quantity;
+                        const entQty = m.stockEntry.quantityReceived;
+                        const qtyMismatch = invQty != null && invQty !== entQty;
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell className="align-top">
+                              <div className="font-medium">{m.invoiceLine.description || "—"}</div>
+                              {m.invoiceLine.partNumber && (
+                                <div className="text-xs text-muted-foreground">{m.invoiceLine.partNumber}</div>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <div className="font-medium">{partDescriptionOf(m.stockEntry.part)}</div>
+                              <div className="text-xs text-muted-foreground">{partNumberOf(m.stockEntry.part)}</div>
+                            </TableCell>
+                            <TableCell
+                              className={`text-right align-top ${qtyMismatch ? "font-semibold text-amber-700" : ""}`}
+                            >
+                              {invQty ?? "—"}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right align-top ${qtyMismatch ? "font-semibold text-amber-700" : ""}`}
+                            >
+                              {entQty}
+                            </TableCell>
+                            <TableCell className="text-right align-top">
+                              <ScoreBadge score={m.score} />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </TabsContent>
+
+              {/* Differences: anything the Matched tab doesn't cleanly reconcile —
+                  invoice lines with no entry, entries with no invoice line, and
+                  matched pairs whose quantity or part number still don't agree. */}
+              <TabsContent value="differences" className="mt-0 flex-1 overflow-y-auto p-3">
+                {matchLoading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Checking for differences…</p>
+                ) : matchError ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">{matchError}</p>
+                ) : differenceCount === 0 ? (
+                  <p className="flex items-center justify-center gap-1.5 py-6 text-center text-sm text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4" /> No differences — every line item and quantity agrees.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right">Invoice qty</TableHead>
+                        <TableHead className="text-right">Entered qty</TableHead>
+                        <TableHead>Detail</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {mismatchedMatches.map((m, idx) => {
+                        const qtyDiff = m.differences.find((d) => d.field === "quantity");
+                        const partDiff = m.differences.find((d) => d.field !== "quantity");
+                        return (
+                          <TableRow key={`mismatch-${idx}`}>
+                            <TableCell className="align-top">
+                              <Badge variant="warning">Doesn't fully agree</Badge>
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <div className="font-medium">{m.invoiceLine.description || "—"}</div>
+                              {m.invoiceLine.partNumber && (
+                                <div className="text-xs text-muted-foreground">{m.invoiceLine.partNumber}</div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right align-top font-semibold text-amber-700">
+                              {qtyDiff ? qtyDiff.invoiceValue ?? "—" : m.invoiceLine.quantity ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-right align-top font-semibold text-amber-700">
+                              {qtyDiff ? qtyDiff.enteredValue ?? "—" : m.stockEntry.quantityReceived}
+                            </TableCell>
+                            <TableCell className="align-top text-xs text-muted-foreground">
+                              {partDiff
+                                ? `Part no. — invoice: ${partDiff.invoiceValue || "—"}, entered: ${
+                                    partDiff.enteredValue || "—"
+                                  }`
+                                : "Quantity doesn't match"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {unmatchedInvoiceLines.map((l, idx) => (
+                        <TableRow key={`inv-only-${idx}`}>
+                          <TableCell className="align-top">
+                            <Badge variant="destructive">Not entered</Badge>
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <div className="font-medium">{l.description || l.partNumber || "Unnamed line"}</div>
+                            {l.partNumber && l.description && (
+                              <div className="text-xs text-muted-foreground">{l.partNumber}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right align-top">{l.quantity ?? "—"}</TableCell>
+                          <TableCell className="text-right align-top text-muted-foreground">—</TableCell>
+                          <TableCell className="align-top text-xs text-muted-foreground">
+                            On the invoice, but nothing was entered for it
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {unmatchedStockEntries.map((e) => (
+                        <TableRow key={e._id}>
+                          <TableCell className="align-top">
+                            <Badge variant="destructive">Not on invoice</Badge>
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <div className="font-medium">{partDescriptionOf(e.part)}</div>
+                            <div className="text-xs text-muted-foreground">{partNumberOf(e.part)}</div>
+                          </TableCell>
+                          <TableCell className="text-right align-top text-muted-foreground">—</TableCell>
+                          <TableCell className="text-right align-top">{e.quantityReceived}</TableCell>
+                          <TableCell className="align-top text-xs text-muted-foreground">
+                            Entered into stock, but not found on the invoice
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </TabsContent>
+
+              {/* Entered: the original raw list of every stock entry booked against this
+                  invoice, unaffected by whether AI matching succeeds. */}
+              <TabsContent value="entered" className="mt-0 flex-1 overflow-y-auto p-3">
+                {loading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Loading stock entries…</p>
+                ) : entries.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    No stock was booked against this invoice yet.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Part no.</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Batch</TableHead>
+                        <TableHead>Booked on</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {entries.map((e) => (
+                        <TableRow key={e._id}>
+                          <TableCell className="font-medium">
+                            {partNumberOf(e.part)}
+                            {e.alternateOfPart && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                (alt of {partNumberOf(e.alternateOfPart)})
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>{partDescriptionOf(e.part)}</TableCell>
+                          <TableCell className="text-right">{e.quantityReceived}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {String(e.matchType || "").replace(/_/g, " ")}
+                          </TableCell>
+                          <TableCell className="text-xs font-mono-tech text-muted-foreground">
+                            {e.batchCode || "—"}
+                          </TableCell>
+                          <TableCell>{fmtDate(e.createdAt)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </TabsContent>
+            </Tabs>
 
             {!loading && (data?.linkedDocuments || []).length > 0 && (
               <div className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
