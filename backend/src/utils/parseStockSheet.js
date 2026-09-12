@@ -20,6 +20,12 @@
 */
 import xlsx from "xlsx";
 
+// Sentinel `dates[].value` / row `dateKey` for rows that HAD something typed
+// in the DATE cell but it couldn't be turned into a real date. Exported so
+// callers (e.g. stockImportController.js) can tell this bucket apart from a
+// genuinely parsed calendar date without duplicating the magic string.
+export const UNDATED_DATE_KEY = "__undated__";
+
 const HEADER_CANDIDATES = {
   code: ["TTZ Item Code", "Part Number", "TT Unique Part Number", "Item Code"],
   description: ["Item Description", "Description"],
@@ -223,7 +229,7 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
   // own pickable bucket instead, with the original cell value kept in
   // `dateRaw` so the person can see exactly what was on the sheet and fix
   // it there (or edit the row's date manually before committing).
-  const UNDATED = "__undated__";
+  const UNDATED = UNDATED_DATE_KEY;
   let undatedCount = 0;
 
   for (let r = headerRowIdx + 1; r < grid.length; r++) {

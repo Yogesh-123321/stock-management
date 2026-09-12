@@ -7,6 +7,11 @@
        unique dates found on the sheet, each row annotated with whatever
        existing part it matches (by TT unique part number), if any. Nothing
        is written to the database.
+
+       The sheet must cover a single date: if it contains more than one
+       distinct calendar date, the whole upload is rejected with a 400
+       before any matching happens (rows with an unparseable/unrecognized
+       date don't count toward this — see UNDATED_DATE_KEY).
     2. The operator picks a date on the frontend, reviews/edits the
        resulting rows (filling in anything missing), and submits them.
     3. POST /import/commit  - vendor is the one already chosen for this
@@ -27,7 +32,7 @@ import xlsx from "xlsx";
 import Part from "../models/Part.js";
 import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
-import { parseStockWorkbook } from "../utils/parseStockSheet.js";
+import { parseStockWorkbook, UNDATED_DATE_KEY } from "../utils/parseStockSheet.js";
 import { bookExistingPart, BookingError } from "../utils/stockBooking.js";
 import { notifyApprovers } from "../utils/notify.js";
 
@@ -59,6 +64,21 @@ export const parseStockImport = asyncHandler(async (req, res) => {
   } catch (err) {
     res.status(400);
     throw new Error(`Could not read that spreadsheet: ${err.message}`);
+  }
+
+  // Only a single-date sheet is accepted here — each import is meant to
+  // represent one delivery/date. Rows with an unrecognized (unparseable)
+  // date don't count toward this — that's a separate "needs review" bucket
+  // — but two or more genuinely different calendar dates on the same sheet
+  // means it should be split and uploaded one date at a time instead.
+  const uniqueRealDates = parsed.dates.filter((d) => d.value !== UNDATED_DATE_KEY);
+  if (uniqueRealDates.length > 1) {
+    res.status(400);
+    throw new Error(
+      `This sheet has ${uniqueRealDates.length} different dates (${uniqueRealDates
+        .map((d) => d.label)
+        .join(", ")}) — only a sheet with a single date can be imported at a time. Split it by date and upload each date separately.`
+    );
   }
 
   // Batch-match every code on the sheet against the parts master in one go.

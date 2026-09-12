@@ -63,6 +63,10 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
 
   const [parsed, setParsed] = useState(null); // { sheetName, dates, rows }
   const [selectedDate, setSelectedDate] = useState(null);
+  // Persistent red banner for a rejected upload (e.g. a sheet spanning more
+  // than one date) — kept separate from the transient toast so the reason
+  // stays visible on screen while the operator fixes the file and retries.
+  const [uploadError, setUploadError] = useState("");
 
   const [rows, setRows] = useState([]); // editable preview rows for the selected date
   const [committing, setCommitting] = useState(false);
@@ -82,6 +86,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
     setSelectedDate(null);
     setRows([]);
     setResult(null);
+    setUploadError("");
     setPhase("upload");
   };
 
@@ -93,6 +98,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
     }
     setParsing(true);
     setParsed(null); // never show a stale parse while a new one is in flight
+    setUploadError("");
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -106,7 +112,13 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
       }
       setPhase("pick-date");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Could not read that spreadsheet");
+      // The backend rejects a sheet up front if it spans more than one date
+      // (each import is meant to be a single delivery date) — surface that,
+      // and any other parse failure, as a standing red warning right under
+      // the file picker, not just a toast that disappears in a few seconds.
+      const message = err.response?.data?.message || "Could not read that spreadsheet";
+      setUploadError(message);
+      toast.error(message);
     } finally {
       setParsing(false);
     }
@@ -235,13 +247,26 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
                 key={fileInputKey}
                 type="file"
                 accept=".xlsx,.xls"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setFile(e.target.files?.[0] || null);
+                  setUploadError("");
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 The sheet is only read to build a preview — nothing is saved until you approve it on the next
                 screen. Every time you pick a file here it's re-read fresh from disk; nothing from an earlier
-                upload carries over.
+                upload carries over. The sheet must cover a single date — a sheet with more than one date on it
+                will be rejected below.
               </p>
+              {uploadError && (
+                <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-2.5 text-xs text-red-800">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
+                  <div>
+                    <p className="font-medium">Failed to upload</p>
+                    <p className="break-words">{uploadError}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
           <CardFooter className="justify-between">
