@@ -11,7 +11,9 @@
     "seed:vendors": "node src/utils/seedVendors.js",
     "seed:parts": "node src/utils/seedParts.js",
     "seed:part-vendors": "node src/utils/seedPartVendors.js",
-    "seed:parts:xlsx": "node src/utils/seedPartsFromExcel.js"
+    "seed:parts:xlsx": "node src/utils/seedPartsFromExcel.js",
+    "seed:parts:missing": "node src/utils/seedMissingPartsFromMaster.js",
+    "seed:part-categories": "node src/utils/seedPartCategories.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

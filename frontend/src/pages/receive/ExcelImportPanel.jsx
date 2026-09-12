@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import api from "@/lib/api";
 import PartDuplicateCheck from "@/components/PartDuplicateCheck";
 import PartNumberPreview from "@/components/PartNumberPreview";
+import CategorySelect from "@/components/CategorySelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
 import {
   FileSpreadsheet,
@@ -512,11 +513,10 @@ function RowEditor({ row, updateRow, updateNewPart }) {
             </div>
             <div className="space-y-1 min-w-0">
               <Label className="text-[11px]">Category</Label>
-              <Input
+              <CategorySelect
                 value={row.newPart.category}
-                onChange={(e) => updateNewPart(row.rowIndex, "category", e.target.value)}
-                className="h-8 text-xs"
-                placeholder="AY"
+                onChange={(v) => updateNewPart(row.rowIndex, "category", v)}
+                triggerClassName="h-8 text-xs"
               />
             </div>
             <div className="space-y-1 min-w-0">

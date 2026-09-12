@@ -29,13 +29,22 @@ const SelectContent = React.forwardRef(({ className, children, ...props }, ref) 
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-card text-card-foreground shadow-md",
+        // `--radix-select-content-available-height` is set by Radix itself
+        // (position="popper") to however much room is actually left between
+        // the trigger and the edge of the viewport. Without capping height
+        // to it, a long list (e.g. 20+ part categories) has nothing to
+        // stop it growing past the screen — it just gets cut off there,
+        // with no scrollbar to reach the rest. overflow-y-auto on the
+        // Viewport below is what makes the now-capped list scrollable.
+        "relative z-50 min-w-[8rem] max-h-[var(--radix-select-content-available-height)] overflow-hidden rounded-md border border-border bg-card text-card-foreground shadow-md",
         className
       )}
       position="popper"
       {...props}
     >
-      <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
+      <SelectPrimitive.Viewport className="p-1 max-h-[var(--radix-select-content-available-height)] overflow-y-auto">
+        {children}
+      </SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
 ));

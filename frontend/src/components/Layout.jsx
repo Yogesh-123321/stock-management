@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
   Boxes,
+  Tags,
   PackagePlus,
   Users as UsersIcon,
   UserCheck,
@@ -29,6 +30,7 @@ const navItems = [
   { to: "/vendors", label: "Vendors", icon: UsersIcon, permission: "vendor.create" },
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
+  { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
   { to: "/kits", label: "Kits", icon: Layers, permission: "kit.manage" },
   { to: "/issue-kit", label: "Issue kit", icon: PackageOpen, permission: "kit.issue" },

@@ -10,6 +10,7 @@ import vendorRoutes from "./src/routes/vendorRoutes.js";
 import buyerRoutes from "./src/routes/buyerRoutes.js";
 import poRoutes from "./src/routes/poRoutes.js";
 import partRoutes from "./src/routes/partRoutes.js";
+import partCategoryRoutes from "./src/routes/partCategoryRoutes.js";
 import stockRoutes from "./src/routes/stockRoutes.js";
 import kitRoutes from "./src/routes/kitRoutes.js";
 import taxInvoiceRoutes from "./src/routes/taxInvoiceRoutes.js";
@@ -25,11 +26,20 @@ import activityLogRoutes from "./src/routes/activityLogRoutes.js";
 
 import { notFound, errorHandler } from "./src/middleware/errorHandler.js";
 import activityLogger from "./src/middleware/activityLogger.js";
+import { ensureDefaultPartCategories } from "./src/utils/seedPartCategories.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 connectDB();
+
+// One-time, idempotent: makes sure the predefined category list (RS, RT,
+// AY, SY ...) exists on a fresh database without anyone having to remember
+// to run `npm run seed:part-categories` first. Never touches categories an
+// admin has since added or edited.
+ensureDefaultPartCategories().catch((err) =>
+  console.error("Could not ensure default part categories:", err)
+);
 
 const app = express();
 
@@ -47,6 +57,7 @@ app.use("/api/vendors", vendorRoutes);
 app.use("/api/buyers", buyerRoutes);
 app.use("/api/purchase-orders", poRoutes);
 app.use("/api/parts", partRoutes);
+app.use("/api/part-categories", partCategoryRoutes);
 app.use("/api/stock-entries", stockRoutes);
 app.use("/api/kits", kitRoutes);
 app.use("/api/tax-invoices", taxInvoiceRoutes);

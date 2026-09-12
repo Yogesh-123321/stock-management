@@ -5,6 +5,7 @@ import ReceiveMaterial from "@/pages/ReceiveMaterial";
 import Vendors from "@/pages/Vendors";
 import Buyers from "@/pages/Buyers";
 import Parts from "@/pages/Parts";
+import PartCategories from "@/pages/PartCategories";
 import Kits from "@/pages/Kits";
 import IssueKit from "@/pages/IssueKit";
 import Documents from "@/pages/Documents";
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/vendors" element={guard("vendor.create", <Vendors />)} />
           <Route path="/buyers" element={guard("buyer.create", <Buyers />)} />
           <Route path="/parts" element={<Parts />} />
+          <Route path="/part-categories" element={guard("part.approve", <PartCategories />)} />
           <Route path="/kits" element={guard("kit.manage", <Kits />)} />
           <Route path="/issue-kit" element={guard("kit.issue", <IssueKit />)} />
           <Route path="/documents" element={guard("documents.view", <Documents />)} />

@@ -15,6 +15,7 @@ import {
   TableEmpty,
 } from "@/components/ui/table";
 import api from "@/lib/api";
+import CategorySelect from "@/components/CategorySelect";
 import { useAuth } from "@/lib/auth";
 import {
   Search,
@@ -220,7 +221,11 @@ function EditRequestDialog({ request, onClose, onSaved }) {
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {f.label}
                 </label>
-                <Input value={form[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
+                {f.key === "category" ? (
+                  <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+                ) : (
+                  <Input value={form[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
+                )}
               </div>
             ))}
 
@@ -489,11 +494,7 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Category
               </label>
-              <Input
-                value={form.category}
-                onChange={(e) => set("category", e.target.value)}
-                placeholder="AY"
-              />
+              <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1052,11 +1053,15 @@ function EditPartDialog({ part, onClose, onSaved }) {
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {f.label}
                 </label>
-                <Input
-                  value={form[f.key] ?? ""}
-                  className={f.mono ? "font-mono-tech" : ""}
-                  onChange={(e) => set(f.key, e.target.value)}
-                />
+                {f.key === "category" ? (
+                  <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+                ) : (
+                  <Input
+                    value={form[f.key] ?? ""}
+                    className={f.mono ? "font-mono-tech" : ""}
+                    onChange={(e) => set(f.key, e.target.value)}
+                  />
+                )}
               </div>
             ))}
 

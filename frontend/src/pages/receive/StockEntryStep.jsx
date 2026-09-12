@@ -12,6 +12,7 @@ import { fetchReceivedTotal } from "@/lib/receivedTotal";
 import ExcelImportPanel from "@/pages/receive/ExcelImportPanel";
 import PartDuplicateCheck from "@/components/PartDuplicateCheck";
 import PartNumberPreview from "@/components/PartNumberPreview";
+import CategorySelect from "@/components/CategorySelect";
 import {
   Search,
   PackageCheck,
@@ -879,10 +880,9 @@ export default function StockEntryStep({
                 </div>
                 <div className="space-y-1.5">
                   <Label>Category</Label>
-                  <Input
+                  <CategorySelect
                     value={newPart.category}
-                    onChange={(e) => setNewPart({ ...newPart, category: e.target.value })}
-                    placeholder="AY"
+                    onChange={(v) => setNewPart({ ...newPart, category: v })}
                   />
                 </div>
                 <div className="space-y-1.5">
