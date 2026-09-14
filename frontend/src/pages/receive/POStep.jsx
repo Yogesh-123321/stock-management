@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,9 +6,27 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
-import { UploadCloud, SkipForward, Link2, RefreshCw } from "lucide-react";
+import { useAutoExtractOnUpload } from "@/lib/useAutoExtractOnUpload";
+import { findMismatches } from "@/lib/documentVerify";
+import DocumentMismatchWarning from "@/components/DocumentMismatchWarning";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
+import { UploadCloud, SkipForward, Link2, RefreshCw, Loader2 } from "lucide-react";
+
+const PO_UPLOAD_SCHEMA = {
+  documentNumber: { required: true, regex: "docNumber" },
+  totalQuantity: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+};
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "");
+
+// AI-read fields off the uploaded PO file, checked against what's typed
+// into the form on this step (and the vendor already selected/chosen).
+const PO_DOC_MAPPING = [
+  { extractedKey: "vendorName", enteredKey: "vendorName", label: "Vendor name", type: "text" },
+  { extractedKey: "documentNumber", enteredKey: "documentNumber", label: "PO number", type: "text" },
+  { extractedKey: "totalQuantity", enteredKey: "totalQuantity", label: "Total quantity", type: "number" },
+];
 
 export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
   const [mode, setMode] = useState("existing"); // "existing" | "upload"
@@ -22,6 +40,30 @@ export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const v = useFormValidation(PO_UPLOAD_SCHEMA);
+
+  // Auto-fetch details off the file the moment it's picked, and fill in
+  // whatever's still blank; any field the person already typed that
+  // disagrees is surfaced as a warning below (see PO_DOC_MAPPING above).
+  const { status: aiStatus, fields: aiFields } = useAutoExtractOnUpload(
+    mode === "upload" ? file : null,
+    { documentType: "purchaseOrderDoc" }
+  );
+  const aiAppliedFileRef = useRef(null);
+
+  useEffect(() => {
+    if (aiStatus !== "done" || !aiFields || !file) return;
+    if (aiAppliedFileRef.current === file) return;
+    aiAppliedFileRef.current = file;
+    if (!documentNumber.trim() && aiFields.documentNumber) setDocumentNumber(aiFields.documentNumber);
+    if (totalQuantity === "" && aiFields.totalQuantity != null) setTotalQuantity(String(aiFields.totalQuantity));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiStatus, aiFields, file]);
+
+  const aiMismatches =
+    aiStatus === "done"
+      ? findMismatches(aiFields, { vendorName: vendor?.companyName, documentNumber, totalQuantity }, PO_DOC_MAPPING)
+      : [];
 
   const loadOpenDocs = async () => {
     setLoadingDocs(true);
@@ -78,6 +120,10 @@ export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
     e.preventDefault();
     if (!file) {
       toast.error("Attach the purchase order file, or use \"Skip\" if none was sent");
+      return;
+    }
+    if (!v.validateAll({ documentNumber, totalQuantity })) {
+      toast.error("Fix the highlighted field before uploading");
       return;
     }
     setSubmitting(true);
@@ -201,8 +247,10 @@ export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
               <Input
                 value={documentNumber}
                 onChange={(e) => setDocumentNumber(e.target.value)}
+                onBlur={() => v.handleBlur("documentNumber", documentNumber, { documentNumber, totalQuantity })}
                 placeholder="PO-2026-0142"
               />
+              <FieldError error={v.fieldError("documentNumber")} />
             </div>
             <div className="space-y-1.5">
               <Label>Total quantity on the PO</Label>
@@ -211,17 +259,30 @@ export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
                 min="0"
                 value={totalQuantity}
                 onChange={(e) => setTotalQuantity(e.target.value)}
+                onBlur={() => v.handleBlur("totalQuantity", totalQuantity, { documentNumber, totalQuantity })}
                 placeholder="e.g. 120"
               />
+              <FieldError error={v.fieldError("totalQuantity")} />
             </div>
             <div className="space-y-1.5">
               <Label>File</Label>
               <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              {aiStatus === "loading" && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Reading document to check the details…
+                </p>
+              )}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>Notes (optional)</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
             </div>
+            {aiMismatches.length > 0 && (
+              <div className="sm:col-span-2">
+                <DocumentMismatchWarning mismatches={aiMismatches} documentLabel="the uploaded PO" />
+              </div>
+            )}
           </form>
         )}
       </CardContent>

@@ -13,6 +13,8 @@ import ExcelImportPanel from "@/pages/receive/ExcelImportPanel";
 import PartDuplicateCheck from "@/components/PartDuplicateCheck";
 import PartNumberPreview from "@/components/PartNumberPreview";
 import CategorySelect from "@/components/CategorySelect";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
 import {
   Search,
   PackageCheck,
@@ -29,7 +31,71 @@ import {
   ShieldAlert,
   Clock,
   FileSpreadsheet,
+  Sparkles,
 } from "lucide-react";
+
+// Debounced fetch of the lightweight "AI suggested checks" for the line
+// currently being entered — see getStockEntrySuggestions in
+// stockController.js. Purely advisory: it never blocks saving, it just
+// surfaces things worth a second look (unusual quantity, unfamiliar
+// vendor, a total that would overshoot the document quantity).
+function useStockSuggestions({ partId, quantity, vendorId, purchaseOrderId }) {
+  const [warnings, setWarnings] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const qty = Number(quantity);
+    if (!partId || !qty || Number.isNaN(qty) || qty <= 0) {
+      setWarnings([]);
+      setLoading(false);
+      return undefined;
+    }
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/stock-entries/suggest-warnings", {
+          params: {
+            part: partId,
+            quantity: qty,
+            vendor: vendorId || undefined,
+            purchaseOrder: purchaseOrderId || undefined,
+          },
+        });
+        setWarnings(Array.isArray(data?.warnings) ? data.warnings : []);
+      } catch {
+        // Advisory only — a failed check should never block data entry.
+        setWarnings([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [partId, quantity, vendorId, purchaseOrderId]);
+
+  return { warnings, loading };
+}
+
+function AiSuggestedWarnings({ warnings, loading }) {
+  if (!loading && warnings.length === 0) return null;
+  return (
+    <div className="rounded-md border border-sky-300 bg-sky-50 p-3 text-xs space-y-1.5">
+      <p className="flex items-center gap-1.5 font-medium text-sky-900">
+        <Sparkles className="h-3.5 w-3.5" />
+        AI suggested checks
+      </p>
+      {loading && warnings.length === 0 && <p className="text-sky-700">Checking…</p>}
+      {warnings.map((w, i) => (
+        <p
+          key={i}
+          className={"flex items-start gap-1.5 " + (w.level === "warning" ? "text-amber-800" : "text-sky-800")}
+        >
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>{w.message}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
 
 // Entries logged in this session, shown either as a compact list or as a
 // grid of cards so the person can scan what has been entered so far.
@@ -102,6 +168,35 @@ function SessionLog({ entries, view }) {
 const partLabel = (np) =>
   [np?.companyCode, np?.category, np?.partTypeBatchNo].filter(Boolean).join(" / ");
 
+// Shared by the "matched existing part" and "approved request" phases —
+// both just need a quantity + optional remarks.
+const QTY_REMARKS_SCHEMA = {
+  quantityReceived: {
+    required: true,
+    requiredMessage: "Enter the quantity received",
+    regex: "positiveInteger",
+    min: 1,
+  },
+  remarks: { maxLength: 500 },
+};
+
+// New / alternate part registration — same field names/placeholders as the
+// Parts section itself, so the same rules apply here.
+const NEW_PART_SCHEMA = {
+  itemDescription: { required: true, requiredMessage: "Item description is required", maxLength: 200 },
+  manufacturerPartNumber: { regex: "docNumber" },
+  typeOfPart: { regex: "alphaNumSpace", maxLength: 40 },
+  companyCode: { required: true, requiredMessage: "Company code is required", regex: "categoryCode" },
+  partTypeBatchNo: {
+    required: true,
+    requiredMessage: "Part type / batch no. is required",
+    regex: "alphaNumSpace",
+    maxLength: 30,
+  },
+  quantityReceived: { regex: "positiveInteger" },
+  remarks: { maxLength: 500 },
+};
+
 export default function StockEntryStep({
   vendor,
   purchaseOrder,
@@ -131,6 +226,8 @@ export default function StockEntryStep({
   const [submitting, setSubmitting] = useState(false);
   const [sessionEntries, setSessionEntries] = useState([]);
   const [logView, setLogView] = useState("grid"); // "grid" | "list"
+  const vQty = useFormValidation(QTY_REMARKS_SCHEMA);
+  const vNewPart = useFormValidation(NEW_PART_SCHEMA);
 
   // ---- part-number approval queue ----
   // A brand-new part number, or an alternate of an existing one, cannot take
@@ -282,6 +379,8 @@ export default function StockEntryStep({
     setMatchedPart(null);
     setAlternateOfPart(null);
     setActiveRequest(null);
+    vQty.reset();
+    vNewPart.reset();
     setNewPart({
       typeOfPart: "",
       manufacturerPartNumber: "",
@@ -328,8 +427,8 @@ export default function StockEntryStep({
 
   const handleConfirmExisting = (e) => {
     e.preventDefault();
-    if (!quantityReceived || Number(quantityReceived) < 1) {
-      toast.error("Enter the quantity received");
+    if (!vQty.validateAll({ quantityReceived, remarks })) {
+      toast.error("Fix the highlighted field before continuing");
       return;
     }
     submitEntry({ matchType: "existing_part_number", existingPartId: matchedPart._id });
@@ -339,8 +438,8 @@ export default function StockEntryStep({
   const handleConfirmApproved = (e) => {
     e.preventDefault();
     if (!activeRequest) return;
-    if (!quantityReceived || Number(quantityReceived) < 1) {
-      toast.error("Enter the quantity received");
+    if (!vQty.validateAll({ quantityReceived, remarks })) {
+      toast.error("Fix the highlighted field before continuing");
       return;
     }
     submitEntry(
@@ -381,12 +480,17 @@ export default function StockEntryStep({
   // to the Parts section for approval first.
   const handleSendForApproval = async (e, isAlternate) => {
     e.preventDefault();
-    if (!newPart.itemDescription || !newPart.companyCode || !newPart.category || !newPart.partTypeBatchNo) {
-      toast.error("Item description, company code, category and part type/batch no. are required");
+    const newPartForm = { ...newPart, quantityReceived, remarks };
+    if (!vNewPart.validateAll(newPartForm)) {
+      toast.error("Fix the highlighted field before sending for approval");
       return;
     }
     if (isAlternate && !alternateOfPart) {
       toast.error("Search for and select the part this is an alternate of");
+      return;
+    }
+    if (!newPart.category) {
+      toast.error("Category is required");
       return;
     }
     setSubmitting(true);
@@ -425,6 +529,21 @@ export default function StockEntryStep({
           "\nContinue anyway? The PO/PI will be left OPEN until the full quantity is received."
       );
       if (!ok) return;
+      // Let admins know this PO/PI is being left open with a quantity
+      // mismatch, rather than leaving it to be noticed later.
+      api
+        .post("/stock-entries/report-mismatch", {
+          purchaseOrder: purchaseOrder?._id || null,
+          poQty,
+          piQty,
+          previouslyReceived: priorTotal,
+          enteredNow: enteredTotal,
+          totalReceived: cumulativeTotal,
+          reportedBy: enteredBy,
+        })
+        .catch(() => {
+          // Best-effort — this should never block finishing the receiving flow.
+        });
     }
     onFinish({
       enteredQuantity: cumulativeTotal,
@@ -446,6 +565,15 @@ export default function StockEntryStep({
       loadApprovals();
     }
   };
+
+  // AI suggested checks only make sense once we know which existing part
+  // is being booked (a brand-new part has no receiving history yet).
+  const { warnings: aiWarnings, loading: aiWarningsLoading } = useStockSuggestions({
+    partId: matchedPart?._id,
+    quantity: quantityReceived,
+    vendorId: vendor?._id,
+    purchaseOrderId: purchaseOrder?._id,
+  });
 
   const term = searchTerm.trim();
   const termMatches = (r) => {
@@ -718,11 +846,20 @@ export default function StockEntryStep({
                   min="1"
                   value={quantityReceived}
                   onChange={(e) => setQuantityReceived(e.target.value)}
+                  onBlur={() => vQty.handleBlur("quantityReceived", quantityReceived, { quantityReceived, remarks })}
                 />
+                <FieldError error={vQty.fieldError("quantityReceived")} />
               </div>
+              <AiSuggestedWarnings warnings={aiWarnings} loading={aiWarningsLoading} />
               <div className="space-y-1.5">
                 <Label>Remarks (optional)</Label>
-                <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
+                <Textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  onBlur={() => vQty.handleBlur("remarks", remarks, { quantityReceived, remarks })}
+                  rows={2}
+                />
+                <FieldError error={vQty.fieldError("remarks")} />
               </div>
             </CardContent>
             <CardFooter className="justify-between">
@@ -767,11 +904,19 @@ export default function StockEntryStep({
                   min="1"
                   value={quantityReceived}
                   onChange={(e) => setQuantityReceived(e.target.value)}
+                  onBlur={() => vQty.handleBlur("quantityReceived", quantityReceived, { quantityReceived, remarks })}
                 />
+                <FieldError error={vQty.fieldError("quantityReceived")} />
               </div>
               <div className="space-y-1.5">
                 <Label>Remarks (optional)</Label>
-                <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
+                <Textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  onBlur={() => vQty.handleBlur("remarks", remarks, { quantityReceived, remarks })}
+                  rows={2}
+                />
+                <FieldError error={vQty.fieldError("remarks")} />
               </div>
             </CardContent>
             <CardFooter className="justify-between">
@@ -843,14 +988,30 @@ export default function StockEntryStep({
                   <Input
                     value={newPart.itemDescription}
                     onChange={(e) => setNewPart({ ...newPart, itemDescription: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("itemDescription", newPart.itemDescription, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                   />
+                  <FieldError error={vNewPart.fieldError("itemDescription")} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Manufacturer part number (optional)</Label>
                   <Input
                     value={newPart.manufacturerPartNumber}
                     onChange={(e) => setNewPart({ ...newPart, manufacturerPartNumber: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("manufacturerPartNumber", newPart.manufacturerPartNumber, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                   />
+                  <FieldError error={vNewPart.fieldError("manufacturerPartNumber")} />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <PartDuplicateCheck
@@ -867,16 +1028,32 @@ export default function StockEntryStep({
                   <Input
                     value={newPart.typeOfPart}
                     onChange={(e) => setNewPart({ ...newPart, typeOfPart: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("typeOfPart", newPart.typeOfPart, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                     placeholder="PCB, MECHANICAL, ..."
                   />
+                  <FieldError error={vNewPart.fieldError("typeOfPart")} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Company code</Label>
                   <Input
                     value={newPart.companyCode}
                     onChange={(e) => setNewPart({ ...newPart, companyCode: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("companyCode", newPart.companyCode, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                     placeholder="TT"
                   />
+                  <FieldError error={vNewPart.fieldError("companyCode")} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Category</Label>
@@ -890,8 +1067,16 @@ export default function StockEntryStep({
                   <Input
                     value={newPart.partTypeBatchNo}
                     onChange={(e) => setNewPart({ ...newPart, partTypeBatchNo: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("partTypeBatchNo", newPart.partTypeBatchNo, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                     placeholder="FAN"
                   />
+                  <FieldError error={vNewPart.fieldError("partTypeBatchNo")} />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <PartNumberPreview
@@ -911,13 +1096,29 @@ export default function StockEntryStep({
                     min="1"
                     value={quantityReceived}
                     onChange={(e) => setQuantityReceived(e.target.value)}
+                    onBlur={() =>
+                      vNewPart.handleBlur("quantityReceived", quantityReceived, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
                     placeholder="Booked after approval"
                   />
+                  <FieldError error={vNewPart.fieldError("quantityReceived")} />
                 </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Remarks for the approver (optional)</Label>
-                <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
+                <Textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  onBlur={() =>
+                    vNewPart.handleBlur("remarks", remarks, { ...newPart, quantityReceived, remarks })
+                  }
+                  rows={2}
+                />
+                <FieldError error={vNewPart.fieldError("remarks")} />
               </div>
             </CardContent>
             <CardFooter className="justify-between">

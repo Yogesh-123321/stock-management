@@ -16,8 +16,16 @@ import {
 import { PERMISSIONS, PERMISSION_GROUPS } from "@/lib/permissions";
 import { Lock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
 
 const EMPTY = { name: "", username: "", email: "", password: "", role: "user" };
+
+const NEW_USER_SCHEMA = {
+  name: { required: true, requiredMessage: "Full name is required", regex: "personName", maxLength: 80 },
+  username: { required: true, requiredMessage: "Username is required", regex: "username" },
+  password: { required: true, requiredMessage: "Password is required", minLength: 6 },
+};
 
 function PermissionGrid({ value, disabled, onToggle }) {
   return (
@@ -79,6 +87,7 @@ export default function Users() {
   const [form, setForm] = useState(EMPTY);
   const [draft, setDraft] = useState({});
   const [openId, setOpenId] = useState(null);
+  const v = useFormValidation(NEW_USER_SCHEMA);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,11 +114,16 @@ export default function Users() {
 
   const createUser = async (e) => {
     e.preventDefault();
+    if (!v.validateAll(form)) {
+      toast.error("Please fix the highlighted fields");
+      return;
+    }
     setCreating(true);
     try {
       await api.post("/users", form);
       toast.success(`${form.name} can now sign in`);
       setForm(EMPTY);
+      v.reset();
       load();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Could not create the user");
@@ -159,27 +173,38 @@ export default function Users() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={createUser} className="grid gap-2 sm:grid-cols-6">
-            <Input
-              className="sm:col-span-2"
-              placeholder="Full name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-            <Input
-              placeholder="Username"
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              required
-            />
-            <Input
-              placeholder="Password"
-              type="text"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-            />
+          <form onSubmit={createUser} className="grid gap-2 sm:grid-cols-6 items-start">
+            <div className="sm:col-span-2">
+              <Input
+                placeholder="Full name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onBlur={() => v.handleBlur("name", form.name, form)}
+                required
+              />
+              <FieldError error={v.fieldError("name")} />
+            </div>
+            <div>
+              <Input
+                placeholder="Username"
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                onBlur={() => v.handleBlur("username", form.username, form)}
+                required
+              />
+              <FieldError error={v.fieldError("username")} />
+            </div>
+            <div>
+              <Input
+                placeholder="Password"
+                type="text"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                onBlur={() => v.handleBlur("password", form.password, form)}
+                required
+              />
+              <FieldError error={v.fieldError("password")} />
+            </div>
             <select
               className="h-9 rounded-md border border-input bg-card px-2 text-sm"
               value={form.role}

@@ -5,12 +5,25 @@ import { Boxes, LogIn, ShieldPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
+
+// Regex validation only applies to the first-run admin-creation fields —
+// the sign-in form only ever gets a "required" check, since an existing
+// account's username/password may pre-date these patterns and must still
+// be able to sign in.
+const SETUP_SCHEMA = {
+  name: { required: true, requiredMessage: "Full name is required", regex: "personName", maxLength: 80 },
+  username: { required: true, requiredMessage: "Username is required", regex: "username" },
+  password: { required: true, requiredMessage: "Password is required", minLength: 6 },
+};
 
 export default function Login() {
   const { user, loading, needsSetup, signIn, bootstrap } = useAuth();
   const location = useLocation();
   const [form, setForm] = useState({ name: "", username: "", password: "" });
   const [busy, setBusy] = useState(false);
+  const v = useFormValidation(SETUP_SCHEMA);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -19,6 +32,10 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault();
     if (busy) return;
+    if (needsSetup && !v.validateAll(form)) {
+      toast.error("Please fix the highlighted fields");
+      return;
+    }
     setBusy(true);
     try {
       if (needsSetup) {
@@ -67,7 +84,14 @@ export default function Login() {
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Full name
               </label>
-              <Input value={form.name} onChange={set("name")} required autoFocus />
+              <Input
+                value={form.name}
+                onChange={set("name")}
+                onBlur={() => needsSetup && v.handleBlur("name", form.name, form)}
+                required
+                autoFocus
+              />
+              {needsSetup && <FieldError error={v.fieldError("name")} />}
             </div>
           )}
           <div>
@@ -75,10 +99,12 @@ export default function Login() {
             <Input
               value={form.username}
               onChange={set("username")}
+              onBlur={() => needsSetup && v.handleBlur("username", form.username, form)}
               autoComplete="username"
               required
               autoFocus={!needsSetup}
             />
+            {needsSetup && <FieldError error={v.fieldError("username")} />}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Password</label>
@@ -86,9 +112,11 @@ export default function Login() {
               type="password"
               value={form.password}
               onChange={set("password")}
+              onBlur={() => needsSetup && v.handleBlur("password", form.password, form)}
               autoComplete={needsSetup ? "new-password" : "current-password"}
               required
             />
+            {needsSetup && <FieldError error={v.fieldError("password")} />}
           </div>
 
           <Button type="submit" className="w-full" disabled={busy}>

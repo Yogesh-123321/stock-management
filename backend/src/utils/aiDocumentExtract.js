@@ -66,23 +66,69 @@ const extOf = (fileName = "") => {
   return i === -1 ? "" : fileName.slice(i).toLowerCase();
 };
 
-// Strips ```json fences / stray commentary a model sometimes wraps its
-// answer in, and pulls out the first {...} block — models occasionally
-// preface the JSON with a sentence despite being told not to.
+// Scans from a given "{" and returns the matching "}" index by tracking
+// brace depth, while ignoring braces that appear inside JSON string
+// literals (so a description field containing "{" doesn't throw off the
+// count). Returns -1 if the object never closes.
+const findMatchingBrace = (s, openIndex) => {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = openIndex; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+};
+
+// Strips ```json fences, <think>/<thinking> reasoning blocks some models
+// emit before their answer, and stray commentary — then pulls out the
+// JSON object using balanced-brace matching (not just first-"{" to
+// last-"}", which breaks if the model's surrounding prose or a reasoning
+// block contains its own braces).
 const extractJsonObject = (text) => {
   if (!text) return null;
   let s = String(text).trim();
-  s = s.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) return null;
-  const candidate = s.slice(start, end + 1);
-  try {
-    const parsed = JSON.parse(candidate);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  s = s.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+  s = s.replace(/```(?:json)?/gi, "").trim();
+
+  // Try every "{" in turn (not just the first) in case an earlier one
+  // belongs to leftover reasoning text rather than the real answer.
+  let searchFrom = 0;
+  while (true) {
+    const start = s.indexOf("{", searchFrom);
+    if (start === -1) break;
+    const end = findMatchingBrace(s, start);
+    if (end !== -1) {
+      const candidate = s.slice(start, end + 1);
+      try {
+        const parsed = JSON.parse(candidate);
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch {
+        // fall through and try the next "{"
+      }
+    }
+    searchFrom = start + 1;
   }
+  return null;
 };
 
 const buildFieldSchemaText = (fields) =>
@@ -151,7 +197,14 @@ const callOpenRouter = async ({ model, imageUrls, promptText, systemPrompt, time
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 1500,
+        max_tokens: 2000,
+        // We only want the final JSON, not a visible chain-of-thought —
+        // and more importantly, hidden reasoning tokens are billed out of
+        // this same max_tokens budget, so an enabled-by-default "thinking"
+        // pass can consume the whole budget before the model ever writes
+        // the answer, leaving `content` empty/truncated. Disabling it
+        // keeps the full budget available for the actual JSON.
+        reasoning: { enabled: false },
         messages: [
           { role: "system", content: systemPrompt },
           {
@@ -171,8 +224,10 @@ const callOpenRouter = async ({ model, imageUrls, promptText, systemPrompt, time
       throw new Error(msg);
     }
 
-    const text = body?.choices?.[0]?.message?.content;
-    const parsed = extractJsonObject(text);
+    const message = body?.choices?.[0]?.message;
+    // Some providers still route output to `reasoning` even with
+    // reasoning disabled, so try `content` first and fall back to it.
+    const parsed = extractJsonObject(message?.content) || extractJsonObject(message?.reasoning);
     if (!parsed) throw new Error("Model reply wasn't a parseable JSON object");
     return parsed;
   } finally {

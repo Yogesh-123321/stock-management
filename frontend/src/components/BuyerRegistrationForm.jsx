@@ -6,6 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import api from "@/lib/api";
+import PartyDocumentAutoCheck from "@/components/PartyDocumentAutoCheck";
+import GstVerifyField from "@/components/GstVerifyField";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
+import { REGEX, isValidGstinChecksum } from "@/lib/validators";
 
 export const emptyBuyerForm = {
   companyName: "",
@@ -22,6 +27,34 @@ export const emptyBuyerForm = {
   signatoryName: "",
   signatoryDesignation: "",
   msmeNumber: "",
+};
+
+// Same rule set as VendorRegistrationForm.jsx (shared field set) — see
+// lib/validators.js for the pattern library.
+const BUYER_FORM_SCHEMA = {
+  companyName: {
+    required: true,
+    requiredMessage: "Company name is required",
+    regex: "companyName",
+    maxLength: 150,
+  },
+  address: { maxLength: 300 },
+  phone: { regex: "phoneLoose" },
+  email: { regex: "email" },
+  contactPersonName: { regex: "personName", maxLength: 80 },
+  contactDesignation: { regex: "alphaNumSpace", maxLength: 60 },
+  natureOfBusiness: { maxLength: 100 },
+  taxRegistrationNo: {
+    regex: "gstin",
+    validate: (v) =>
+      REGEX.gstin.test(v) && !isValidGstinChecksum(v)
+        ? "That GSTIN's checksum digit doesn't match — double-check for a typo"
+        : null,
+  },
+  principleCustomers: { maxLength: 150 },
+  signatoryName: { regex: "personName", maxLength: 80 },
+  signatoryDesignation: { regex: "alphaNumSpace", maxLength: 60 },
+  msmeNumber: { regex: "udyam" },
 };
 
 // Every supporting document is optional.
@@ -62,6 +95,7 @@ export default function BuyerRegistrationForm({
   const [isMsme, setIsMsme] = useState(!!buyer?.isMsme);
   const [files, setFiles] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const v = useFormValidation(BUYER_FORM_SCHEMA);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const setFile = (field) => (e) =>
@@ -69,8 +103,8 @@ export default function BuyerRegistrationForm({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.companyName.trim()) {
-      toast.error("Company name is required");
+    if (!v.validateAll(form)) {
+      toast.error("Please fix the highlighted fields before submitting");
       return;
     }
     setSubmitting(true);
@@ -115,27 +149,60 @@ export default function BuyerRegistrationForm({
           </legend>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Name of the company</Label>
-            <Input required value={form.companyName} onChange={set("companyName")} />
+            <Input
+              required
+              value={form.companyName}
+              onChange={set("companyName")}
+              onBlur={() => v.handleBlur("companyName", form.companyName, form)}
+            />
+            <FieldError error={v.fieldError("companyName")} />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Full address of company</Label>
-            <Textarea rows={2} value={form.address} onChange={set("address")} />
+            <Textarea
+              rows={2}
+              value={form.address}
+              onChange={set("address")}
+              onBlur={() => v.handleBlur("address", form.address, form)}
+            />
+            <FieldError error={v.fieldError("address")} />
           </div>
           <div className="space-y-1.5">
             <Label>Phone</Label>
-            <Input value={form.phone} onChange={set("phone")} />
+            <Input
+              value={form.phone}
+              onChange={set("phone")}
+              onBlur={() => v.handleBlur("phone", form.phone, form)}
+            />
+            <FieldError error={v.fieldError("phone")} />
           </div>
           <div className="space-y-1.5">
             <Label>Email</Label>
-            <Input type="email" value={form.email} onChange={set("email")} />
+            <Input
+              type="email"
+              value={form.email}
+              onChange={set("email")}
+              onBlur={() => v.handleBlur("email", form.email, form)}
+            />
+            <FieldError error={v.fieldError("email")} />
           </div>
           <div className="space-y-1.5">
             <Label>Contact person</Label>
-            <Input value={form.contactPersonName} onChange={set("contactPersonName")} />
+            <Input
+              value={form.contactPersonName}
+              onChange={set("contactPersonName")}
+              onBlur={() => v.handleBlur("contactPersonName", form.contactPersonName, form)}
+            />
+            <FieldError error={v.fieldError("contactPersonName")} />
           </div>
           <div className="space-y-1.5">
             <Label>Designation</Label>
-            <Input value={form.contactDesignation} onChange={set("contactDesignation")} />
+            <Input
+              value={form.contactDesignation}
+              onChange={set("contactDesignation")}
+              onBlur={() => v.handleBlur("contactDesignation", form.contactDesignation, form)}
+            />
+            <FieldError error={v.fieldError("contactDesignation")} />
           </div>
           <div className="space-y-1.5">
             <Label>Nature of the company</Label>
@@ -150,7 +217,13 @@ export default function BuyerRegistrationForm({
           </div>
           <div className="space-y-1.5">
             <Label>Nature of business</Label>
-            <Input value={form.natureOfBusiness} onChange={set("natureOfBusiness")} placeholder="Distributor / Trading / ..." />
+            <Input
+              value={form.natureOfBusiness}
+              onChange={set("natureOfBusiness")}
+              onBlur={() => v.handleBlur("natureOfBusiness", form.natureOfBusiness, form)}
+              placeholder="Distributor / Trading / ..."
+            />
+            <FieldError error={v.fieldError("natureOfBusiness")} />
           </div>
         </fieldset>
 
@@ -162,13 +235,25 @@ export default function BuyerRegistrationForm({
             <Label>Bank name, branch, A/C no. &amp; IFSC</Label>
             <Textarea rows={2} value={form.bankDetails} onChange={set("bankDetails")} />
           </div>
-          <div className="space-y-1.5">
-            <Label>GST / Sales Tax registration no.</Label>
-            <Input value={form.taxRegistrationNo} onChange={set("taxRegistrationNo")} placeholder="GSTIN / PAN" />
-          </div>
+          <GstVerifyField
+            value={form.taxRegistrationNo}
+            onChange={set("taxRegistrationNo")}
+            onBlur={() => v.handleBlur("taxRegistrationNo", form.taxRegistrationNo, form)}
+            error={v.fieldError("taxRegistrationNo")}
+            form={form}
+            setForm={setForm}
+            companyNameKey="companyName"
+            addressKey="address"
+            label="GST / Sales Tax registration no."
+          />
           <div className="space-y-1.5">
             <Label>Principal customers</Label>
-            <Input value={form.principleCustomers} onChange={set("principleCustomers")} />
+            <Input
+              value={form.principleCustomers}
+              onChange={set("principleCustomers")}
+              onBlur={() => v.handleBlur("principleCustomers", form.principleCustomers, form)}
+            />
+            <FieldError error={v.fieldError("principleCustomers")} />
           </div>
 
           <div className="sm:col-span-2 rounded-md border border-border p-3">
@@ -189,7 +274,13 @@ export default function BuyerRegistrationForm({
             {isMsme && (
               <div className="space-y-1.5 mt-3">
                 <Label>MSME / Udyam registration no. (optional)</Label>
-                <Input value={form.msmeNumber} onChange={set("msmeNumber")} placeholder="UDYAM-XX-00-0000000" />
+                <Input
+                  value={form.msmeNumber}
+                  onChange={set("msmeNumber")}
+                  onBlur={() => v.handleBlur("msmeNumber", form.msmeNumber, form)}
+                  placeholder="UDYAM-XX-00-0000000"
+                />
+                <FieldError error={v.fieldError("msmeNumber")} />
               </div>
             )}
           </div>
@@ -201,11 +292,21 @@ export default function BuyerRegistrationForm({
           </legend>
           <div className="space-y-1.5">
             <Label>Signatory name</Label>
-            <Input value={form.signatoryName} onChange={set("signatoryName")} />
+            <Input
+              value={form.signatoryName}
+              onChange={set("signatoryName")}
+              onBlur={() => v.handleBlur("signatoryName", form.signatoryName, form)}
+            />
+            <FieldError error={v.fieldError("signatoryName")} />
           </div>
           <div className="space-y-1.5">
             <Label>Signatory designation</Label>
-            <Input value={form.signatoryDesignation} onChange={set("signatoryDesignation")} />
+            <Input
+              value={form.signatoryDesignation}
+              onChange={set("signatoryDesignation")}
+              onBlur={() => v.handleBlur("signatoryDesignation", form.signatoryDesignation, form)}
+            />
+            <FieldError error={v.fieldError("signatoryDesignation")} />
           </div>
         </fieldset>
 
@@ -221,6 +322,7 @@ export default function BuyerRegistrationForm({
                   {doc.label} <span className="text-muted-foreground font-normal">(optional)</span>
                 </Label>
                 <Input type="file" onChange={setFile(doc.field)} />
+                <PartyDocumentAutoCheck docField={doc.field} file={files[doc.field]} form={form} setForm={setForm} />
                 {existing && !files[doc.field] && (
                   <p className="text-xs text-muted-foreground truncate">
                     Current:{" "}

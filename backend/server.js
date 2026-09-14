@@ -24,6 +24,7 @@ import notificationRoutes from "./src/routes/notificationRoutes.js";
 import approvalRoutes from "./src/routes/approvalRoutes.js";
 import activityLogRoutes from "./src/routes/activityLogRoutes.js";
 import aiRoutes from "./src/routes/aiRoutes.js";
+import gstRoutes from "./src/routes/gstRoutes.js";
 
 import { notFound, errorHandler } from "./src/middleware/errorHandler.js";
 import activityLogger from "./src/middleware/activityLogger.js";
@@ -72,6 +73,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/approvals", approvalRoutes);
 app.use("/api/activity-logs", activityLogRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/gst", gstRoutes);
 
 // 404 + error handlers MUST stay last — anything mounted after them is unreachable.
 app.use(notFound);

@@ -15,6 +15,13 @@ import {
   TableCell,
   TableEmpty,
 } from "@/components/ui/table";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
+
+const CATEGORY_SCHEMA = {
+  code: { required: true, requiredMessage: "Category code is required", regex: "categoryCode" },
+  description: { required: true, requiredMessage: "Description is required", maxLength: 150 },
+};
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -40,6 +47,8 @@ export default function PartCategories() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ code: "", description: "" });
   const [savingEdit, setSavingEdit] = useState(false);
+  const v = useFormValidation(CATEGORY_SCHEMA);
+  const vEdit = useFormValidation(CATEGORY_SCHEMA);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,8 +68,8 @@ export default function PartCategories() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.code.trim() || !form.description.trim()) {
-      toast.error("Category code and description are required");
+    if (!v.validateAll(form)) {
+      toast.error("Please fix the highlighted fields");
       return;
     }
     setSaving(true);
@@ -71,6 +80,7 @@ export default function PartCategories() {
       });
       setCategories((prev) => [...prev, data].sort((a, b) => a.code.localeCompare(b.code)));
       setForm({ code: "", description: "" });
+      v.reset();
       toast.success(`Category "${data.code}" added — it now shows up in the category picker`);
     } catch (err) {
       toast.error(err.response?.data?.message || "Could not add the category");
@@ -93,16 +103,18 @@ export default function PartCategories() {
   const startEdit = (category) => {
     setEditingId(category._id);
     setEditForm({ code: category.code, description: category.description });
+    vEdit.reset();
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm({ code: "", description: "" });
+    vEdit.reset();
   };
 
   const saveEdit = async (category) => {
-    if (!editForm.code.trim() || !editForm.description.trim()) {
-      toast.error("Category code and description are required");
+    if (!vEdit.validateAll(editForm)) {
+      toast.error("Please fix the highlighted fields");
       return;
     }
     setSavingEdit(true);
@@ -153,17 +165,21 @@ export default function PartCategories() {
               <Input
                 value={form.code}
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                onBlur={() => v.handleBlur("code", form.code, form)}
                 placeholder="e.g. FR"
                 maxLength={10}
               />
+              <FieldError error={v.fieldError("code")} />
             </div>
             <div className="space-y-1.5">
               <Label>Description</Label>
               <Input
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                onBlur={() => v.handleBlur("description", form.description, form)}
                 placeholder="e.g. Ferrite Bead"
               />
+              <FieldError error={v.fieldError("description")} />
             </div>
             <Button type="submit" disabled={saving}>
               <Plus className="mr-1 h-4 w-4" />
@@ -200,25 +216,33 @@ export default function PartCategories() {
                     <TableRow key={c._id}>
                       <TableCell className="font-mono-tech">
                         {isEditing ? (
-                          <Input
-                            value={editForm.code}
-                            onChange={(e) =>
-                              setEditForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))
-                            }
-                            className="h-8 text-xs font-mono-tech"
-                            maxLength={10}
-                          />
+                          <>
+                            <Input
+                              value={editForm.code}
+                              onChange={(e) =>
+                                setEditForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))
+                              }
+                              onBlur={() => vEdit.handleBlur("code", editForm.code, editForm)}
+                              className="h-8 text-xs font-mono-tech"
+                              maxLength={10}
+                            />
+                            <FieldError error={vEdit.fieldError("code")} />
+                          </>
                         ) : (
                           c.code
                         )}
                       </TableCell>
                       <TableCell>
                         {isEditing ? (
-                          <Input
-                            value={editForm.description}
-                            onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                            className="h-8 text-xs"
-                          />
+                          <>
+                            <Input
+                              value={editForm.description}
+                              onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                              onBlur={() => vEdit.handleBlur("description", editForm.description, editForm)}
+                              className="h-8 text-xs"
+                            />
+                            <FieldError error={vEdit.fieldError("description")} />
+                          </>
                         ) : (
                           c.description
                         )}

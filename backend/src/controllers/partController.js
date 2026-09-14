@@ -3,6 +3,7 @@ import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
+import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
 
 /*
   Attaches, to each part, how much of it has actually gone out through
@@ -59,17 +60,72 @@ async function attachKitDemand(parts) {
   return Array.isArray(parts) ? withDemand : withDemand[0];
 }
 
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Splits a search box query into individual terms on whitespace, so
+// "a b" is treated as two independent terms rather than the literal
+// substring "a b". Empty/whitespace-only input yields no terms.
+const searchTermsFrom = (search) =>
+  search ? String(search).trim().split(/\s+/).filter(Boolean) : [];
+
+// Builds a Mongo $or filter matching a part where ANY given term appears
+// in ANY of the searchable fields (part number, mfr part number,
+// description). Multi-term ranking (which terms matched, and how many)
+// happens afterwards in rankByMatchedTerms — this filter just widens the
+// candidate set to everything worth ranking.
+const buildPartSearchFilter = (terms) => {
+  if (!terms.length) return {};
+  return {
+    $or: terms.flatMap((term) => {
+      const rx = { $regex: escapeRegex(term), $options: "i" };
+      return [
+        { ttUniquePartNumber: rx },
+        { manufacturerPartNumber: rx },
+        { itemDescription: rx },
+      ];
+    }),
+  };
+};
+
+// Orders already-fetched parts so that a query like "a b" surfaces, in
+// order: parts matching every term, then parts matching only earlier
+// terms, then parts matching only later terms — matching-term-count wins
+// first, and among equal counts, matching an earlier-typed term outranks
+// matching a later one. Ties fall back to the original (incoming) order,
+// which callers should have pre-sorted (e.g. by part number).
+function rankByMatchedTerms(parts, terms) {
+  const termRegexes = terms.map((t) => new RegExp(escapeRegex(t), "i"));
+  const scored = parts.map((part, idx) => {
+    const haystack = [part.ttUniquePartNumber, part.manufacturerPartNumber, part.itemDescription]
+      .filter(Boolean)
+      .join(" ");
+    let matchCount = 0;
+    let weight = 0;
+    termRegexes.forEach((rx, i) => {
+      if (rx.test(haystack)) {
+        matchCount += 1;
+        // Earlier terms carry more weight, so "matches term 1 only" ranks
+        // above "matches term 2 only" among equal matchCounts.
+        weight += 2 ** (termRegexes.length - 1 - i);
+      }
+    });
+    return { part, idx, matchCount, weight };
+  });
+
+  scored.sort((a, b) => {
+    if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+    if (b.weight !== a.weight) return b.weight - a.weight;
+    return a.idx - b.idx;
+  });
+
+  return scored.map((s) => s.part);
+}
+
 // GET /api/parts?search=&limit=
 export const getParts = asyncHandler(async (req, res) => {
   const { search } = req.query;
-  const filter = {};
-  if (search) {
-    filter.$or = [
-      { ttUniquePartNumber: { $regex: search, $options: "i" } },
-      { manufacturerPartNumber: { $regex: search, $options: "i" } },
-      { itemDescription: { $regex: search, $options: "i" } },
-    ];
-  }
+  const terms = searchTermsFrom(search);
+  const filter = buildPartSearchFilter(terms);
   // The parts master has no pagination UI — it lists everything that
   // matches. 200 used to be hard-coded here, which silently cut the table
   // (and anything that counts off this endpoint, like the dashboard) off
@@ -80,20 +136,18 @@ export const getParts = asyncHandler(async (req, res) => {
     .populate("vendors", "companyName")
     .sort({ ttUniquePartNumber: 1 })
     .limit(limit);
-  res.json(await attachKitDemand(parts));
+  const withDemand = await attachKitDemand(parts);
+  // Single-term (or empty) searches keep the plain alphabetical order;
+  // multi-term searches get re-ordered by how many/which terms matched.
+  const ordered = terms.length > 1 ? rankByMatchedTerms(withDemand, terms) : withDemand;
+  res.json(ordered);
 });
 
 // GET /api/parts/count?search=  -> exact total, independent of any list limit
 export const getPartsCount = asyncHandler(async (req, res) => {
   const { search } = req.query;
-  const filter = {};
-  if (search) {
-    filter.$or = [
-      { ttUniquePartNumber: { $regex: search, $options: "i" } },
-      { manufacturerPartNumber: { $regex: search, $options: "i" } },
-      { itemDescription: { $regex: search, $options: "i" } },
-    ];
-  }
+  const terms = searchTermsFrom(search);
+  const filter = buildPartSearchFilter(terms);
   const count = await Part.countDocuments(filter);
   res.json({ count });
 });
@@ -367,11 +421,27 @@ export const adjustPartStock = asyncHandler(async (req, res) => {
   res.json(part);
 });
 
-// GET /api/parts/duplicates
-// Groups active parts by manufacturer part number (trimmed, case-insensitive)
-// and returns only the groups that contain more than one TT part number —
-// i.e. the same manufacturer part accidentally entered under different rows.
-export const getDuplicateParts = asyncHandler(async (req, res) => {
+// Every part field the duplicate finder knows how to compare on. Each
+// entry both drives the frontend's dropdown (via GET /parts/duplicates
+// with no criterion — see below) and picks the matching finder function.
+const DUPLICATE_CRITERIA = {
+  manufacturerPartNumber: {
+    label: "Manufacturer part number (exact match)",
+    finder: findDuplicatesByManufacturerPartNumber,
+  },
+  description: {
+    label: "Item description (exact match)",
+    finder: findDuplicatesByExactDescription,
+  },
+  aiSimilarity: {
+    label: "Item description (AI similarity)",
+    finder: findDuplicatesByDescriptionSimilarity,
+  },
+};
+
+// Same manufacturer part number (trimmed, case-insensitive) entered under
+// more than one TT part number — the original, and still default, check.
+async function findDuplicatesByManufacturerPartNumber() {
   const groups = await Part.aggregate([
     {
       $match: {
@@ -380,13 +450,13 @@ export const getDuplicateParts = asyncHandler(async (req, res) => {
     },
     {
       $addFields: {
-        _mfgKey: { $toUpper: { $trim: { input: "$manufacturerPartNumber" } } },
+        _key: { $toUpper: { $trim: { input: "$manufacturerPartNumber" } } },
       },
     },
-    { $match: { _mfgKey: { $ne: "" } } },
+    { $match: { _key: { $ne: "" } } },
     {
       $group: {
-        _id: "$_mfgKey",
+        _id: "$_key",
         partIds: { $push: "$_id" },
         count: { $sum: 1 },
       },
@@ -395,20 +465,157 @@ export const getDuplicateParts = asyncHandler(async (req, res) => {
     { $sort: { count: -1, _id: 1 } },
   ]);
 
-  const allIds = groups.flatMap((g) => g.partIds);
-  const parts = await Part.find({ _id: { $in: allIds } })
+  const parts = await partsByIds(groups.flatMap((g) => g.partIds));
+  return groups.map((g) => ({
+    criterion: "manufacturerPartNumber",
+    label: `Mfr part no.: ${g._id}`,
+    count: g.count,
+    parts: g.partIds.map((id) => parts.get(String(id))).filter(Boolean),
+  }));
+}
+
+// Same item description (trimmed, case-insensitive, repeated whitespace
+// collapsed) entered under more than one TT part number — catches parts
+// re-entered under a fresh part number with no manufacturer number to tie
+// them together.
+async function findDuplicatesByExactDescription() {
+  const parts = await Part.find({ itemDescription: { $exists: true, $nin: [null, ""] } })
     .populate("vendors", "companyName")
     .sort({ ttUniquePartNumber: 1 })
     .lean();
-  const byId = new Map(parts.map((p) => [String(p._id), p]));
 
-  const duplicates = groups.map((g) => ({
-    manufacturerPartNumber: g._id,
-    count: g.count,
-    parts: g.partIds.map((id) => byId.get(String(id))).filter(Boolean),
-  }));
+  const byKey = new Map();
+  for (const p of parts) {
+    const key = String(p.itemDescription || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, " ");
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(p);
+  }
 
-  res.json(duplicates);
+  return [...byKey.values()]
+    .filter((group) => group.length > 1)
+    .map((group) => ({
+      criterion: "description",
+      label: `Description: “${group[0].itemDescription.trim()}”`,
+      count: group.length,
+      parts: group,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+// Above this cosine similarity, two item descriptions are treated as
+// describing the same physical part (near-duplicate wording, not just
+// "same rough category of thing").
+const AI_DUPLICATE_MIN_SIMILARITY = 0.88;
+// Comparing every part against every other part is O(n^2); past this many
+// parts a single request would take too long (and burn too many embedding
+// tokens) to run synchronously.
+const AI_DUPLICATE_MAX_PARTS = 800;
+
+// Semantic near-duplicate check: embeds every part's description, then
+// groups any parts whose descriptions land above AI_DUPLICATE_MIN_SIMILARITY
+// — transitively, via union-find, so A~B and B~C land in one group even if
+// A and C alone fall just under the bar. Catches things the exact-match
+// checks above miss, e.g. "24V DC cooling fan" vs "Cooling fan, 24VDC".
+async function findDuplicatesByDescriptionSimilarity() {
+  const parts = await Part.find({ itemDescription: { $exists: true, $nin: [null, ""] } })
+    .populate("vendors", "companyName")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean();
+
+  if (parts.length > AI_DUPLICATE_MAX_PARTS) {
+    const err = new Error(
+      `AI similarity check only runs on up to ${AI_DUPLICATE_MAX_PARTS} parts at a time (the master currently has ${parts.length}). Try the manufacturer part number or description checks instead.`
+    );
+    err.httpStatus = 422;
+    throw err;
+  }
+  if (parts.length < 2) return [];
+
+  let vectors;
+  try {
+    vectors = await getEmbeddings(parts.map((p) => p.itemDescription || ""));
+  } catch (err) {
+    const wrapped = new Error(err.message || "Could not run AI similarity matching");
+    wrapped.httpStatus = err instanceof EmbeddingError ? 502 : 500;
+    throw wrapped;
+  }
+
+  const parent = parts.map((_, i) => i);
+  const find = (x) => (parent[x] === x ? x : (parent[x] = find(parent[x])));
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i + 1; j < parts.length; j++) {
+      if (cosineSimilarity(vectors[i], vectors[j]) >= AI_DUPLICATE_MIN_SIMILARITY) {
+        union(i, j);
+      }
+    }
+  }
+
+  const byRoot = new Map();
+  parts.forEach((p, i) => {
+    const root = find(i);
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root).push(p);
+  });
+
+  return [...byRoot.values()]
+    .filter((g) => g.length > 1)
+    .map((g) => ({
+      criterion: "aiSimilarity",
+      label: `Similar description: “${g[0].itemDescription}”`,
+      count: g.length,
+      parts: g,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+// Shared by every criterion above: fetch full part docs (with vendors
+// populated) for a set of ids, keyed by id string for easy lookup.
+async function partsByIds(ids) {
+  const parts = await Part.find({ _id: { $in: ids } })
+    .populate("vendors", "companyName")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean();
+  return new Map(parts.map((p) => [String(p._id), p]));
+}
+
+// GET /api/parts/duplicates?criterion=manufacturerPartNumber|description|aiSimilarity
+// Criterion defaults to manufacturerPartNumber (the original behaviour) for
+// callers that don't pass one. GET /api/parts/duplicate-criteria lists the
+// available options for a dropdown.
+export const getDuplicateParts = asyncHandler(async (req, res) => {
+  const criterion = req.query.criterion || "manufacturerPartNumber";
+  const entry = DUPLICATE_CRITERIA[criterion];
+  if (!entry) {
+    res.status(400);
+    throw new Error(
+      `Unknown duplicate-check criterion "${criterion}". Valid options: ${Object.keys(DUPLICATE_CRITERIA).join(", ")}.`
+    );
+  }
+
+  try {
+    const groups = await entry.finder();
+    res.json(groups);
+  } catch (err) {
+    if (err.httpStatus) res.status(err.httpStatus);
+    throw err;
+  }
+});
+
+// GET /api/parts/duplicate-criteria — powers the criterion dropdown.
+export const getDuplicateCriteria = asyncHandler(async (req, res) => {
+  res.json(
+    Object.entries(DUPLICATE_CRITERIA).map(([value, { label }]) => ({ value, label }))
+  );
 });
 
 // DELETE /api/parts/:id

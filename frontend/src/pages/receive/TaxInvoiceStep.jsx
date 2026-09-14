@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { fetchReceivedTotal } from "@/lib/receivedTotal";
-import { UploadCloud, SkipForward, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useAutoExtractOnUpload } from "@/lib/useAutoExtractOnUpload";
+import { findMismatches } from "@/lib/documentVerify";
+import DocumentMismatchWarning from "@/components/DocumentMismatchWarning";
+import FieldError from "@/components/FieldError";
+import { useFormValidation } from "@/lib/useFormValidation";
+import { UploadCloud, SkipForward, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+
+const TAX_INVOICE_SCHEMA = {
+  invoiceNumber: { required: true, regex: "docNumber" },
+  invoiceQuantity: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+};
+
+// AI-read fields off the uploaded tax invoice, checked against what's
+// typed into this step (and the vendor already selected).
+const TAX_INVOICE_DOC_MAPPING = [
+  { extractedKey: "vendorName", enteredKey: "vendorName", label: "Vendor name", type: "text" },
+  { extractedKey: "invoiceNumber", enteredKey: "invoiceNumber", label: "Invoice number", type: "text" },
+  { extractedKey: "invoiceDate", enteredKey: "invoiceDate", label: "Invoice date", type: "text" },
+  { extractedKey: "totalQuantity", enteredKey: "invoiceQuantity", label: "Total quantity", type: "number" },
+];
 
 // purchaseOrder here is whichever PO/PI document anchors this delivery (the
 // "primary" one — PO if uploaded, otherwise the PI).
@@ -26,6 +45,32 @@ export default function TaxInvoiceStep({
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const v = useFormValidation(TAX_INVOICE_SCHEMA);
+
+  // Auto-fetch details off the file the moment it's picked, and fill in
+  // whatever's still blank; any field the person already typed that
+  // disagrees is surfaced as a warning below (see TAX_INVOICE_DOC_MAPPING).
+  const { status: aiStatus, fields: aiFields } = useAutoExtractOnUpload(file, { documentType: "taxInvoice" });
+  const aiAppliedFileRef = useRef(null);
+
+  useEffect(() => {
+    if (aiStatus !== "done" || !aiFields || !file) return;
+    if (aiAppliedFileRef.current === file) return;
+    aiAppliedFileRef.current = file;
+    if (!invoiceNumber.trim() && aiFields.invoiceNumber) setInvoiceNumber(aiFields.invoiceNumber);
+    if (!invoiceDate && aiFields.invoiceDate) setInvoiceDate(aiFields.invoiceDate);
+    if (invoiceQuantity === "" && aiFields.totalQuantity != null) setInvoiceQuantity(String(aiFields.totalQuantity));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiStatus, aiFields, file]);
+
+  const aiMismatches =
+    aiStatus === "done"
+      ? findMismatches(
+          aiFields,
+          { vendorName: vendor?.companyName, invoiceNumber, invoiceDate, invoiceQuantity },
+          TAX_INVOICE_DOC_MAPPING
+        )
+      : [];
 
   const { po: poQty = null, pi: piQty = null } = expectedQuantities;
   const docQtys = [
@@ -71,6 +116,10 @@ export default function TaxInvoiceStep({
       toast.error("Attach the tax invoice file, or skip if it hasn't arrived yet");
       return;
     }
+    if (!v.validateAll({ invoiceNumber, invoiceQuantity })) {
+      toast.error("Fix the highlighted field before uploading");
+      return;
+    }
     setSubmitting(true);
     try {
       const fd = new FormData();
@@ -97,6 +146,33 @@ export default function TaxInvoiceStep({
       } else if (purchaseOrder) {
         toast(rec?.reason || "PO/PI left open", { icon: "⚠️" });
       }
+
+      // Kick off the same embeddings-based line-item match used on the
+      // Documents page (getTaxInvoiceLineMatch), so a difference between
+      // what the invoice lists and what was actually entered into stock
+      // surfaces right away instead of only when someone later opens that
+      // dialog manually.
+      if (data?._id) {
+        api
+          .get(`/tax-invoices/${data._id}/line-match`)
+          .then(({ data: match }) => {
+            const diffCount = (match.matches || []).filter((m) => m.differences?.length > 0).length;
+            const unmatched = (match.unmatchedInvoiceLines?.length || 0) + (match.unmatchedStockEntries?.length || 0);
+            if (diffCount > 0 || unmatched > 0) {
+              toast(
+                `Line-item check: ${diffCount} line(s) differ from stock entry, ${unmatched} unmatched — review in Documents`,
+                { icon: "⚠️", duration: 6000 }
+              );
+            } else if ((match.matches || []).length > 0) {
+              toast.success("Line-item check: invoice matches stock entry");
+            }
+          })
+          .catch(() => {
+            // Best-effort only — line matching needs a readable PDF and a
+            // configured AI provider; silently skip if either isn't there.
+          });
+      }
+
       onUploaded();
     } catch (err) {
       toast.error(err.response?.data?.message || "Upload failed");
@@ -119,7 +195,13 @@ export default function TaxInvoiceStep({
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>Tax invoice number</Label>
-            <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="INV-2026-0142" />
+            <Input
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+              onBlur={() => v.handleBlur("invoiceNumber", invoiceNumber, { invoiceNumber, invoiceQuantity })}
+              placeholder="INV-2026-0142"
+            />
+            <FieldError error={v.fieldError("invoiceNumber")} />
           </div>
           <div className="space-y-1.5">
             <Label>Invoice date</Label>
@@ -132,17 +214,31 @@ export default function TaxInvoiceStep({
               min="0"
               value={invoiceQuantity}
               onChange={(e) => setInvoiceQuantity(e.target.value)}
+              onBlur={() => v.handleBlur("invoiceQuantity", invoiceQuantity, { invoiceNumber, invoiceQuantity })}
               placeholder={String(receivedTotal || "")}
             />
+            <FieldError error={v.fieldError("invoiceQuantity")} />
           </div>
           <div className="space-y-1.5">
             <Label>File</Label>
             <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            {aiStatus === "loading" && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Reading document to check the details…
+              </p>
+            )}
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes (optional)</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+
+          {aiMismatches.length > 0 && (
+            <div className="sm:col-span-2">
+              <DocumentMismatchWarning mismatches={aiMismatches} documentLabel="the uploaded tax invoice" />
+            </div>
+          )}
 
           {purchaseOrder && (
             <div

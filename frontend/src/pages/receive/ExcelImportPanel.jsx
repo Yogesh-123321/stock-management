@@ -10,6 +10,8 @@ import PartDuplicateCheck from "@/components/PartDuplicateCheck";
 import PartNumberPreview from "@/components/PartNumberPreview";
 import CategorySelect from "@/components/CategorySelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
+import FieldError from "@/components/FieldError";
+import { validateValue } from "@/lib/validators";
 import {
   FileSpreadsheet,
   UploadCloud,
@@ -54,6 +56,26 @@ const emptyNewPart = () => ({
   category: "",
   partTypeBatchNo: "",
 });
+
+// Same field rules as the manual "new part" form on the Stock entry step —
+// this is the bulk-import path for the same data, so it should be no more
+// permissive than typing it in one row at a time.
+const ROW_FIELD_RULES = {
+  itemDescription: { required: true, requiredMessage: "Item description is required", maxLength: 200 },
+  manufacturerPartNumber: { regex: "docNumber" },
+  companyCode: { required: true, requiredMessage: "Company code is required", regex: "categoryCode" },
+  partTypeBatchNo: {
+    required: true,
+    requiredMessage: "Part type / batch no. is required",
+    regex: "alphaNumSpace",
+    maxLength: 30,
+  },
+  quantityReceived: { required: true, requiredMessage: "Enter the quantity received", regex: "positiveInteger", min: 1 },
+};
+
+function validateRowField(field, value) {
+  return validateValue(value, ROW_FIELD_RULES[field], null);
+}
 
 export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onImported, onClose }) {
   const [phase, setPhase] = useState("upload"); // upload -> pick-date -> preview -> done
@@ -140,6 +162,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
         isAlternate: false,
         alternateOfPart: null,
         quantityReceived: r.suggestedQuantity != null ? String(r.suggestedQuantity) : "",
+        errors: {},
         newPart: r.matchedPart
           ? emptyNewPart()
           : {
@@ -150,6 +173,11 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
       }));
     setRows(dayRows);
     setPhase("preview");
+  };
+
+  const blurRowField = (rowIndex, field, value) => {
+    const err = validateRowField(field, value);
+    setRows((prev) => prev.map((r) => (r.rowIndex === rowIndex ? { ...r, errors: { ...r.errors, [field]: err } } : r)));
   };
 
   const updateRow = (rowIndex, patch) => {
@@ -168,11 +196,13 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
 
   const rowIsValid = (r) => {
     if (!r.included) return true; // skipped rows don't block submission
-    const qty = Number(r.quantityReceived);
-    if (!qty || qty < 1) return false;
+    if (validateRowField("quantityReceived", r.quantityReceived)) return false;
     if (r.matchType === "existing_part_number") return !!r.matchedPart;
     if (r.isAlternate && !r.alternateOfPart) return false;
-    return !!(r.newPart.itemDescription && r.newPart.companyCode && r.newPart.category && r.newPart.partTypeBatchNo);
+    if (!r.newPart.category) return false;
+    return ["itemDescription", "manufacturerPartNumber", "companyCode", "partTypeBatchNo"].every(
+      (field) => !validateRowField(field, r.newPart[field])
+    );
   };
 
   const canCommit = includedRows.length > 0 && rows.every(rowIsValid);
@@ -343,7 +373,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
 
             <div className="space-y-2">
               {rows.map((r) => (
-                <RowEditor key={r.rowIndex} row={r} updateRow={updateRow} updateNewPart={updateNewPart} />
+                <RowEditor key={r.rowIndex} row={r} updateRow={updateRow} updateNewPart={updateNewPart} blurRowField={blurRowField} />
               ))}
             </div>
           </CardContent>
@@ -405,7 +435,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
   );
 }
 
-function RowEditor({ row, updateRow, updateNewPart }) {
+function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
   const isNew = row.matchType === "new_part_number";
   const normalize = (s) => String(s || "").trim().toLowerCase();
   // Only set for a row that started out unmatched and was then resolved to
@@ -439,10 +469,14 @@ function RowEditor({ row, updateRow, updateNewPart }) {
             <Input
               value={row.newPart.itemDescription}
               onChange={(e) => updateNewPart(row.rowIndex, "itemDescription", e.target.value)}
+              onBlur={(e) => blurRowField(row.rowIndex, "itemDescription", e.target.value)}
               className="h-8 text-xs"
             />
           ) : (
             <span className="block text-sm break-words">{row.itemDescription}</span>
+          )}
+          {isNew && row.errors?.itemDescription && (
+            <FieldError error={row.errors.itemDescription} />
           )}
           {row.dateUnrecognized && (
             <span className="flex items-start gap-1 text-[11px] text-amber-700 break-words">
@@ -466,14 +500,18 @@ function RowEditor({ row, updateRow, updateNewPart }) {
           )}
         </div>
 
-        <Input
-          type="number"
-          min="1"
-          value={row.quantityReceived}
-          onChange={(e) => updateRow(row.rowIndex, { quantityReceived: e.target.value })}
-          className="h-8 w-24 text-right shrink-0"
-          disabled={!row.included}
-        />
+        <div className="shrink-0">
+          <Input
+            type="number"
+            min="1"
+            value={row.quantityReceived}
+            onChange={(e) => updateRow(row.rowIndex, { quantityReceived: e.target.value })}
+            onBlur={(e) => blurRowField(row.rowIndex, "quantityReceived", e.target.value)}
+            className="h-8 w-24 text-right"
+            disabled={!row.included}
+          />
+          {row.errors?.quantityReceived && <FieldError error={row.errors.quantityReceived} />}
+        </div>
 
         <div className="shrink-0 pt-1">
           {row.matchedPart ? (
@@ -532,9 +570,11 @@ function RowEditor({ row, updateRow, updateNewPart }) {
               <Input
                 value={row.newPart.companyCode}
                 onChange={(e) => updateNewPart(row.rowIndex, "companyCode", e.target.value)}
+                onBlur={(e) => blurRowField(row.rowIndex, "companyCode", e.target.value)}
                 className="h-8 text-xs"
                 placeholder="TT"
               />
+              <FieldError error={row.errors?.companyCode} />
             </div>
             <div className="space-y-1 min-w-0">
               <Label className="text-[11px]">Category</Label>
@@ -549,17 +589,21 @@ function RowEditor({ row, updateRow, updateNewPart }) {
               <Input
                 value={row.newPart.partTypeBatchNo}
                 onChange={(e) => updateNewPart(row.rowIndex, "partTypeBatchNo", e.target.value)}
+                onBlur={(e) => blurRowField(row.rowIndex, "partTypeBatchNo", e.target.value)}
                 className="h-8 text-xs"
                 placeholder="FAN"
               />
+              <FieldError error={row.errors?.partTypeBatchNo} />
             </div>
             <div className="space-y-1 min-w-0">
               <Label className="text-[11px]">Mfr part no. (optional)</Label>
               <Input
                 value={row.newPart.manufacturerPartNumber}
                 onChange={(e) => updateNewPart(row.rowIndex, "manufacturerPartNumber", e.target.value)}
+                onBlur={(e) => blurRowField(row.rowIndex, "manufacturerPartNumber", e.target.value)}
                 className="h-8 text-xs"
               />
+              <FieldError error={row.errors?.manufacturerPartNumber} />
             </div>
           </div>
 

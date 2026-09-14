@@ -9,6 +9,7 @@ import {
   createPart,
   adjustPartStock,
   getDuplicateParts,
+  getDuplicateCriteria,
   deletePart,
 } from "../controllers/partController.js";
 import { updatePart } from "../controllers/partAdminController.js";
@@ -18,6 +19,7 @@ const router = express.Router();
 
 // Declared before "/:id" so it is never swallowed by the id route.
 router.get("/duplicates", getDuplicateParts);
+router.get("/duplicate-criteria", getDuplicateCriteria);
 router.get("/count", getPartsCount);
 
 router.get("/", getParts);

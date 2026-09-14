@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableHeader,
@@ -41,6 +42,7 @@ import {
   History,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Sparkles,
 } from "lucide-react";
 
 /**
@@ -50,17 +52,17 @@ const COLUMNS = [
   {
     key: "ttUniquePartNumber",
     label: "TT part number",
-    width: "w-[170px]",
+    width: "w-[130px]",
     align: "left",
     sortValue: (p) => (p.ttUniquePartNumber || "").toLowerCase(),
   },
   {
     key: "itemDescription",
     label: "Description",
-    // No fixed width — this column takes whatever space the others leave
-    // behind, and its cells wrap instead of truncating (see the row
-    // render below), so the full description is always visible without
-    // a horizontal scrollbar.
+    // No fixed width — every other column below is trimmed to a compact
+    // fixed size, so this one absorbs whatever space is left over. Kept
+    // on a single line (see the row render below); the table stays
+    // within the viewport, so no horizontal scrollbar is needed either.
     width: "w-auto",
     align: "left",
     sortValue: (p) => (p.itemDescription || "").toLowerCase(),
@@ -68,21 +70,21 @@ const COLUMNS = [
   {
     key: "manufacturerPartNumber",
     label: "Mfr part no.",
-    width: "w-[120px]",
+    width: "w-[95px]",
     align: "left",
     sortValue: (p) => (p.manufacturerPartNumber || "").toLowerCase(),
   },
   {
     key: "category",
     label: "Category",
-    width: "w-[90px]",
+    width: "w-[75px]",
     align: "left",
     sortValue: (p) => (p.category || "").toLowerCase(),
   },
   {
     key: "vendors",
     label: "Vendor(s)",
-    width: "w-[150px]",
+    width: "w-[110px]",
     align: "left",
     sortValue: (p) =>
       (p.vendors && p.vendors.length ? p.vendors[0].companyName : "").toLowerCase(),
@@ -90,21 +92,21 @@ const COLUMNS = [
   {
     key: "quantityInStock",
     label: "Stock qty",
-    width: "w-[80px]",
+    width: "w-[65px]",
     align: "right",
     sortValue: (p) => Number(p.quantityInStock ?? 0),
   },
   {
     key: "totalQtyInKits",
     label: "Qty in kits",
-    width: "w-[100px]",
+    width: "w-[80px]",
     align: "right",
     sortValue: (p) => Number(p.totalQtyInKits ?? 0),
   },
   {
     key: "isAlternatePart",
     label: "Alternate?",
-    width: "w-[95px]",
+    width: "w-[80px]",
     align: "left",
     sortValue: (p) => (p.isAlternatePart ? 1 : 0),
   },
@@ -1524,20 +1526,43 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
  * part number and surfaces any group with more than one TT part number.
  * ------------------------------------------------------------------ */
 function DuplicatePartsDialog({ onClose, onChanged }) {
+  const [criteria, setCriteria] = useState([]);
+  const [criterion, setCriterion] = useState("manufacturerPartNumber");
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [comparingGroup, setComparingGroup] = useState(null);
+
+  // Populates the dropdown. Falls back to just the original
+  // manufacturer-number check if this call fails for some reason, so an
+  // older backend (or a hiccup) doesn't leave the dropdown empty.
+  useEffect(() => {
+    api
+      .get("/parts/duplicate-criteria")
+      .then(({ data }) => {
+        if (Array.isArray(data) && data.length) setCriteria(data);
+      })
+      .catch(() => {
+        setCriteria([{ value: "manufacturerPartNumber", label: "Manufacturer part number (exact match)" }]);
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError("");
     api
-      .get("/parts/duplicates")
+      .get("/parts/duplicates", { params: { criterion } })
       .then(({ data }) => {
         if (!cancelled) setGroups(Array.isArray(data) ? data : []);
       })
       .catch((err) => {
-        toast.error(err.response?.data?.message || "Could not check for duplicate parts");
+        const message = err.response?.data?.message || "Could not check for duplicate parts";
+        if (!cancelled) {
+          setGroups([]);
+          setLoadError(message);
+        }
+        toast.error(message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -1545,7 +1570,7 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [criterion]);
 
   // Keeps the group list (and the open comparison view, if any) in sync
   // after an edit or delete performed from inside the comparison grid.
@@ -1593,7 +1618,7 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
               Duplicate part numbers
             </h2>
             <p className="text-xs text-muted-foreground">
-              Same manufacturer part number entered under more than one TT part number.
+              Parts that look like the same real-world item entered more than once.
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -1601,22 +1626,54 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
           </Button>
         </div>
 
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-secondary/30 px-5 py-3">
+          <span className="text-xs font-medium text-muted-foreground">Compare by</span>
+          <Select value={criterion} onValueChange={setCriterion}>
+            <SelectTrigger className="h-8 w-auto min-w-[220px] text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            {/* z-[200]: this dialog is z-[120] and Radix portals the list to
+                document.body, so the shared default of z-50 would paint
+                behind the dialog overlay (see CategorySelect.jsx for the
+                same fix). */}
+            <SelectContent className="z-[200]">
+              {criteria.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  <span className="inline-flex items-center gap-1.5">
+                    {c.value === "aiSimilarity" && <Sparkles className="h-3.5 w-3.5 text-accent" />}
+                    {c.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {criterion === "aiSimilarity" && (
+            <span className="text-xs text-muted-foreground">
+              Uses AI to catch same-part descriptions worded differently — may take a moment.
+            </span>
+          )}
+        </div>
+
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading && <p className="py-8 text-center text-sm text-muted-foreground">Checking…</p>}
 
-          {!loading && groups.length === 0 && (
+          {!loading && loadError && (
+            <p className="py-8 text-center text-sm text-destructive">{loadError}</p>
+          )}
+
+          {!loading && !loadError && groups.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No duplicate manufacturer part numbers found.
+              No duplicates found on this criterion.
             </p>
           )}
 
-          {!loading && groups.length > 0 && (
+          {!loading && !loadError && groups.length > 0 && (
             <div className="space-y-4">
-              {groups.map((g) => (
-                <div key={g.manufacturerPartNumber} className="rounded-lg border border-border">
+              {groups.map((g, gIdx) => (
+                <div key={`${g.criterion}-${gIdx}`} className="rounded-lg border border-border">
                   <div className="flex items-center justify-between gap-2 border-b border-border bg-secondary/60 px-3 py-2">
-                    <p className="font-mono-tech text-sm font-semibold">
-                      Mfr: {g.manufacturerPartNumber}
+                    <p className="truncate text-sm font-semibold" title={g.label}>
+                      {g.label}
                     </p>
                     <div className="flex items-center gap-2">
                       <Badge variant="warning">{g.count} entries</Badge>
@@ -1760,8 +1817,8 @@ function PartComparisonDialog({ group, onClose, onPartUpdated, onPartDeleted }) 
               <Columns3 className="h-4 w-4 text-accent" />
               Comparing {parts.length} entries
             </h2>
-            <p className="font-mono-tech text-xs text-muted-foreground">
-              Mfr: {group.manufacturerPartNumber}
+            <p className="truncate font-mono-tech text-xs text-muted-foreground" title={group.label}>
+              {group.label}
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -1875,6 +1932,13 @@ export default function Parts() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState({ key: "ttUniquePartNumber", dir: "asc" });
+  // True once the user has explicitly clicked a column header for the
+  // current set of results. Until then, a multi-word search ("a b") shows
+  // the server's relevance order (all-terms matches, then earlier-term-only
+  // matches, then later-term-only matches) instead of being immediately
+  // re-sorted back to plain alphabetical order.
+  const [manualSort, setManualSort] = useState(false);
+  const isMultiTermSearch = search.trim().split(/\s+/).filter(Boolean).length > 1;
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(null);
   const [viewingId, setViewingId] = useState(null);
@@ -1889,6 +1953,9 @@ export default function Parts() {
       try {
         const { data } = await api.get("/parts", { params: search ? { search } : {} });
         setParts(data);
+        // Fresh results for this search start in relevance order; a manual
+        // column-sort choice only applies until the search text changes again.
+        setManualSort(false);
       } catch (err) {
         toast.error(err.response?.data?.message || "Could not load parts");
       } finally {
@@ -1898,12 +1965,18 @@ export default function Parts() {
     return () => clearTimeout(t);
   }, [search, reloadKey]);
 
-  const toggleSort = (key) =>
+  const toggleSort = (key) => {
+    setManualSort(true);
     setSort((s) =>
       s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }
     );
+  };
 
   const sortedParts = useMemo(() => {
+    // A multi-word search the user hasn't manually re-sorted: keep the
+    // server's relevance order (all-terms matches first, then partial
+    // matches) rather than collapsing it back to a column sort.
+    if (isMultiTermSearch && !manualSort) return parts;
     const col = COLUMNS.find((c) => c.key === sort.key);
     if (!col) return parts;
     const dir = sort.dir === "asc" ? 1 : -1;
@@ -1914,7 +1987,7 @@ export default function Parts() {
       if (av > bv) return 1 * dir;
       return 0;
     });
-  }, [parts, sort]);
+  }, [parts, sort, isMultiTermSearch, manualSort]);
 
   const SortIcon = ({ colKey }) => {
     if (sort.key !== colKey) return <ArrowUpDown className="ml-1 inline h-3 w-3 opacity-40" />;
@@ -1993,7 +2066,7 @@ export default function Parts() {
           <CardTitle className="text-base font-display">Master part database</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table className="table-fixed">
+          <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[56px] text-left select-none">S.No</TableHead>

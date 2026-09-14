@@ -51,7 +51,7 @@ export default function CategorySelect({
   return (
     <div className="space-y-1">
       <Select
-        value={value || undefined}
+        value={value ?? ""}
         onValueChange={onChange}
         disabled={disabled || loading}
       >

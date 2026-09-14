@@ -97,7 +97,7 @@ export async function bookExistingPart({
  * from. Never called for a rejected request.
  */
 export async function createPartFromApprovedRequest(request) {
-  const { newPart, requestType, alternateOfPart: alternateOfPartId, vendor } = request;
+  const { newPart, requestType, alternateOfPart: alternateOfPartId, vendor, requestRemarks } = request;
   const isAlternate = requestType === "alternate_part";
 
   if (!newPart || !newPart.itemDescription || !newPart.companyCode || !newPart.category || !newPart.partTypeBatchNo) {
@@ -131,6 +131,10 @@ export async function createPartFromApprovedRequest(request) {
     vendors: vendor ? [vendor] : [],
     isAlternatePart: isAlternate,
     alternateOf: isAlternate ? alternateOfPart._id : null,
+    // Carries the "remarks for the approver" typed at registration time
+    // (stock-entry step) through to the part record, so it's visible in the
+    // part details popup without having to dig up the original request.
+    remarks: requestRemarks || "",
   });
 
   if (isAlternate) {
@@ -211,6 +215,7 @@ export async function bookNewPart({
       vendors: [vendor],
       isAlternatePart: isAlternate,
       alternateOf: isAlternate ? alternateOfPart._id : null,
+      remarks: approvedRequest?.requestRemarks || "",
     });
 
     if (isAlternate) {

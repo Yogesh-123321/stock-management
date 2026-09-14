@@ -29,9 +29,18 @@ export class EmbeddingError extends Error {
   }
 }
 
+// The embeddings endpoint hard-rejects a single request with more than
+// this many inputs ("Too big: expected array to have <=128 items") — seen
+// in practice once the duplicate-parts AI check ran on a few hundred
+// parts at once. Batching below keeps every caller working regardless of
+// how many texts it passes in one call.
+const MAX_INPUTS_PER_REQUEST = 128;
+
 /**
  * @param {string[]} texts — non-empty strings, in order. Order of the
- *   returned array matches the order of `texts`.
+ *   returned array matches the order of `texts`. Internally split into
+ *   batches of MAX_INPUTS_PER_REQUEST if needed — callers don't need to
+ *   chunk their input themselves.
  * @returns {Promise<number[][]>}
  */
 export async function getEmbeddings(texts) {
@@ -41,6 +50,17 @@ export async function getEmbeddings(texts) {
   const clean = (texts || []).map((t) => (t == null ? "" : String(t).trim()));
   if (clean.length === 0) return [];
 
+  const vectors = [];
+  for (let start = 0; start < clean.length; start += MAX_INPUTS_PER_REQUEST) {
+    const batch = clean.slice(start, start + MAX_INPUTS_PER_REQUEST);
+    const batchVectors = await getEmbeddingsBatch(batch);
+    vectors.push(...batchVectors);
+  }
+  return vectors;
+}
+
+// Does the actual API call for one batch (<=MAX_INPUTS_PER_REQUEST texts).
+async function getEmbeddingsBatch(clean) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_EXTRACT_TIMEOUT_MS);
   try {

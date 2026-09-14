@@ -19,6 +19,19 @@ const partSchema = new mongoose.Schema(
     // kept only so older rows imported before that change still show theirs.
     runningSerialNo: { type: String, trim: true, default: "" },
 
+    hsnCode: { type: String, trim: true, default: "" },
+    unit: { type: String, trim: true, default: "" },
+
+    // Free-text notes about the part. Pre-filled from the "remarks for the
+    // approver" the operator typed when raising the new-part / alternate-part
+    // request (see PartApprovalRequest.requestRemarks and
+    // utils/stockBooking.js), and editable afterwards from the parts master
+    // edit popup (see controllers/partAdminController.js). Shown read-only
+    // in the part details popup.
+    remarks: { type: String, trim: true, default: "" },
+    lastEditedBy: { type: String, trim: true, default: "" },
+    lastEditedAt: { type: Date, default: null },
+
     quantityInStock: { type: Number, default: 0, min: 0 },
 
     // Every vendor this part has ever been received from. Populated with

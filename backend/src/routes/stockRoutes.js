@@ -1,10 +1,20 @@
 import express from "express";
-import { getStockEntries, createStockEntry, deleteStockEntry } from "../controllers/stockController.js";
+import {
+  getStockEntries,
+  createStockEntry,
+  deleteStockEntry,
+  getStockEntrySuggestions,
+  reportQuantityMismatch,
+} from "../controllers/stockController.js";
 import { parseStockImport, commitStockImport } from "../controllers/stockImportController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadStockSheet } from "../middleware/upload.js";
 
 const router = express.Router();
+
+// Specific GET/POST paths first so they aren't shadowed by "/" or "/:id".
+router.get("/suggest-warnings", getStockEntrySuggestions);
+router.post("/report-mismatch", reportQuantityMismatch);
 
 router.get("/", getStockEntries);
 router.post("/", createStockEntry);

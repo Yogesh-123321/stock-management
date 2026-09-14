@@ -4,6 +4,7 @@ import PurchaseOrder from "../models/PurchaseOrder.js";
 import Part from "../models/Part.js";
 import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { bookExistingPart, bookNewPart, BookingError } from "../utils/stockBooking.js";
+import { notifyApprovers } from "../utils/notify.js";
 
 // GET /api/stock-entries?purchaseOrder=&vendor=&part=
 export const getStockEntries = asyncHandler(async (req, res) => {
@@ -152,4 +153,145 @@ export const deleteStockEntry = asyncHandler(async (req, res) => {
 
   await entry.deleteOne();
   res.json({ message: "History entry deleted", _id: entry._id, partId: entry.part });
+});
+
+/*
+  GET /api/stock-entries/suggest-warnings?part=&quantity=&vendor=&purchaseOrder=
+
+  Lightweight, in-app "AI suggestion" pass for the stock-entry step — no
+  external model call, just heuristics over data we already have, so it's
+  instant and free to run on every keystroke-settle. Flags things worth a
+  second look before the entry is saved:
+    - a quantity far outside this part's usual receiving pattern
+    - a vendor this part has never been received from before
+    - a quantity that would push the PO/PI's cumulative received total past
+      what the document says should arrive
+  Never blocks saving — these are suggestions the operator can dismiss.
+*/
+export const getStockEntrySuggestions = asyncHandler(async (req, res) => {
+  const { part: partId, quantity, vendor, purchaseOrder } = req.query;
+  const warnings = [];
+
+  const qty = Number(quantity);
+  if (!partId || !qty || Number.isNaN(qty) || qty <= 0) {
+    return res.json({ warnings });
+  }
+
+  const partDoc = await Part.findById(partId).select("vendors ttUniquePartNumber");
+  if (!partDoc) return res.json({ warnings });
+
+  // Unusual quantity vs this part's own receiving history.
+  const history = await StockEntry.find({ part: partId })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .select("quantityReceived");
+  if (history.length >= 3) {
+    const avg = history.reduce((s, h) => s + Number(h.quantityReceived || 0), 0) / history.length;
+    if (avg > 0) {
+      if (qty >= avg * 3) {
+        warnings.push({
+          message: `That's about ${Math.round(qty / avg)}x this part's usual receiving quantity (avg ${Math.round(
+            avg
+          )}). Worth double-checking the count.`,
+          level: "warning",
+        });
+      } else if (qty <= avg * 0.3) {
+        warnings.push({
+          message: `That's well below this part's usual receiving quantity (avg ${Math.round(
+            avg
+          )}). Make sure nothing was left uncounted.`,
+          level: "info",
+        });
+      }
+    }
+  }
+
+  // Vendor this part has never come from before.
+  if (vendor && Array.isArray(partDoc.vendors) && partDoc.vendors.length > 0) {
+    const known = partDoc.vendors.map((v) => String(v));
+    if (!known.includes(String(vendor))) {
+      warnings.push({
+        message: `${partDoc.ttUniquePartNumber} hasn't been received from this vendor before — confirm the vendor is correct.`,
+        level: "info",
+      });
+    }
+  }
+
+  // Would this push the document total over what's expected?
+  if (purchaseOrder) {
+    const poDoc = await PurchaseOrder.findById(purchaseOrder).select("totalQuantity linkedDocument");
+    if (poDoc?.totalQuantity != null) {
+      const docIds = [poDoc._id, poDoc.linkedDocument].filter(Boolean);
+      const priorEntries = await StockEntry.find({ purchaseOrder: { $in: docIds } }).select(
+        "quantityReceived"
+      );
+      const priorTotal = priorEntries.reduce((s, e) => s + Number(e.quantityReceived || 0), 0);
+      const projected = priorTotal + qty;
+      if (projected > poDoc.totalQuantity) {
+        warnings.push({
+          message: `This would bring the total received to ${projected}, ${
+            projected - poDoc.totalQuantity
+          } more than the ${poDoc.totalQuantity} shown on the document.`,
+          level: "warning",
+        });
+      }
+    }
+  }
+
+  res.json({ warnings });
+});
+
+/*
+  POST /api/stock-entries/report-mismatch
+  Body: { purchaseOrder, poQty, piQty, previouslyReceived, enteredNow, totalReceived, reportedBy }
+
+  Called from the "Finish stock entry" step when the operator chooses to
+  proceed despite the PO/PI quantity not matching what's been entered into
+  stock. Fires a notification to every admin so the discrepancy doesn't sit
+  unnoticed until someone happens to open the document later — the PO/PI
+  itself is left "open" either way (see ReceiveMaterial.jsx), this just
+  makes sure someone gets told about it.
+*/
+export const reportQuantityMismatch = asyncHandler(async (req, res) => {
+  const {
+    purchaseOrder,
+    poQty = null,
+    piQty = null,
+    previouslyReceived = 0,
+    enteredNow = 0,
+    totalReceived = 0,
+    reportedBy = "",
+  } = req.body;
+
+  let poDoc = null;
+  if (purchaseOrder) {
+    poDoc = await PurchaseOrder.findById(purchaseOrder).populate("vendor", "companyName");
+  }
+
+  const docParts = [];
+  if (poQty != null) docParts.push(`PO: ${poQty}`);
+  if (piQty != null) docParts.push(`PI: ${piQty}`);
+  const docLabel = docParts.length ? docParts.join(", ") : "no document quantity on record";
+  const diff = poQty != null || piQty != null ? totalReceived - (poQty ?? piQty) : null;
+
+  try {
+    await notifyApprovers({
+      actorId: req.user?._id,
+      title: "Stock quantity mismatch",
+      message: `${reportedBy || "An operator"} logged ${enteredNow} unit(s)${
+        poDoc?.vendor?.companyName ? ` from ${poDoc.vendor.companyName}` : ""
+      }${
+        poDoc?.documentNumber ? ` against ${poDoc.documentNumber}` : ""
+      } — total received so far is ${totalReceived}, which does not match the document (${docLabel})${
+        diff != null ? ` (${diff > 0 ? `+${diff} over` : `${diff} short`})` : ""
+      }. The PO/PI was left open.`,
+      link: "/receive",
+      entityType: "po",
+      entityId: poDoc?._id || null,
+    });
+  } catch (e) {
+    console.error("stock mismatch notification failed:", e.message);
+  }
+
+  res.json({ notified: true });
 });
