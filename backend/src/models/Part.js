@@ -22,6 +22,13 @@ const partSchema = new mongoose.Schema(
     hsnCode: { type: String, trim: true, default: "" },
     unit: { type: String, trim: true, default: "" },
 
+    // Reference files kept alongside the part record — both optional,
+    // uploaded to Cloudinary the same way vendor/buyer documents are (see
+    // config/cloudinary.js). photoUrl is a JPEG image of the part;
+    // datasheetUrl is its manufacturer/technical datasheet PDF.
+    photoUrl: { type: String, trim: true, default: "" },
+    datasheetUrl: { type: String, trim: true, default: "" },
+
     // Free-text notes about the part. Pre-filled from the "remarks for the
     // approver" the operator typed when raising the new-part / alternate-part
     // request (see PartApprovalRequest.requestRemarks and

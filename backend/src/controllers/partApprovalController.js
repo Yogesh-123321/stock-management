@@ -1,6 +1,7 @@
 import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { notifyApprovers, notifyRequester } from "../utils/notify.js";
 import { createPartFromApprovedRequest } from "../utils/stockBooking.js";
+import { uploadFileToCloudinary } from "../config/cloudinary.js";
 
 const partLabel = (doc) =>
   [doc.newPart?.itemDescription, doc.newPart?.manufacturerPartNumber]
@@ -12,12 +13,18 @@ const partLabel = (doc) =>
  * Raise a request to register a new part number, or an alternate of an
  * existing part. Raised from the stock-entry step; no stock is booked here.
  * Every admin (and anyone holding `part.approve`) gets a notification.
+ *
+ * Accepts either a plain JSON body with a nested `newPart` object (the
+ * original shape, still used by the Receive-material screen) or a
+ * multipart/form-data body with `newPart`'s fields flattened to the top
+ * level plus optional `photo` (JPEG) / `datasheet` (PDF) files — used by
+ * the Parts master's "new part request" dialog, which is the only place
+ * these files can be attached at request time.
  */
 export const createRequest = async (req, res) => {
   try {
     const {
       requestType,
-      newPart = {},
       alternateOfPartId = null,
       vendorId = null,
       purchaseOrderId = null,
@@ -26,6 +33,15 @@ export const createRequest = async (req, res) => {
       requestedBy = "",
       requestRemarks = "",
     } = req.body;
+
+    const newPart = req.body.newPart || {
+      typeOfPart: req.body.typeOfPart || "",
+      manufacturerPartNumber: req.body.manufacturerPartNumber || "",
+      itemDescription: req.body.itemDescription || "",
+      companyCode: req.body.companyCode || "",
+      category: req.body.category || "",
+      partTypeBatchNo: req.body.partTypeBatchNo || "",
+    };
 
     if (!["new_part_number", "alternate_part"].includes(requestType)) {
       return res.status(400).json({ message: "Invalid request type" });
@@ -56,6 +72,18 @@ export const createRequest = async (req, res) => {
       });
     }
 
+    // Both files are optional. Uploaded once here — the URLs are copied
+    // straight onto the Part record when this request is later approved
+    // (see createPartFromApprovedRequest in utils/stockBooking.js).
+    const photoFile = req.files?.photo?.[0];
+    const datasheetFile = req.files?.datasheet?.[0];
+    const [photoUrl, datasheetUrl] = await Promise.all([
+      photoFile ? uploadFileToCloudinary(photoFile, { category: "parts/photos" }) : Promise.resolve(""),
+      datasheetFile
+        ? uploadFileToCloudinary(datasheetFile, { category: "parts/datasheets" })
+        : Promise.resolve(""),
+    ]);
+
     const doc = await PartApprovalRequest.create({
       requestType,
       newPart: {
@@ -65,12 +93,14 @@ export const createRequest = async (req, res) => {
         companyCode: newPart.companyCode,
         category: newPart.category,
         partTypeBatchNo: newPart.partTypeBatchNo,
+        photoUrl: photoUrl || "",
+        datasheetUrl: datasheetUrl || "",
       },
       alternateOfPart: requestType === "alternate_part" ? alternateOfPartId : null,
       vendor: vendorId || null,
       purchaseOrder: purchaseOrderId || null,
       searchTerm,
-      proposedQuantity: proposedQuantity == null ? null : Number(proposedQuantity),
+      proposedQuantity: proposedQuantity == null || proposedQuantity === "" ? null : Number(proposedQuantity),
       requestedBy: requestedBy || req.user?.name || req.user?.username || "",
       requestedByUser: req.user?._id || null,
       requestRemarks,

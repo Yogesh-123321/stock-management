@@ -243,19 +243,25 @@ export const getKitIssueById = asyncHandler(async (req, res) => {
 
 /*
   POST /api/kits/:id/issue
-  Body: { quantity, vendor, issuedBy, remarks }
+  Body: { quantity, vendor, issuedBy, remarks, lines? }
+  `lines` (optional): [{ ttUniquePartNumber, qtyIssued }, ...] — lets the
+  user hand-enter the actual quantity being issued for one or more items
+  instead of accepting the auto-computed min(available, required). Any
+  item not named in `lines` falls back to the old auto behaviour.
 
   Re-resolves every non-DNP item against the live parts master by
   ttUniquePartNumber and issues the kit regardless of stock levels — a
   short or missing part no longer blocks the whole kit. Each line deducts
-  whatever stock is actually available (down to zero, never negative) and
-  records qtyRequired / qtyIssued / qtyShort, so any shortage is captured
-  as part of the kit issue's own history rather than rejecting the
-  request outright. `hasShortage` on the issue and `shortage` in the
-  response flag whether anything was short, for the UI to surface.
+  either the user-entered qty (capped at available stock) or, absent an
+  override, whatever stock is actually available (down to zero, never
+  negative), and records qtyRequired / qtyIssued / qtyShort, so any
+  shortage is captured as part of the kit issue's own history rather than
+  rejecting the request outright. `hasShortage` on the issue and
+  `shortage` in the response flag whether anything was short, for the UI
+  to surface.
 */
 export const issueKit = asyncHandler(async (req, res) => {
-  const { quantity, vendor, issuedBy, remarks } = req.body;
+  const { quantity, vendor, issuedBy, remarks, lines: overrideLines } = req.body;
 
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty < 1 || !Number.isInteger(qty)) {
@@ -295,18 +301,47 @@ export const issueKit = asyncHandler(async (req, res) => {
 
   const byCode = await resolvePartsByCode(items);
 
+  // Optional per-item overrides from the user: the actual quantity being
+  // issued for each part, keyed by ttUniquePartNumber. When a part isn't
+  // present in this map (or the body sent no `lines` at all), the line
+  // falls back to the old auto behaviour of min(available, required), so
+  // older clients keep working unchanged.
+  const overrideByCode = new Map();
+  if (Array.isArray(overrideLines)) {
+    for (const line of overrideLines) {
+      const code = String(line?.ttUniquePartNumber || "").trim().toUpperCase();
+      if (!code) continue;
+      const q = Number(line?.qtyIssued);
+      if (Number.isFinite(q) && q >= 0) overrideByCode.set(code, q);
+    }
+  }
+
   // Resolve every line against live stock. A line is never rejected for
   // being short — it deducts whatever is available (0 if the part is
   // missing from the master entirely) and the gap is recorded as a
-  // shortage on that line.
+  // shortage on that line. If the user entered a specific qty to issue for
+  // a line, that figure is used instead (still capped at available stock,
+  // since a line can never deduct more than what's on hand).
   const resolvedLines = [];
   const shortages = [];
   for (const item of items) {
     const partDoc = byCode.get(item.ttUniquePartNumber);
     const required = item.qtyPerKit * qty;
     const available = partDoc ? partDoc.quantityInStock : 0;
-    const toDeduct = Math.min(available, required);
-    const short = required - toDeduct;
+
+    let toDeduct;
+    if (overrideByCode.has(item.ttUniquePartNumber)) {
+      toDeduct = overrideByCode.get(item.ttUniquePartNumber);
+      if (toDeduct > available) {
+        res.status(400);
+        throw new Error(
+          `Qty to issue for ${item.ttUniquePartNumber} (${toDeduct}) exceeds available stock (${available})`
+        );
+      }
+    } else {
+      toDeduct = Math.min(available, required);
+    }
+    const short = Math.max(0, required - toDeduct);
 
     if (short > 0) {
       shortages.push({

@@ -25,6 +25,11 @@ const partApprovalRequestSchema = new mongoose.Schema(
       companyCode: { type: String, trim: true, required: true },
       category: { type: String, trim: true, required: true },
       partTypeBatchNo: { type: String, trim: true, required: true },
+      // Uploaded when the request is raised (see partApprovalController.js
+      // createRequest) and copied onto the Part record the moment this
+      // request is approved (see utils/stockBooking.js).
+      photoUrl: { type: String, trim: true, default: "" },
+      datasheetUrl: { type: String, trim: true, default: "" },
     },
 
     alternateOfPart: { type: mongoose.Schema.Types.ObjectId, ref: "Part", default: null },

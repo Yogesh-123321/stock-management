@@ -15,14 +15,24 @@ const toQty = (v) => {
 // GET /api/purchase-orders?vendor=&status=&documentType=&lifecycleStatus=&search=
 // documentType: "Purchase Order" | "Proforma Invoice"  (POs and PIs are listed separately)
 // lifecycleStatus: "open" | "closed"
+// search: matches documentNumber OR the vendor's company name/GSTIN (smart search —
+// same idea as the other document tables: number-or-party, one box).
 export const getPurchaseOrders = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.vendor) filter.vendor = req.query.vendor;
   if (req.query.status) filter.status = req.query.status;
   if (req.query.documentType) filter.documentType = req.query.documentType;
   if (req.query.lifecycleStatus) filter.lifecycleStatus = req.query.lifecycleStatus;
-  if (req.query.search) {
-    filter.documentNumber = { $regex: escapeRegex(req.query.search.trim()), $options: "i" };
+
+  const q = String(req.query.search || "").trim();
+  if (q) {
+    const rx = { $regex: escapeRegex(q), $options: "i" };
+    const matchingVendors = await Vendor.find(
+      { $or: [{ companyName: rx }, { taxRegistrationNo: rx }] },
+      "_id"
+    ).lean();
+    const vendorIds = matchingVendors.map((v) => v._id);
+    filter.$or = [{ documentNumber: rx }, ...(vendorIds.length ? [{ vendor: { $in: vendorIds } }] : [])];
   }
 
   const pos = await PurchaseOrder.find(filter).populate("vendor").sort({ createdAt: -1 });

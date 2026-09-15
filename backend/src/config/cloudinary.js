@@ -24,6 +24,9 @@ import { v2 as cloudinary } from "cloudinary";
  *       bharat-motors-27AAACB2894G1ZT/
  *         registration/ ...
  *     misc/
+ *       parts/
+ *         photos/
+ *         datasheets/
  */
 const isConfigured = () =>
   Boolean(

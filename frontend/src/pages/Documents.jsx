@@ -151,7 +151,7 @@ function DocumentTable({ documentType, emptyLabel }) {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search by document number"
+            placeholder="Search by document number, vendor or GSTIN"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -261,7 +261,8 @@ function GeneratedPoTable() {
     return rows.filter(
       (r) =>
         String(r.voucherNo || "").toLowerCase().includes(q) ||
-        String(r.supplierName || "").toLowerCase().includes(q),
+        String(r.supplierName || "").toLowerCase().includes(q) ||
+        String(r.supplierGSTIN || "").toLowerCase().includes(q),
     );
   }, [rows, search]);
 
@@ -300,7 +301,7 @@ function GeneratedPoTable() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search by PO number or supplier"
+            placeholder="Search by PO number, supplier or GSTIN"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -440,7 +441,7 @@ function GeneratedPiTable() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search by PI number or buyer"
+            placeholder="Search by PI number, buyer or GSTIN"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -916,6 +917,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
 function TaxInvoiceTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [openDocs, setOpenDocs] = useState([]);
   const [docType, setDocType] = useState("Proforma Invoice");
@@ -930,17 +932,20 @@ function TaxInvoiceTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/tax-invoices");
+      const { data } = await api.get("/tax-invoices", {
+        params: { search: search.trim() || undefined },
+      });
       setRows(Array.isArray(data) ? data : []);
     } catch {
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search]);
 
   useEffect(() => {
-    load();
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
   }, [load]);
 
   // Only OPEN POs / PIs can receive a tax invoice — that's the dropdown source.
@@ -996,7 +1001,16 @@ function TaxInvoiceTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Search by invoice number, vendor, GSTIN or PO/PI number"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <Button onClick={() => setOpen(true)}>
           <Upload className="mr-2 h-4 w-4" /> Upload tax invoice
         </Button>
@@ -1023,7 +1037,7 @@ function TaxInvoiceTab() {
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
-                  No tax invoices uploaded yet.
+                  {search.trim() ? "No tax invoices match that search." : "No tax invoices uploaded yet."}
                 </td>
               </tr>
             ) : (

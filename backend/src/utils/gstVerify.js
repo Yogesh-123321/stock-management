@@ -87,7 +87,32 @@ function normalizeProviderResponse(raw, gstin) {
 
   let address = data.principal_place_address || null;
   if (!address && data.pradr) {
-    address = typeof data.pradr === "string" ? data.pradr : data.pradr.addr || data.pradr.address || null;
+    if (typeof data.pradr === "string") {
+      address = data.pradr;
+    } else if (typeof data.pradr.adr === "string" && data.pradr.adr.trim()) {
+      // gstincheck.co.in / GSTN already hand back a fully formatted
+      // address string here (pradr.adr) — prefer it over reconstructing
+      // one ourselves, since the structured pradr.addr sub-object below
+      // is lossy (it can drop floor/building-name/street entirely, and
+      // its "building number" field is sometimes just "0" as a
+      // placeholder) compared to this ready-made string.
+      address = data.pradr.adr.trim();
+    } else {
+      // Fallback for providers that only give the structured sub-object
+      // and no pre-formatted string. pradr.addr is itself an object
+      // ({ bno, bnm, st, loc, dst, city, stcd, pncd, flno, ... }), not a
+      // string — assigning it directly used to render as "[object
+      // Object]" wherever the address was shown. Flatten it into a
+      // human-readable, comma-joined line instead.
+      const addr = data.pradr.addr || data.pradr.address || data.pradr;
+      if (typeof addr === "string") {
+        address = addr;
+      } else if (addr && typeof addr === "object") {
+        address = [addr.flno, addr.bno, addr.bnm, addr.st, addr.loc, addr.city, addr.dst, addr.stcd, addr.pncd]
+          .filter(Boolean)
+          .join(", ") || null;
+      }
+    }
   }
   if (!address && data.principal_place_split_address) {
     const a = data.principal_place_split_address;

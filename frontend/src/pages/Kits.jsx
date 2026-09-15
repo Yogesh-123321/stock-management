@@ -28,6 +28,7 @@ import {
   ListPlus,
   Power,
   History,
+  Eye,
 } from "lucide-react";
 
 const fmtDate = (d) =>
@@ -486,6 +487,139 @@ function TemplateIssuesDialog({ template, onClose }) {
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * Read-only preview of a kit template's items — opened by clicking a
+ * row in the kit list, so items can be checked at a glance without
+ * dropping into the (editable) KitEditor.
+ * ------------------------------------------------------------------ */
+function KitPreviewDialog({ template, onClose, onEdit }) {
+  const [loading, setLoading] = useState(true);
+  const [kit, setKit] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get(`/kits/${template._id}`)
+      .then(({ data }) => {
+        if (!cancelled) setKit(data);
+      })
+      .catch((err) => {
+        toast.error(err.response?.data?.message || "Could not load this kit template");
+        onClose();
+      })
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template._id]);
+
+  const items = kit?.items || [];
+  const issuableCount = items.filter((it) => !it.dnp).length;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-semibold flex items-center gap-2">
+              <Eye className="h-4 w-4 text-accent" />
+              {template.kitName}
+              {template.isActive ? (
+                <Badge variant="success">Active</Badge>
+              ) : (
+                <Badge variant="secondary">Inactive</Badge>
+              )}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {[template.kitCode, template.revision ? `Rev. ${template.revision}` : null]
+                .filter(Boolean)
+                .join(" · ") || "No code or revision on file"}
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {loading && <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>}
+
+          {!loading && kit && (
+            <>
+              {kit.description && <p className="text-sm text-muted-foreground">{kit.description}</p>}
+
+              <p className="text-xs text-muted-foreground">
+                {items.length} item(s) total
+                {items.length !== issuableCount ? ` · ${items.length - issuableCount} DNP (excluded)` : ""}
+              </p>
+
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary/70">
+                    <tr className="border-b border-border">
+                      {["Ref.", "Value", "TT part #", "Description", "Qty/kit", "In stock", "DNP"].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
+                          >
+                            {h}
+                          </th>
+                        )
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
+                    {items.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                          This kit has no items.
+                        </td>
+                      </tr>
+                    )}
+                    {items.map((it, i) => (
+                      <tr key={it._id || i} className="border-b border-border">
+                        <td className="px-2.5 py-1.5 text-xs">{it.referenceDesignator || "—"}</td>
+                        <td className="px-2.5 py-1.5 text-xs">{it.value || "—"}</td>
+                        <td className="px-2.5 py-1.5 text-xs font-mono-tech">{it.ttUniquePartNumber}</td>
+                        <td className="px-2.5 py-1.5 text-xs">
+                          {it.matchedPart?.itemDescription || (
+                            <span className="text-amber-700">not in parts master</span>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{it.qtyPerKit}</td>
+                        <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
+                          {it.matchedPart ? it.matchedPart.quantityInStock : "—"}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-xs">
+                          {it.dnp ? <Badge variant="secondary">DNP</Badge> : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          {onEdit && (
+            <Button type="button" onClick={onEdit}>
+              <Pencil className="mr-1.5 h-4 w-4" />
+              Edit kit
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 export default function Kits() {
@@ -494,6 +628,7 @@ export default function Kits() {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // null = closed, {} = new, {...} = edit
   const [viewingIssues, setViewingIssues] = useState(null);
+  const [previewing, setPreviewing] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async () => {
@@ -596,7 +731,12 @@ export default function Kits() {
               )}
               {!loading &&
                 templates.map((t) => (
-                  <TableRow key={t._id}>
+                  <TableRow
+                    key={t._id}
+                    className="cursor-pointer hover:bg-secondary/40"
+                    title="Click to preview this kit"
+                    onClick={() => setPreviewing(t)}
+                  >
                     <TableCell className="font-medium">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate">{t.kitName}</span>
@@ -616,8 +756,18 @@ export default function Kits() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{t.revision || "—"}</TableCell>
                     <TableCell className="text-right font-mono-tech">{t.itemCount ?? 0}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-8 p-0"
+                          title="Preview kit items"
+                          onClick={() => setPreviewing(t)}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           type="button"
                           size="sm"
@@ -685,6 +835,18 @@ export default function Kits() {
 
       {viewingIssues && (
         <TemplateIssuesDialog template={viewingIssues} onClose={() => setViewingIssues(null)} />
+      )}
+
+      {previewing && (
+        <KitPreviewDialog
+          template={previewing}
+          onClose={() => setPreviewing(null)}
+          onEdit={() => {
+            const tpl = previewing;
+            setPreviewing(null);
+            setEditing(tpl);
+          }}
+        />
       )}
     </div>
   );

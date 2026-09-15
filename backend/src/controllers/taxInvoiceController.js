@@ -10,11 +10,32 @@ import { generateBatchCode } from "../utils/batchCode.js";
 import { extractInvoiceLineItems, AiExtractionError } from "../utils/aiDocumentExtract.js";
 import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
 
-// GET /api/tax-invoices?purchaseOrder=&vendor=
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// GET /api/tax-invoices?purchaseOrder=&vendor=&search=
+// search: matches invoiceNumber OR the vendor's company name/GSTIN OR the
+// linked PO/PI's document number — same smart, number-or-party search as
+// the other document tables.
 export const getTaxInvoices = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.purchaseOrder) filter.purchaseOrder = req.query.purchaseOrder;
   if (req.query.vendor) filter.vendor = req.query.vendor;
+
+  const q = String(req.query.search || "").trim();
+  if (q) {
+    const rx = { $regex: escapeRegex(q), $options: "i" };
+    const [matchingVendors, matchingPOs] = await Promise.all([
+      Vendor.find({ $or: [{ companyName: rx }, { taxRegistrationNo: rx }] }, "_id").lean(),
+      PurchaseOrder.find({ documentNumber: rx }, "_id").lean(),
+    ]);
+    const vendorIds = matchingVendors.map((v) => v._id);
+    const poIds = matchingPOs.map((p) => p._id);
+    filter.$or = [
+      { invoiceNumber: rx },
+      ...(vendorIds.length ? [{ vendor: { $in: vendorIds } }] : []),
+      ...(poIds.length ? [{ purchaseOrder: { $in: poIds } }] : []),
+    ];
+  }
 
   const invoices = await TaxInvoice.find(filter)
     .populate("vendor purchaseOrder")

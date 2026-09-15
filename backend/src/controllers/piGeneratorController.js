@@ -218,7 +218,7 @@ export async function listPis(req, res) {
     if (req.query.status) filter.status = req.query.status;
     if (q) {
       const rx = new RegExp(escapeRegex(q), "i");
-      filter.$or = [{ invoiceNo: rx }, { buyerName: rx }];
+      filter.$or = [{ invoiceNo: rx }, { buyerName: rx }, { buyerGSTIN: rx }];
     }
     const list = await ProformaInvoiceGen.find(filter).sort({ createdAt: -1 }).limit(200).lean();
     res.json(list);

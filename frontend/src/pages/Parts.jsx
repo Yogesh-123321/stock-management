@@ -320,6 +320,8 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
   });
   const [proposedQuantity, setProposedQuantity] = useState("");
   const [requestRemarks, setRequestRemarks] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [datasheetFile, setDatasheetFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -361,14 +363,19 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
     }
     setSubmitting(true);
     try {
-      await api.post("/part-approvals", {
-        requestType: isAlternate ? "alternate_part" : "new_part_number",
-        newPart: form,
-        alternateOfPartId: isAlternate ? alternateOfPart._id : null,
-        searchTerm: initialSearch,
-        proposedQuantity: proposedQuantity ? Number(proposedQuantity) : null,
-        requestedBy: user?.name || user?.username || "",
-        requestRemarks,
+      const fd = new FormData();
+      fd.append("requestType", isAlternate ? "alternate_part" : "new_part_number");
+      Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
+      if (isAlternate && alternateOfPart) fd.append("alternateOfPartId", alternateOfPart._id);
+      fd.append("searchTerm", initialSearch || "");
+      if (proposedQuantity) fd.append("proposedQuantity", String(Number(proposedQuantity)));
+      fd.append("requestedBy", user?.name || user?.username || "");
+      fd.append("requestRemarks", requestRemarks);
+      if (photoFile) fd.append("photo", photoFile);
+      if (datasheetFile) fd.append("datasheet", datasheetFile);
+
+      await api.post("/part-approvals", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
       toast.success("Sent for approval — the admin will review it in the Parts approvals panel");
       onCreated?.();
@@ -518,6 +525,26 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
                 value={proposedQuantity}
                 onChange={(e) => setProposedQuantity(e.target.value)}
                 placeholder="Booked later, after approval"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Part photo (JPEG, optional)
+              </label>
+              <Input
+                type="file"
+                accept="image/jpeg"
+                onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Datasheet (PDF, optional)
+              </label>
+              <Input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setDatasheetFile(e.target.files?.[0] || null)}
               />
             </div>
             <div className="sm:col-span-2">
@@ -849,6 +876,30 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
                     {r.requestRemarks ? (
                       <p className="truncate text-xs text-muted-foreground">{r.requestRemarks}</p>
                     ) : null}
+                    {(r.newPart?.photoUrl || r.newPart?.datasheetUrl) && (
+                      <p className="mt-0.5 flex gap-2 text-xs">
+                        {r.newPart?.photoUrl && (
+                          <a
+                            href={r.newPart.photoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline text-muted-foreground"
+                          >
+                            Photo
+                          </a>
+                        )}
+                        {r.newPart?.datasheetUrl && (
+                          <a
+                            href={r.newPart.datasheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline text-muted-foreground"
+                          >
+                            Datasheet
+                          </a>
+                        )}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell>
                     {r.requestType === "alternate_part" ? (
@@ -968,6 +1019,8 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
 /* ------------------------------------------------------------------ *
  * Edit part popup — ADMIN ONLY
  * ------------------------------------------------------------------ */
+const fileNameFromUrl = (url) => (url ? String(url).split("/").pop() : "");
+
 const EDIT_FIELDS = [
   { key: "ttUniquePartNumber", label: "TT part number", mono: true },
   { key: "itemDescription", label: "Description", full: true },
@@ -991,6 +1044,8 @@ function EditPartDialog({ part, onClose, onSaved }) {
     return base;
   });
   const [stockQty, setStockQty] = useState(String(part?.quantityInStock ?? 0));
+  const [photoFile, setPhotoFile] = useState(null);
+  const [datasheetFile, setDatasheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -1009,7 +1064,13 @@ function EditPartDialog({ part, onClose, onSaved }) {
     setSaving(true);
     try {
       let data;
-      ({ data } = await api.patch(`/parts/${part._id}`, form));
+      const fd = new FormData();
+      Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
+      if (photoFile) fd.append("photo", photoFile);
+      if (datasheetFile) fd.append("datasheet", datasheetFile);
+      ({ data } = await api.patch(`/parts/${part._id}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }));
 
       // The stock quantity is a separate field on purpose — it's adjusted
       // through its own endpoint (a delta), not the general part-edit one,
@@ -1088,6 +1149,52 @@ function EditPartDialog({ part, onClose, onSaved }) {
                 Remarks
               </label>
               <Input value={form.remarks} onChange={(e) => set("remarks", e.target.value)} />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Part photo (JPEG)
+              </label>
+              <Input type="file" accept="image/jpeg" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
+              {part?.photoUrl && !photoFile && (
+                <p className="mt-1 text-xs text-muted-foreground truncate">
+                  Current:{" "}
+                  <a href={part.photoUrl} target="_blank" rel="noreferrer" className="underline">
+                    {fileNameFromUrl(part.photoUrl)}
+                  </a>{" "}
+                  — choose a file to replace it.
+                </p>
+              )}
+              {photoFile && (
+                <p className="mt-1 text-xs text-warning truncate">
+                  Will replace the current photo with {photoFile.name} on save.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Datasheet (PDF)
+              </label>
+              <Input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setDatasheetFile(e.target.files?.[0] || null)}
+              />
+              {part?.datasheetUrl && !datasheetFile && (
+                <p className="mt-1 text-xs text-muted-foreground truncate">
+                  Current:{" "}
+                  <a href={part.datasheetUrl} target="_blank" rel="noreferrer" className="underline">
+                    {fileNameFromUrl(part.datasheetUrl)}
+                  </a>{" "}
+                  — choose a file to replace it.
+                </p>
+              )}
+              {datasheetFile && (
+                <p className="mt-1 text-xs text-warning truncate">
+                  Will replace the current datasheet with {datasheetFile.name} on save.
+                </p>
+              )}
             </div>
 
             <label className="flex cursor-pointer items-center gap-2 text-sm sm:col-span-2">
@@ -1223,6 +1330,41 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                       ? part.vendors.map((v) => v.companyName).join(" / ")
                       : "—"}
                   </p>
+                </div>
+
+                <div>
+                  <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Photo
+                  </p>
+                  {part.photoUrl ? (
+                    <a href={part.photoUrl} target="_blank" rel="noreferrer">
+                      <img
+                        src={part.photoUrl}
+                        alt={part.itemDescription}
+                        className="h-16 w-16 rounded border border-border object-cover"
+                      />
+                    </a>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">—</p>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Datasheet
+                  </p>
+                  {part.datasheetUrl ? (
+                    <a
+                      href={part.datasheetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm underline"
+                    >
+                      {fileNameFromUrl(part.datasheetUrl)}
+                    </a>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">—</p>
+                  )}
                 </div>
 
                 <div className="sm:col-span-2">

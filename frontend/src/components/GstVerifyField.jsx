@@ -81,7 +81,7 @@ export default function GstVerifyField({
   const result = state.result;
   const details =
     result?.verified && (result.legalName || result.tradeName || result.address)
-      ? { companyName: result.legalName || result.tradeName, address: result.address }
+      ? { companyName: result.tradeName || result.legalName, address: result.address }
       : null;
 
   const mismatches = details
@@ -128,7 +128,7 @@ export default function GstVerifyField({
           {result.verified ? (
             <p className="flex items-center gap-1.5 text-xs text-success">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Verified — {result.legalName || result.tradeName}
+              Verified — {result.tradeName || result.legalName}
               {result.stateName ? ` · ${result.stateName}` : ""}
             </p>
           ) : (

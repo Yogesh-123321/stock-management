@@ -131,6 +131,10 @@ export async function createPartFromApprovedRequest(request) {
     vendors: vendor ? [vendor] : [],
     isAlternatePart: isAlternate,
     alternateOf: isAlternate ? alternateOfPart._id : null,
+    // Carried over from the request, if a photo / datasheet was attached
+    // when it was raised (see partApprovalController.js createRequest).
+    photoUrl: newPart.photoUrl || "",
+    datasheetUrl: newPart.datasheetUrl || "",
     // Carries the "remarks for the approver" typed at registration time
     // (stock-entry step) through to the part record, so it's visible in the
     // part details popup without having to dig up the original request.

@@ -187,6 +187,11 @@ export default function IssueKit() {
   const [submitting, setSubmitting] = useState(false);
   const [shortages, setShortages] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Per-item override for "qty actually being issued", keyed by
+  // ttUniquePartNumber. A part with no entry here just falls back to the
+  // auto default (min of available stock and required qty) shown in the
+  // input. Cleared whenever a new template is chosen or after a submit.
+  const [issueQtyOverrides, setIssueQtyOverrides] = useState({});
 
   useEffect(() => {
     api
@@ -202,6 +207,7 @@ export default function IssueKit() {
     }
     setLoadingTemplate(true);
     setShortages(null);
+    setIssueQtyOverrides({});
     api
       .get(`/kits/${templateId}`)
       .then(({ data }) => setTemplate(data))
@@ -225,12 +231,25 @@ export default function IssueKit() {
         const required = (it.qtyPerKit || 0) * qtyNum;
         const available = it.matchedPart?.quantityInStock ?? 0;
         const ok = !!it.matchedPart && available >= required;
-        return { ...it, required, available, ok };
+        const defaultToIssue = Math.min(available, required);
+        return { ...it, required, available, ok, defaultToIssue };
       }),
     [issuableItems, qtyNum]
   );
 
   const hasShortfall = preview.some((p) => !p.ok);
+
+  // The qty currently shown/used for a row: whatever the user typed for
+  // that part, or the auto default (min of available, required) if they
+  // haven't touched it yet.
+  const qtyToIssueFor = (p) => {
+    const override = issueQtyOverrides[p.ttUniquePartNumber];
+    return override === undefined || override === "" ? p.defaultToIssue : Number(override);
+  };
+
+  const setQtyToIssueFor = (ttUniquePartNumber, value) => {
+    setIssueQtyOverrides((prev) => ({ ...prev, [ttUniquePartNumber]: value }));
+  };
 
   const resetAfterIssue = () => {
     setQuantity("1");
@@ -238,6 +257,7 @@ export default function IssueKit() {
     setRemarks("");
     setTemplateId("");
     setTemplate(null);
+    setIssueQtyOverrides({});
   };
 
   const submit = async (e) => {
@@ -262,6 +282,26 @@ export default function IssueKit() {
       toast.error("This vendor is marked inactive — it can't be issued to");
       return;
     }
+
+    // Validate the per-line qty-to-issue overrides before sending: each
+    // must be a non-negative whole number and can never exceed what's
+    // actually in stock for that part.
+    const linesPayload = [];
+    for (const p of preview) {
+      const q = qtyToIssueFor(p);
+      if (!Number.isFinite(q) || q < 0 || !Number.isInteger(q)) {
+        toast.error(`Qty being issued for ${p.ttUniquePartNumber} must be a whole number of 0 or more`);
+        return;
+      }
+      if (q > p.available) {
+        toast.error(
+          `Qty being issued for ${p.ttUniquePartNumber} (${q}) can't exceed available stock (${p.available})`
+        );
+        return;
+      }
+      linesPayload.push({ ttUniquePartNumber: p.ttUniquePartNumber, qtyIssued: q });
+    }
+
     setSubmitting(true);
     setShortages(null);
     try {
@@ -269,6 +309,7 @@ export default function IssueKit() {
         quantity: qtyNum,
         vendor: vendor._id,
         remarks,
+        lines: linesPayload,
       });
       const shortLines = (data.lines || []).filter((l) => (l.qtyShort || 0) > 0);
       if (shortLines.length > 0) {
@@ -399,7 +440,7 @@ export default function IssueKit() {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        {["TT part #", "Description", "Qty/kit", "Required", "Available", "Status"].map(
+                        {["TT part #", "Description", "Qty/kit", "Required", "Available", "Qty issuing", "Status"].map(
                           (h) => (
                             <th
                               key={h}
@@ -430,6 +471,19 @@ export default function IssueKit() {
                           </td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                             {p.available}
+                          </td>
+                          <td className="px-2.5 py-1.5">
+                            <Input
+                              type="number"
+                              min="0"
+                              max={p.available}
+                              step="1"
+                              className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
+                              value={
+                                issueQtyOverrides[p.ttUniquePartNumber] ?? String(p.defaultToIssue)
+                              }
+                              onChange={(e) => setQtyToIssueFor(p.ttUniquePartNumber, e.target.value)}
+                            />
                           </td>
                           <td className="px-2.5 py-1.5">
                             {p.ok ? (

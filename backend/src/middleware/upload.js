@@ -27,6 +27,11 @@ export const uploadPODoc = makeUploader();
 
 export const uploadTaxInvoiceDoc = makeUploader();
 
+// Part photo (JPEG) + datasheet (PDF) — used both when raising a new-part
+// / alternate-part approval request and when editing an existing part
+// from the parts master (see partApprovalRoutes.js and partRoutes.js).
+export const uploadPartDoc = makeUploader();
+
 // Vendor "inward stock" workbooks (e.g. the KKTRON sheet) used by the
 // Stock Entry -> "Import from vendor sheet" utility. Kept in memory only
 // long enough to be parsed — never written to disk or Cloudinary.
