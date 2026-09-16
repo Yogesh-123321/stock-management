@@ -319,7 +319,16 @@ export const getPartHistory = asyncHandler(async (req, res) => {
         party: issue.vendor
           ? { role: "vendor", id: issue.vendor._id, name: issue.vendor.companyName }
           : null,
-        reference: { type: "Kit issue", number: issue.kitCode || issue.kitName, id: issue._id },
+        // Show this specific issue's own code (e.g. "Kit 1", "Kit 1A") —
+        // unique per issuance and always present — rather than the kit's
+        // name, which is shared by every issue of the same kit template.
+        // Falls back to the template's kitCode, then kitName, only for
+        // older records created before issueCode existed.
+        reference: {
+          type: "Kit issue",
+          number: issue.issueCode || issue.kitCode || issue.kitName,
+          id: issue._id,
+        },
         matchType: null,
         enteredBy: issue.issuedBy || null,
         remarks: issue.remarks || null,
@@ -639,4 +648,123 @@ export const deletePart = asyncHandler(async (req, res) => {
 
   await part.deleteOne();
   res.json({ message: "Part deleted", _id: part._id });
+});
+
+// ---------------------------------------------------------------------
+// CSV export — Part Master "Download parts" button. Two separate CSVs
+// (not zipped together) so each can be opened straight in Excel:
+//   1. parts master itself
+//   2. the part <-> vendor linkage, one row per vendor per part
+// Mirrors the pattern used for the activity log export
+// (controllers/activityLogController.js: exportLogs) and the vendor
+// "download all forms" button (controllers/vendorController.js).
+// ---------------------------------------------------------------------
+
+const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+
+const csvFrom = (header, rows) =>
+  "\uFEFF" +
+  [header.map(csvEscape).join(","), ...rows.map((row) => row.map(csvEscape).join(","))].join(
+    "\n"
+  );
+
+const sendCsv = (res, filenamePrefix, csv) => {
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv"`
+  );
+  res.send(csv);
+};
+
+// GET /api/parts/export/parts-csv — every field on the Part Master, ADMIN ONLY.
+// GET /api/parts/export/parts-csv — every field on the Part Master, ADMIN ONLY.
+export const exportPartsCsv = asyncHandler(async (req, res) => {
+  const parts = await Part.find({})
+    .populate("vendors", "companyName")
+    .populate("alternateOf", "ttUniquePartNumber")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean({ virtuals: true });
+
+  const header = [
+    "TT unique part number",
+    "Type of part",
+    "Manufacturer part number",
+    "Item description",
+    "Company code",
+    "Category",
+    "Part type / batch no.",
+    "HSN code",
+    "Unit",
+    "Quantity in stock",
+    "Vendor(s)",
+    "Is alternate part",
+    "Alternate of",
+    "Has photo",
+    "Has datasheet",
+    "Remarks",
+    "Last edited by",
+    "Last edited at",
+    "Created at",
+  ];
+
+  const rows = parts.map((p) => [
+    p.ttUniquePartNumber,
+    p.typeOfPart || "",
+    p.manufacturerPartNumber || "",
+    p.itemDescription || "",
+    p.companyCode || "",
+    p.category || "",
+    p.partTypeBatchNo || "",
+    p.hsnCode || "",
+    p.unit || "",
+    p.quantityInStock ?? 0,
+    (p.vendors || []).map((v) => v.companyName).filter(Boolean).join(" / "),
+    p.isAlternatePart ? "Yes" : "No",
+    p.alternateOf?.ttUniquePartNumber || "",
+    p.photoUrl ? "Yes" : "No",
+    p.datasheetUrl ? "Yes" : "No",
+    p.remarks || "",
+    p.lastEditedBy || "",
+    p.lastEditedAt ? new Date(p.lastEditedAt).toLocaleString("en-IN") : "",
+    p.createdAt ? new Date(p.createdAt).toLocaleString("en-IN") : "",
+  ]);
+
+  sendCsv(res, "parts-master", csvFrom(header, rows));
+});
+// GET /api/parts/export/vendor-links-csv — one row per part<->vendor link
+// (the "related details" alongside the parts master itself), ADMIN ONLY.
+export const exportPartVendorLinksCsv = asyncHandler(async (req, res) => {
+  const parts = await Part.find({ vendors: { $exists: true, $ne: [] } })
+    .populate("vendors", "companyName taxRegistrationNo phone email activeStatus")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean();
+
+  const header = [
+    "TT unique part number",
+    "Item description",
+    "Vendor name",
+    "Vendor GST / tax reg. no.",
+    "Vendor phone",
+    "Vendor email",
+    "Vendor status",
+  ];
+
+  const rows = [];
+  for (const p of parts) {
+    for (const v of p.vendors || []) {
+      if (!v) continue;
+      rows.push([
+        p.ttUniquePartNumber,
+        p.itemDescription || "",
+        v.companyName || "",
+        v.taxRegistrationNo || "",
+        v.phone || "",
+        v.email || "",
+        v.activeStatus || "",
+      ]);
+    }
+  }
+
+  sendCsv(res, "part-vendor-details", csvFrom(header, rows));
 });

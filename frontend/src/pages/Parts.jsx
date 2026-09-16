@@ -43,6 +43,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Sparkles,
+  Download,
 } from "lucide-react";
 
 /**
@@ -1288,9 +1289,38 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
 
           {!loading && part && (
             <div className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-2">
+              {/* Photo pinned top-right; detail fields flow around it */}
+              <div className="flow-root">
+                <div className="float-right ml-4 mb-3 w-40">
+                  {part.photoUrl ? (
+                    <a
+                      href={part.photoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block w-fit"
+                      title="Open full-size photo"
+                    >
+                      <img
+                        src={part.photoUrl}
+                        alt={part.itemDescription}
+                        className="h-40 w-40 rounded border border-border object-cover"
+                      />
+                    </a>
+                  ) : (
+                    <div className="flex h-40 w-40 items-center justify-center rounded border border-dashed border-border text-xs text-muted-foreground">
+                      No photo
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[0px]">
                 {DETAIL_FIELDS.map((f) => (
-                  <div key={f.key} className={f.full ? "sm:col-span-2" : ""}>
+                  <div
+                    key={f.key}
+                    className={`inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3 ${
+                      f.full ? "sm:w-full sm:pr-0" : ""
+                    }`}
+                  >
                     <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       {f.label}
                     </p>
@@ -1300,14 +1330,14 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   </div>
                 ))}
 
-                <div>
+                <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Stock qty
                   </p>
                   <p className="font-mono-tech text-sm">{part.quantityInStock ?? 0}</p>
                 </div>
 
-                <div>
+                <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Qty in kits
                   </p>
@@ -1321,7 +1351,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   </p>
                 </div>
 
-                <div>
+                <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Vendor(s)
                   </p>
@@ -1332,24 +1362,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   </p>
                 </div>
 
-                <div>
-                  <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Photo
-                  </p>
-                  {part.photoUrl ? (
-                    <a href={part.photoUrl} target="_blank" rel="noreferrer">
-                      <img
-                        src={part.photoUrl}
-                        alt={part.itemDescription}
-                        className="h-16 w-16 rounded border border-border object-cover"
-                      />
-                    </a>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">—</p>
-                  )}
-                </div>
-
-                <div>
+                <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Datasheet
                   </p>
@@ -1367,7 +1380,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   )}
                 </div>
 
-                <div className="sm:col-span-2">
+                <div className="inline-block w-full align-top pb-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Alternate part
                   </p>
@@ -1392,13 +1405,14 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                 </div>
 
                 {part.remarks && (
-                  <div className="sm:col-span-2">
+                  <div className="inline-block w-full align-top pb-3">
                     <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Remarks
                     </p>
                     <p className="text-sm">{part.remarks}</p>
                   </div>
                 )}
+              </div>
               </div>
 
               <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
@@ -2088,6 +2102,34 @@ export default function Parts() {
   const [deletingId, setDeletingId] = useState(null);
   const [showNewPartRequest, setShowNewPartRequest] = useState(false);
   const [myRequestsReloadKey, setMyRequestsReloadKey] = useState(0);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
+
+  // "Download parts" — admin only. Two separate CSVs (parts master +
+  // part/vendor details), each saved as its own file, same as the
+  // activity log's "Export CSV" button — never zipped together.
+  const downloadPartsCsv = async () => {
+    setDownloadingCsv(true);
+    const today = new Date().toISOString().slice(0, 10);
+    const files = [
+      { url: "/parts/export/parts-csv", name: `parts-master-${today}.csv` },
+      { url: "/parts/export/vendor-links-csv", name: `part-vendor-details-${today}.csv` },
+    ];
+    try {
+      for (const file of files) {
+        const { data } = await api.get(file.url, { responseType: "blob" });
+        const blobUrl = URL.createObjectURL(new Blob([data], { type: "text/csv" }));
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = file.name;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not download parts");
+    } finally {
+      setDownloadingCsv(false);
+    }
+  };
 
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -2167,6 +2209,18 @@ export default function Parts() {
           <p className="mt-1 text-sm text-muted-foreground">{parts.length} part(s) shown</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isApprover && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={downloadPartsCsv}
+              disabled={downloadingCsv}
+              title="Download the parts master and part/vendor details as CSV files"
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              {downloadingCsv ? "Preparing…" : "Download parts"}
+            </Button>
+          )}
           <Button type="button" variant="outline" onClick={() => setShowDuplicates(true)}>
             <Copy className="mr-1.5 h-3.5 w-3.5" />
             Find duplicate part numbers

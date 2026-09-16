@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableHeader,
@@ -29,6 +30,7 @@ import {
   Power,
   History,
   Eye,
+  Copy,
 } from "lucide-react";
 
 const fmtDate = (d) =>
@@ -76,11 +78,14 @@ const toEditorRows = (items = []) =>
  * from Excel" shortcut that drops parsed rows straight into the same
  * table for review before Save is ever pressed.
  * ------------------------------------------------------------------ */
-function KitEditor({ template, onClose, onSaved }) {
+function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
   const isEdit = !!template?._id;
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [copySourceId, setCopySourceId] = useState("");
+  const [copying, setCopying] = useState(false);
 
   const [kitName, setKitName] = useState(template?.kitName || "");
   const [kitCode, setKitCode] = useState(template?.kitCode || "");
@@ -100,6 +105,7 @@ function KitEditor({ template, onClose, onSaved }) {
         setRevision(data.revision || "");
         setDescription(data.description || "");
         setItems(toEditorRows(data.items));
+        setLocked(!!data.hasIssues);
       })
       .catch((err) => {
         toast.error(err.response?.data?.message || "Could not load this kit template");
@@ -114,10 +120,80 @@ function KitEditor({ template, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template?._id]);
 
+  // "Copy from existing" (new-kit only) — pulls another template's full
+  // item list in as a starting point. Fully independent afterwards: this
+  // never links back to the source, it's just a one-time prefill.
+  const copyFromTemplate = async (id) => {
+    if (!id) return;
+    setCopying(true);
+    try {
+      const { data } = await api.get(`/kits/${id}`);
+      setKitName(data.kitName ? `${data.kitName} (Copy)` : "");
+      setKitCode(data.kitCode || "");
+      setRevision(data.revision || "");
+      setDescription(data.description || "");
+      setItems(toEditorRows(data.items));
+      toast.success(`Copied "${data.kitName}" — review before saving`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not load that kit template to copy");
+    } finally {
+      setCopying(false);
+      setCopySourceId("");
+    }
+  };
+
   const setItem = (key, field, value) =>
     setItems((rows) => rows.map((r) => (r._key === key ? { ...r, [field]: value } : r)));
 
   const addRow = () => setItems((rows) => [...rows, blankItem()]);
+
+  // Live "Matched" / "Not in master" preview as the admin types a part
+  // number into a row -- without this, a row typed in by hand (as opposed
+  // to one loaded from an existing template or an Excel import) never
+  // gets a matchedPart at all until the whole template is saved and
+  // reloaded, so a part that's genuinely in the master still shows "Not
+  // in master" the entire time it's being entered. Debounced, and only
+  // re-looked-up for codes whose cached matchedPart is missing or stale
+  // -- never loops, since the dependency below only changes when someone
+  // actually edits a part-number cell, not when matchedPart itself is set.
+  const ttCodesKey = items.map((r) => r.ttUniquePartNumber).join("|");
+  useEffect(() => {
+    const codes = [
+      ...new Set(items.map((r) => r.ttUniquePartNumber.trim().toUpperCase()).filter(Boolean)),
+    ];
+    const codesNeedingLookup = codes.filter((code) => {
+      const row = items.find((r) => r.ttUniquePartNumber.trim().toUpperCase() === code);
+      return !row?.matchedPart || row.matchedPart.ttUniquePartNumber !== code;
+    });
+    if (codesNeedingLookup.length === 0) return undefined;
+
+    const t = setTimeout(async () => {
+      try {
+        const results = await Promise.all(
+          codesNeedingLookup.map((code) =>
+            api
+              .get("/parts/lookup", { params: { partNumber: code } })
+              .then(({ data }) => [code, data.matched ? data.part : null])
+              .catch(() => [code, null])
+          )
+        );
+        const byCode = new Map(results);
+        setItems((rows) =>
+          rows.map((r) => {
+            const code = r.ttUniquePartNumber.trim().toUpperCase();
+            if (!code || !byCode.has(code)) return r;
+            return { ...r, matchedPart: byCode.get(code) };
+          })
+        );
+      } catch {
+        /* best-effort live preview only -- save-time resolution on the
+           backend is what actually decides the match */
+      }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ttCodesKey]);
+
   const removeRow = (key) => setItems((rows) => rows.filter((r) => r._key !== key));
 
   const handleImported = (parsed) => {
@@ -132,6 +208,7 @@ function KitEditor({ template, onClose, onSaved }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (locked) return;
     if (!kitName.trim()) {
       toast.error("Kit name is required");
       return;
@@ -197,6 +274,7 @@ function KitEditor({ template, onClose, onSaved }) {
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
               <Layers className="h-4 w-4 text-accent" />
               {isEdit ? "Edit kit template" : "New kit template"}
+              {locked && <Badge variant="secondary">Locked — already issued</Badge>}
             </h2>
             <p className="text-xs text-muted-foreground">
               Items are matched to stock purely by TT unique part number.
@@ -212,18 +290,59 @@ function KitEditor({ template, onClose, onSaved }) {
         ) : (
           <form onSubmit={submit} className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {locked && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  This kit has already been issued at least once, so its name, code, revision,
+                  description and items are locked — issues (and edits made to them) rely on this
+                  staying exactly as it was. Deactivate it and create a new kit template if
+                  anything needs to change.
+                </div>
+              )}
+
+              {!isEdit && existingTemplates.length > 0 && (
+                <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed border-border p-2.5">
+                  <div className="min-w-[220px] flex-1">
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Copy from an existing template (optional)
+                    </label>
+                    <Select value={copySourceId} onValueChange={setCopySourceId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a kit to copy…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {existingTemplates.map((t) => (
+                          <SelectItem key={t._id} value={t._id}>
+                            {t.kitName} {t.kitCode ? `(${t.kitCode})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!copySourceId || copying}
+                    onClick={() => copyFromTemplate(copySourceId)}
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                    {copying ? "Copying…" : "Copy into this form"}
+                  </Button>
+                </div>
+              )}
+
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Kit name
                   </label>
-                  <Input value={kitName} onChange={(e) => setKitName(e.target.value)} />
+                  <Input value={kitName} onChange={(e) => setKitName(e.target.value)} disabled={locked} />
                 </div>
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Revision
                   </label>
-                  <Input value={revision} onChange={(e) => setRevision(e.target.value)} />
+                  <Input value={revision} onChange={(e) => setRevision(e.target.value)} disabled={locked} />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -233,6 +352,7 @@ function KitEditor({ template, onClose, onSaved }) {
                     className="font-mono-tech"
                     value={kitCode}
                     onChange={(e) => setKitCode(e.target.value)}
+                    disabled={locked}
                   />
                 </div>
                 <div className="sm:col-span-3">
@@ -243,6 +363,7 @@ function KitEditor({ template, onClose, onSaved }) {
                     rows={2}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
+                    disabled={locked}
                   />
                 </div>
               </div>
@@ -250,11 +371,17 @@ function KitEditor({ template, onClose, onSaved }) {
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">Items ({items.length})</p>
                 <div className="flex gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => setShowImport(true)}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowImport(true)}
+                    disabled={locked}
+                  >
                     <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
                     Import from Excel
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={addRow}>
+                  <Button type="button" size="sm" variant="outline" onClick={addRow} disabled={locked}>
                     <ListPlus className="h-3.5 w-3.5 mr-1.5" />
                     Add row
                   </Button>
@@ -292,6 +419,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             className="h-8 text-xs"
                             value={r.referenceDesignator}
                             onChange={(e) => setItem(r._key, "referenceDesignator", e.target.value)}
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[110px]">
@@ -299,6 +427,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             className="h-8 text-xs"
                             value={r.value}
                             onChange={(e) => setItem(r._key, "value", e.target.value)}
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[150px]">
@@ -309,6 +438,7 @@ function KitEditor({ template, onClose, onSaved }) {
                               setItem(r._key, "ttUniquePartNumber", e.target.value.toUpperCase())
                             }
                             placeholder="required"
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[130px]">
@@ -316,6 +446,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             className="h-8 text-xs"
                             value={r.manufacturerPartNumber}
                             onChange={(e) => setItem(r._key, "manufacturerPartNumber", e.target.value)}
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[80px]">
@@ -325,6 +456,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             className="h-8 text-xs font-mono-tech"
                             value={r.qtyPerKit}
                             onChange={(e) => setItem(r._key, "qtyPerKit", e.target.value)}
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[50px] text-center">
@@ -333,6 +465,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             className="h-3.5 w-3.5"
                             checked={r.dnp}
                             onChange={(e) => setItem(r._key, "dnp", e.target.checked)}
+                            disabled={locked}
                           />
                         </td>
                         <td className="px-1.5 py-1 w-[110px]">
@@ -350,6 +483,7 @@ function KitEditor({ template, onClose, onSaved }) {
                             size="icon"
                             variant="ghost"
                             onClick={() => removeRow(r._key)}
+                            disabled={locked}
                           >
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
@@ -369,10 +503,12 @@ function KitEditor({ template, onClose, onSaved }) {
               <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={saving}>
-                <Save className="mr-1.5 h-4 w-4" />
-                {saving ? "Saving…" : isEdit ? "Save changes" : "Create kit template"}
-              </Button>
+              {!locked && (
+                <Button type="submit" disabled={saving}>
+                  <Save className="mr-1.5 h-4 w-4" />
+                  {saving ? "Saving…" : isEdit ? "Save changes" : "Create kit template"}
+                </Button>
+              )}
             </div>
           </form>
         )}
@@ -436,10 +572,11 @@ function TemplateIssuesDialog({ template, onClose }) {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[90px]">Date</TableHead>
+                  <TableHead className="w-[100px]">Code</TableHead>
                   <TableHead>Vendor</TableHead>
                   <TableHead className="w-[60px] text-right">Qty</TableHead>
                   <TableHead className="w-[110px]">Issued by</TableHead>
-                  <TableHead className="w-[90px]">Status</TableHead>
+                  <TableHead className="w-[130px]">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -450,25 +587,40 @@ function TemplateIssuesDialog({ template, onClose }) {
                       <TableCell className="text-xs text-muted-foreground">
                         {fmtDate(iss.createdAt)}
                       </TableCell>
+                      <TableCell>
+                        <span
+                          className="inline-block break-all rounded border border-border bg-[hsl(220_20%_97%)] px-1.5 py-0.5 font-mono-tech text-xs tracking-wide"
+                          title={iss.issueCode || ""}
+                        >
+                          {iss.issueCode || "—"}
+                        </span>
+                      </TableCell>
                       <TableCell>{iss.vendor?.companyName || "—"}</TableCell>
                       <TableCell className="text-right font-mono-tech">{iss.quantity}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {iss.issuedBy || "—"}
                       </TableCell>
                       <TableCell>
-                        {shortLines.length > 0 ? (
-                          <Badge
-                            variant="destructive"
-                            className="gap-1"
-                            title={shortLines
-                              .map((l) => `${l.ttUniquePartNumber}: short ${l.qtyShort}`)
-                              .join(", ")}
-                          >
-                            {shortLines.length} short
-                          </Badge>
-                        ) : (
-                          <Badge variant="success">Full</Badge>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {shortLines.length > 0 ? (
+                            <Badge
+                              variant="destructive"
+                              className="gap-1"
+                              title={shortLines
+                                .map((l) => `${l.ttUniquePartNumber}: short ${l.qtyShort}`)
+                                .join(", ")}
+                            >
+                              {shortLines.length} short
+                            </Badge>
+                          ) : (
+                            <Badge variant="success">Full</Badge>
+                          )}
+                          {iss.isEditable === false && (
+                            <Badge variant="secondary" title="This entry has been edited — view only">
+                              View only
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -716,7 +868,7 @@ export default function Kits() {
             <TableHeader>
               <TableRow>
                 <TableHead>Kit name</TableHead>
-                <TableHead className="w-[140px]">Code</TableHead>
+                <TableHead className="w-[190px]">Code</TableHead>
                 <TableHead className="w-[70px]">Rev.</TableHead>
                 <TableHead className="w-[70px] text-right">Items</TableHead>
                 <TableHead className="w-[190px] text-right">Actions</TableHead>
@@ -751,7 +903,10 @@ export default function Kits() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono-tech text-xs text-muted-foreground">
+                    <TableCell
+                      className="break-all font-mono-tech text-xs text-muted-foreground"
+                      title={t.kitCode || ""}
+                    >
                       {t.kitCode || "—"}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{t.revision || "—"}</TableCell>
@@ -794,7 +949,8 @@ export default function Kits() {
                           size="sm"
                           variant="outline"
                           className="h-8 w-8 p-0"
-                          title="Edit kit"
+                          title={t.hasIssues ? "Already issued — locked from editing" : "Edit kit"}
+                          disabled={t.hasIssues}
                           onClick={() => setEditing(t)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -822,6 +978,7 @@ export default function Kits() {
       {editing !== null && (
         <KitEditor
           template={editing._id ? editing : null}
+          existingTemplates={templates}
           onClose={() => setEditing(null)}
           onSaved={(saved) =>
             setTemplates((list) =>
@@ -841,11 +998,15 @@ export default function Kits() {
         <KitPreviewDialog
           template={previewing}
           onClose={() => setPreviewing(null)}
-          onEdit={() => {
-            const tpl = previewing;
-            setPreviewing(null);
-            setEditing(tpl);
-          }}
+          onEdit={
+            previewing.hasIssues
+              ? undefined
+              : () => {
+                  const tpl = previewing;
+                  setPreviewing(null);
+                  setEditing(tpl);
+                }
+          }
         />
       )}
     </div>

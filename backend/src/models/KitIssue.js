@@ -31,15 +31,45 @@ const kitIssueLineSchema = new mongoose.Schema(
 
 const kitIssueSchema = new mongoose.Schema(
   {
+    // "draft" = saved progress, stock untouched, freely editable in place.
+    // "issued" = the real thing — stock has been deducted and, from here
+    // on, this document is only ever superseded by a new one (see
+    // rootIssue/editedFrom below), never rewritten. Issuing a kit can take
+    // 10-14 days in practice, so a draft lets the same in-progress kit be
+    // saved and revisited any number of times before it's finally issued.
+    status: { type: String, enum: ["draft", "issued"], default: "issued" },
+
     // Not populated-through for display — kept only so "view the template
     // this came from" can still work when the template still exists.
     kitTemplate: { type: mongoose.Schema.Types.ObjectId, ref: "KitTemplate", default: null },
     kitName: { type: String, required: true, trim: true }, // snapshot
     kitCode: { type: String, trim: true, default: "" }, // snapshot
 
-    quantity: { type: Number, required: true, min: 1 }, // number of kits issued
+    // Display code for THIS issue action specifically — defaults to the
+    // kit's own code (or its name, if it has none) at the moment this
+    // issue was created. Grows a letter suffix each time it's "edited"
+    // (see rootIssue/editIndex below): ABC11 -> ABC11A -> ABC11B -> ...
+    // Left blank while status is "draft" — it's only assigned the moment
+    // the draft is actually issued.
+    issueCode: { type: String, trim: true, default: "" },
 
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", required: true }, // recipient
+    // Edit lineage. The original issue in a chain has rootIssue: null and
+    // editIndex: 0. Every edit points rootIssue at that ORIGINAL (never at
+    // its immediate parent, so the letter suffix always counts from the
+    // start of the chain no matter which entry "Edit" was clicked on) and
+    // editedFrom at whichever entry it was actually created from, for a
+    // full trail. Editing never modifies the entry it was created from —
+    // it only ever creates a new document alongside it.
+    rootIssue: { type: mongoose.Schema.Types.ObjectId, ref: "KitIssue", default: null },
+    editedFrom: { type: mongoose.Schema.Types.ObjectId, ref: "KitIssue", default: null },
+    editIndex: { type: Number, default: 0 },
+
+    // Not `required` at the schema level (a fresh draft may not have these
+    // filled in yet) — the controllers enforce both being present the
+    // moment a kit actually gets issued.
+    quantity: { type: Number, default: 1, min: 0 }, // number of kits issued
+
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null }, // recipient
 
     issuedBy: { type: String, trim: true, default: "" },
     issuedByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

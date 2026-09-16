@@ -11,6 +11,8 @@ import {
   getDuplicateParts,
   getDuplicateCriteria,
   deletePart,
+  exportPartsCsv,
+  exportPartVendorLinksCsv,
 } from "../controllers/partController.js";
 import { updatePart } from "../controllers/partAdminController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
@@ -29,6 +31,22 @@ const partDocFields = uploadPartDoc.fields([
 router.get("/duplicates", getDuplicateParts);
 router.get("/duplicate-criteria", getDuplicateCriteria);
 router.get("/count", getPartsCount);
+
+// CSV export for the "Download parts" button on the Parts master —
+// ADMIN ONLY, same as editing/deleting parts. Declared before "/:id" so
+// "export" is never swallowed as an id.
+router.get(
+  "/export/parts-csv",
+  protect,
+  requirePermission("part.approve"),
+  exportPartsCsv
+);
+router.get(
+  "/export/vendor-links-csv",
+  protect,
+  requirePermission("part.approve"),
+  exportPartVendorLinksCsv
+);
 
 router.get("/", getParts);
 router.get("/lookup", lookupPart);
