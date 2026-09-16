@@ -1,19 +1,25 @@
 /*
   Parses a kit / BOM workbook — e.g. the "TMPL_XXXX_iMONICAM_BOM" style
-  sheet — for the Kits -> "Import from Excel" utility.
+  sheet, or a "QUANTITY ISSUE FOR ..." tracking sheet — for the Kits ->
+  "Import from Excel" utility.
 
-  The sheet this was built against has a free-form title block in the
-  first few rows (document number, author, rev, date...) and the real
-  header a few rows down, with columns including:
+  Real sheets have a free-form title block in the first few rows (document
+  number, author, rev, date...) and the real header a few rows down, with
+  columns whose exact wording, casing and order vary sheet to sheet, e.g.:
     Sr. No | Reference | Value | PART_TYPE | TTZ Part | MFR_PART_NUMBER |
-    MANUFACTURER | Footprint | Qty | DNP | ...pack-size columns the admin
-    doesn't need...
+    MANUFACTURER | Footprint | Qty | DNP | ...
+  or:
+    S.NO | TTZ PART NO | ITEM DESCRIPTION | QTY IN 1 SET | QTY Reqd ... |
+    QTY ISSUE | Shortage | ...
 
   Same approach as parseStockSheet.js: the header row is located by
   searching for a part-number-ish column ("TTZ Part") together with a
   quantity column ("Qty"), and every other column is looked up by name
-  (with a few likely synonyms) rather than a hard-coded column letter, so
-  a differently laid out kit sheet keeps working without a code change.
+  (with a list of likely synonyms) rather than a hard-coded column letter,
+  so a differently laid out kit sheet keeps working without a code change.
+  Matching is case-insensitive and whitespace-normalized, since the same
+  header shows up as "TTZ Part", "TTZ PART NO", "Ttz part no." etc. across
+  different sheets.
 
   This module only reads the workbook; nothing here touches the database
   or creates a KitTemplate — that happens once the admin reviews/edits the
@@ -22,10 +28,24 @@
 import xlsx from "xlsx";
 
 const HEADER_CANDIDATES = {
-  srNo: ["Sr. No", "Sr No", "S. No", "S No", "SNo", "Sr#", "Sl. No", "Sl No"],
-  reference: ["Reference", "Ref Designator", "Ref. Designator", "Designator", "Ref Des"],
-  value: ["Value"],
-  partType: ["PART_TYPE", "Part Type", "Type", "Component Type"],
+  srNo: [
+    "Sr. No", "Sr No", "S. No", "S No", "SNo", "Sr#", "Sl. No", "Sl No",
+    "S.NO", "Sr.No", "Sl.No", "#",
+  ],
+  reference: [
+    "Reference", "Ref Designator", "Ref. Designator", "Designator",
+    "Ref Des", "Reference Designator", "RefDes",
+  ],
+  // "Value" sheets (BOM style) and "Item Description" sheets (issue-
+  // tracking style) both describe what the part *is* — a kit template has
+  // no separate free-text description field, so both map into `value`.
+  value: [
+    "Value", "Item Value", "Item Description", "Description",
+    "Item Desc", "Desc",
+  ],
+  partType: [
+    "PART_TYPE", "Part Type", "Type", "Component Type", "Category",
+  ],
   ttPart: [
     "TTZ Part",
     "TT Part",
@@ -34,6 +54,14 @@ const HEADER_CANDIDATES = {
     "TTZ Part Number",
     "Part Number",
     "TT Number",
+    "TTZ Part No",
+    "TT Part No",
+    "TTZ No",
+    "TT No",
+    "TTZ Code",
+    "TT Code",
+    "Part No",
+    "Part Code",
   ],
   mfrPart: [
     "MFR_PART_NUMBER",
@@ -42,11 +70,28 @@ const HEADER_CANDIDATES = {
     "Mfr Part No",
     "Mfr Part Number",
     "MPN",
+    "Manufacturer Part No",
   ],
-  manufacturer: ["MANUFACTURER", "Manufacturer", "Mfr", "Make"],
+  manufacturer: [
+    "MANUFACTURER", "Manufacturer", "Mfr", "Make", "Brand",
+  ],
   footprint: ["Footprint", "Package"],
-  qty: ["Qty", "Quantity", "Qty per kit", "Qty/Unit", "Qty Per Unit", "Qty."],
-  dnp: ["DNP"],
+  qty: [
+    "Qty",
+    "Quantity",
+    "Qty per kit",
+    "Qty/Unit",
+    "Qty Per Unit",
+    "Qty.",
+    "Qty in 1 Set",
+    "Qty in 1 Kit",
+    "Qty Per Kit",
+    "Qty/Kit",
+    "Qty. Per Kit",
+    "Qty Per Set",
+    "Qty/Set",
+  ],
+  dnp: ["DNP", "Do Not Populate", "Do Not Place"],
 };
 
 const norm = (v) =>
@@ -55,14 +100,20 @@ const norm = (v) =>
     .replace(/\s+/g, " ")
     .trim();
 
+// Comparison-only normalization: case-insensitive on top of norm(), so
+// header text is matched regardless of how a given sheet capitalized it
+// ("TTZ Part" vs "TTZ PART NO" vs "ttz part"). Display/original-case text
+// (header cells shown in the UI, error messages) still uses norm().
+const normKey = (v) => norm(v).toLowerCase();
+
 // Scans the first 25 rows for the row that looks like the real header (has
 // both a part-number column and a Qty column) — kit sheets have a variable
 // number of title/metadata rows above the header.
 const findHeaderRow = (grid) => {
-  const wantedTT = HEADER_CANDIDATES.ttPart.map(norm);
-  const wantedQty = HEADER_CANDIDATES.qty.map(norm);
+  const wantedTT = HEADER_CANDIDATES.ttPart.map(normKey);
+  const wantedQty = HEADER_CANDIDATES.qty.map(normKey);
   for (let r = 0; r < Math.min(grid.length, 25); r++) {
-    const cells = (grid[r] || []).map(norm);
+    const cells = (grid[r] || []).map(normKey);
     const hasTT = cells.some((c) => wantedTT.includes(c));
     const hasQty = cells.some((c) => wantedQty.includes(c));
     if (hasTT && hasQty) return r;
@@ -71,8 +122,8 @@ const findHeaderRow = (grid) => {
 };
 
 const findCol = (headerCells, candidates) => {
-  const wanted = candidates.map(norm);
-  return headerCells.findIndex((c) => wanted.includes(norm(c)));
+  const wanted = candidates.map(normKey);
+  return headerCells.findIndex((c) => wanted.includes(normKey(c)));
 };
 
 const toNumber = (v) => {
