@@ -174,8 +174,9 @@ const QTY_REMARKS_SCHEMA = {
   quantityReceived: {
     required: true,
     requiredMessage: "Enter the quantity received",
-    regex: "positiveInteger",
-    min: 1,
+    // Decimal quantities are allowed (metres, kilograms, ...).
+    regex: "positiveDecimal",
+    min: 0.001,
   },
   remarks: { maxLength: 500 },
 };
@@ -193,7 +194,14 @@ const NEW_PART_SCHEMA = {
     regex: "alphaNumSpace",
     maxLength: 30,
   },
-  quantityReceived: { regex: "positiveInteger" },
+  // Unit of measure (PCS, KG, MTR, ...) and the per-unit price/rate for
+  // that unit — both optional, captured here so they're on the Part
+  // record from the moment it's approved (see stockBooking.js). price is
+  // matched against a vendor's tax invoice later (unitPrice AI-extracts
+  // from the invoice's own line items).
+  unit: { regex: "alphaNumSpace", maxLength: 20 },
+  price: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+  quantityReceived: { regex: "positiveDecimal" },
   remarks: { maxLength: 500 },
 };
 
@@ -221,6 +229,8 @@ export default function StockEntryStep({
     companyCode: "",
     category: "",
     partTypeBatchNo: "",
+    unit: "",
+    price: "",
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -388,6 +398,8 @@ export default function StockEntryStep({
       companyCode: "",
       category: "",
       partTypeBatchNo: "",
+      unit: "",
+      price: "",
     });
   };
 
@@ -456,6 +468,8 @@ export default function StockEntryStep({
           companyCode: activeRequest.newPart?.companyCode || "",
           category: activeRequest.newPart?.category || "",
           partTypeBatchNo: activeRequest.newPart?.partTypeBatchNo || "",
+          unit: activeRequest.newPart?.unit || "",
+          price: activeRequest.newPart?.price ?? null,
         },
         approvedRequestId: activeRequest._id,
       },
@@ -843,7 +857,8 @@ export default function StockEntryStep({
                 <Label>Quantity received</Label>
                 <Input
                   type="number"
-                  min="1"
+                  min="0.001"
+                  step="any"
                   value={quantityReceived}
                   onChange={(e) => setQuantityReceived(e.target.value)}
                   onBlur={() => vQty.handleBlur("quantityReceived", quantityReceived, { quantityReceived, remarks })}
@@ -901,7 +916,8 @@ export default function StockEntryStep({
                 <Label>Quantity received</Label>
                 <Input
                   type="number"
-                  min="1"
+                  min="0.001"
+                  step="any"
                   value={quantityReceived}
                   onChange={(e) => setQuantityReceived(e.target.value)}
                   onBlur={() => vQty.handleBlur("quantityReceived", quantityReceived, { quantityReceived, remarks })}
@@ -1090,10 +1106,46 @@ export default function StockEntryStep({
                   />
                 </div>
                 <div className="space-y-1.5">
+                  <Label>Unit (optional)</Label>
+                  <Input
+                    value={newPart.unit}
+                    onChange={(e) => setNewPart({ ...newPart, unit: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("unit", newPart.unit, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
+                    placeholder="PCS, KG, MTR, ..."
+                  />
+                  <FieldError error={vNewPart.fieldError("unit")} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Price per unit (optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={newPart.price}
+                    onChange={(e) => setNewPart({ ...newPart, price: e.target.value })}
+                    onBlur={() =>
+                      vNewPart.handleBlur("price", newPart.price, {
+                        ...newPart,
+                        quantityReceived,
+                        remarks,
+                      })
+                    }
+                    placeholder="Rate per unit, e.g. 12.50"
+                  />
+                  <FieldError error={vNewPart.fieldError("price")} />
+                </div>
+                <div className="space-y-1.5">
                   <Label>Quantity expected (optional)</Label>
                   <Input
                     type="number"
-                    min="1"
+                    min="0.001"
+                    step="any"
                     value={quantityReceived}
                     onChange={(e) => setQuantityReceived(e.target.value)}
                     onBlur={() =>
@@ -1103,7 +1155,7 @@ export default function StockEntryStep({
                         remarks,
                       })
                     }
-                    placeholder="Booked after approval"
+                    placeholder="Booked after approval — decimals allowed"
                   />
                   <FieldError error={vNewPart.fieldError("quantityReceived")} />
                 </div>

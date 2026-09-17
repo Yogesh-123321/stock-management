@@ -25,6 +25,23 @@ const kitIssueLineSchema = new mongoose.Schema(
     qtyRequired: { type: Number, required: true, min: 0 }, // qtyPerKit * quantity issued
     qtyIssued: { type: Number, required: true, min: 0 }, // actually deducted from stock — may be less than qtyRequired
     qtyShort: { type: Number, default: 0 }, // qtyRequired - qtyIssued; >0 means this line was short
+
+    // FIFO breakdown of which batch(es) qtyIssued was actually drawn
+    // from, oldest batch first — e.g. 10 from batch "0124", then 2 from
+    // "0224" once the first ran out (see utils/batchAllocation.js).
+    // batchCode: null means stock that isn't tied to any batch (a legacy
+    // receipt from before batch codes existed, or a manual stock
+    // correction) — only ever reached once every real batch is
+    // exhausted. Empty when nothing was actually issued for this line.
+    batchBreakdown: {
+      type: [
+        {
+          batchCode: { type: String, default: null },
+          quantity: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

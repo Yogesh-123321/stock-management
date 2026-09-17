@@ -49,6 +49,36 @@ const fmtDateTime = (d) =>
       })
     : "—";
 
+// Client-side mirror of the backend's FIFO batch walk (see
+// utils/batchAllocation.js) — used only to preview, before a kit is
+// actually issued, which batch(es) a line's qty will be drawn from.
+// `batches` is a snapshot from when the template was last loaded, so
+// this is indicative, not authoritative — the backend re-computes the
+// real breakdown against live stock the moment the kit is actually
+// issued.
+function previewBatchBreakdown(batches, qty) {
+  let remaining = Number(qty) || 0;
+  const breakdown = [];
+  for (const b of batches || []) {
+    if (remaining <= 0) break;
+    if (b.remaining <= 0) continue;
+    const take = Math.min(b.remaining, remaining);
+    if (take > 0) {
+      breakdown.push({ batchCode: b.batchCode, quantity: take });
+      remaining -= take;
+    }
+  }
+  if (remaining > 0) breakdown.push({ batchCode: null, quantity: remaining });
+  return breakdown;
+}
+
+// Renders a batch breakdown (from either previewBatchBreakdown or the
+// batchBreakdown a real kit issue line already has) as "B1: 10, B2: 2".
+function formatBatchBreakdown(breakdown) {
+  if (!breakdown || breakdown.length === 0) return "—";
+  return breakdown.map((b) => `${b.batchCode || "No batch"}: ${b.quantity}`).join(", ");
+}
+
 /* ------------------------------------------------------------------ *
  * Edit an already-issued kit — never touches the entry it was opened
  * from. Submitting always creates a brand-new KitIssue, re-checked
@@ -516,7 +546,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
             <table className="w-full text-sm">
               <thead className="bg-secondary/70">
                 <tr className="border-b border-border">
-                  {["TT part #", "Description", "Qty/kit", "Required", "Issued", "Short"].map((h) => (
+                  {["TT part #", "Description", "Qty/kit", "Required", "Issued", "Batches", "Short"].map((h) => (
                     <th
                       key={h}
                       className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
@@ -529,7 +559,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
               <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                 {lines.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                    <td colSpan={7} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
                       This issue has no lines.
                     </td>
                   </tr>
@@ -543,6 +573,9 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyPerKit}</td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyRequired}</td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyIssued}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                      {formatBatchBreakdown(l.batchBreakdown)}
+                    </td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                       {l.qtyShort > 0 ? (
                         <span className="text-destructive">{l.qtyShort}</span>
@@ -1353,7 +1386,7 @@ export default function IssueKit() {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        {["TT part #", "Description", "Qty/kit", "Required", "Available", "Qty issuing", "Status"].map(
+                        {["TT part #", "Description", "Qty/kit", "Required", "Available", "Qty issuing", "Batches", "Status"].map(
                           (h) => (
                             <th
                               key={h}
@@ -1397,6 +1430,9 @@ export default function IssueKit() {
                               }
                               onChange={(e) => setQtyToIssueFor(p.ttUniquePartNumber, e.target.value)}
                             />
+                          </td>
+                          <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                            {formatBatchBreakdown(previewBatchBreakdown(p.batches, qtyToIssueFor(p)))}
                           </td>
                           <td className="px-2.5 py-1.5">
                             {p.ok ? (

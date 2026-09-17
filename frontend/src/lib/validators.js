@@ -36,6 +36,10 @@ export const REGEX = {
   alphaNumSpace: /^[A-Za-z0-9 ]+$/,
   positiveInteger: /^\d+$/,
   decimal2: /^\d+(\.\d{1,2})?$/,
+  // Quantities can be decimal (metres, kilograms, ...), so this allows any
+  // number of decimal places rather than capping at 2 like decimal2 (which
+  // is meant for currency amounts).
+  positiveDecimal: /^\d+(\.\d+)?$/,
   // Free-text fields (address, remarks, ...): block a value made up of
   // nothing but punctuation/whitespace, still allow full sentences.
   nonBlank: /\S/,
@@ -59,6 +63,7 @@ export const MESSAGES = {
   alphaNumSpace: "Letters, numbers and spaces only",
   positiveInteger: "Whole numbers only",
   decimal2: "Numbers only, up to 2 decimal places",
+  positiveDecimal: "Enter a positive number",
   nonBlank: "This field can't be just spaces",
 };
 

@@ -152,7 +152,9 @@ export const commitStockImport = asyncHandler(async (req, res) => {
   for (const row of rows) {
     try {
       const quantityReceived = Number(row.quantityReceived);
-      if (!quantityReceived || quantityReceived < 1) {
+      // Decimal quantities are allowed (e.g. metres, kilograms) — just
+      // reject missing/zero/negative values, not anything under 1.
+      if (!quantityReceived || quantityReceived <= 0) {
         throw new Error("Quantity received is required");
       }
 

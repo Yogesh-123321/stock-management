@@ -335,6 +335,11 @@ export const getPartHistory = asyncHandler(async (req, res) => {
         // Kit issues deduct stock the instant they're created — there is
         // no "pending an invoice" equivalent on the way out.
         stockApplied: true,
+        // Which batch(es) this line's qty was actually drawn from, oldest
+        // first — see utils/batchAllocation.js. batchCode: null is stock
+        // that wasn't tied to any batch (a legacy receipt, or a manual
+        // stock correction).
+        batchBreakdown: line.batchBreakdown || [],
         entryType: "kit_issue",
         issueId: issue._id,
         lineId: line._id,
@@ -383,6 +388,8 @@ export const createPart = asyncHandler(async (req, res) => {
     partTypeBatchNo,
     isAlternatePart,
     alternateOf,
+    unit,
+    price,
   } = req.body;
 
   if (!itemDescription || !companyCode || !category || !partTypeBatchNo) {
@@ -406,6 +413,8 @@ export const createPart = asyncHandler(async (req, res) => {
     companyCode: companyCode.toUpperCase(),
     category: category.toUpperCase(),
     partTypeBatchNo: partTypeBatchNo.toUpperCase(),
+    unit: unit || "",
+    price: price === "" || price == null ? null : Number(price),
     isAlternatePart: !!isAlternatePart,
     alternateOf: isAlternatePart ? alternateOf : null,
   });
@@ -731,6 +740,38 @@ export const exportPartsCsv = asyncHandler(async (req, res) => {
   ]);
 
   sendCsv(res, "parts-master", csvFrom(header, rows));
+});
+
+/*
+  GET /api/parts/:id/document-history
+  Audit trail of every time this part's photo or datasheet was added,
+  replaced, or removed — who did it, when, and the old/new file URLs.
+  Separate from the stock ledger (getPartHistory above), which tracks
+  quantity movements, not file changes. Purely a read of the
+  documentHistory array that updatePart (partAdminController.js) appends
+  to; newest change first.
+*/
+export const getPartDocumentHistory = asyncHandler(async (req, res) => {
+  const part = await Part.findById(req.params.id).select("documentHistory ttUniquePartNumber");
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+
+  const entries = (part.documentHistory || [])
+    .slice()
+    .sort((a, b) => new Date(b.date) - new Date(a.date)) // newest first
+    .map((e) => ({
+      _id: e._id,
+      date: e.date,
+      field: e.field, // "photo" | "datasheet"
+      action: e.action, // "added" | "replaced" | "removed"
+      url: e.url, // the file now in place (null if removed)
+      previousUrl: e.previousUrl, // the file that was there before (null if added)
+      changedBy: e.changedBy,
+    }));
+
+  res.json(entries);
 });
 // GET /api/parts/export/vendor-links-csv — one row per part<->vendor link
 // (the "related details" alongside the parts master itself), ADMIN ONLY.

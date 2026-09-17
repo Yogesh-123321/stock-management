@@ -152,7 +152,10 @@ const partNumberScore = (a, b) => {
   return 0;
 };
 
-const quantityScore = (a, b) => {
+// Shared "how close are these two numbers" scorer — used for both
+// quantity and price agreement (a 1 = exact match, tapering to 0 the
+// further apart the two values are, relative to their own size).
+const closenessScore = (a, b) => {
   if (a == null || b == null) return null; // no signal either way
   const x = Number(a);
   const y = Number(b);
@@ -163,16 +166,28 @@ const quantityScore = (a, b) => {
   return Math.max(0, 1 - diff / base);
 };
 
-// Weighted blend of however many of the three signals are actually
+const quantityScore = closenessScore;
+
+// Compares the per-unit rate AI-extracted from the invoice line
+// (invoiceLine.unitPrice — see utils/aiDocumentExtract.js) against the
+// price registered on the matched part at registration time (Part.price
+// — see models/Part.js / utils/stockBooking.js). Both are a rate per
+// `unit` (PCS/KG/MTR/...), not a line total, so they're directly
+// comparable regardless of quantity.
+const priceScore = (invoiceUnitPrice, partPrice) => closenessScore(invoiceUnitPrice, partPrice);
+
+// Weighted blend of however many of the four signals are actually
 // available for this pair — a signal that's missing on one side (e.g. no
-// part number printed on the invoice) is left out of the average rather
-// than silently counted as 0, so a good description match on a document
-// with no part numbers at all doesn't get unfairly capped.
-const combineScores = (descSim, partScore, qtyScore) => {
+// part number printed on the invoice, or no price registered on the part
+// yet) is left out of the average rather than silently counted as 0, so a
+// good description match on a document with nothing else to compare
+// doesn't get unfairly capped.
+const combineScores = (descSim, partScore, qtyScore, priceScoreValue) => {
   const weighted = [
-    [descSim, 0.55],
-    [partScore, 0.25],
+    [descSim, 0.45],
+    [partScore, 0.2],
     [qtyScore, 0.2],
+    [priceScoreValue, 0.15],
   ].filter(([s]) => s != null);
   if (weighted.length === 0) return 0;
   const totalWeight = weighted.reduce((sum, [, w]) => sum + w, 0);
@@ -273,13 +288,15 @@ export const getTaxInvoiceLineMatch = asyncHandler(async (req, res) => {
       if (descSim < MIN_MATCH_SIMILARITY) continue;
       const partScore = partNumberScore(invoiceLines[i].partNumber, partNumberOf(stockEntries[j].part));
       const qtyScore = quantityScore(invoiceLines[i].quantity, stockEntries[j].quantityReceived);
+      const priceScoreValue = priceScore(invoiceLines[i].unitPrice, stockEntries[j].part?.price);
       pairs.push({
         i,
         j,
         descSim,
         partScore,
         qtyScore,
-        score: combineScores(descSim, partScore, qtyScore),
+        priceScoreValue,
+        score: combineScores(descSim, partScore, qtyScore, priceScoreValue),
       });
     }
   }
@@ -309,6 +326,13 @@ export const getTaxInvoiceLineMatch = asyncHandler(async (req, res) => {
         field: "partNumber",
         invoiceValue: invoiceLine.partNumber,
         enteredValue: partNumberOf(stockEntry.part),
+      });
+    }
+    if (pair.priceScoreValue != null && pair.priceScoreValue < 1) {
+      differences.push({
+        field: "price",
+        invoiceValue: invoiceLine.unitPrice,
+        enteredValue: stockEntry.part?.price ?? null,
       });
     }
 

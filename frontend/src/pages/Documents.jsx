@@ -708,6 +708,8 @@ function InvoiceStockDialog({ invoice, onClose }) {
                         <TableHead>Entered as</TableHead>
                         <TableHead className="text-right">Invoice qty</TableHead>
                         <TableHead className="text-right">Entered qty</TableHead>
+                        <TableHead className="text-right">Invoice price</TableHead>
+                        <TableHead className="text-right">Registered price</TableHead>
                         <TableHead className="text-right">Match score</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -716,6 +718,10 @@ function InvoiceStockDialog({ invoice, onClose }) {
                         const invQty = m.invoiceLine.quantity;
                         const entQty = m.stockEntry.quantityReceived;
                         const qtyMismatch = invQty != null && invQty !== entQty;
+                        const invPrice = m.invoiceLine.unitPrice;
+                        const partPrice = m.stockEntry.part?.price;
+                        const priceMismatch =
+                          invPrice != null && partPrice != null && Number(invPrice) !== Number(partPrice);
                         return (
                           <TableRow key={idx}>
                             <TableCell className="align-top">
@@ -737,6 +743,16 @@ function InvoiceStockDialog({ invoice, onClose }) {
                               className={`text-right align-top ${qtyMismatch ? "font-semibold text-amber-700" : ""}`}
                             >
                               {entQty}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right align-top ${priceMismatch ? "font-semibold text-amber-700" : ""}`}
+                            >
+                              {invPrice ?? "—"}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right align-top ${priceMismatch ? "font-semibold text-amber-700" : ""}`}
+                            >
+                              {partPrice ?? "—"}
                             </TableCell>
                             <TableCell className="text-right align-top">
                               <ScoreBadge score={m.score} />
@@ -775,7 +791,24 @@ function InvoiceStockDialog({ invoice, onClose }) {
                     <TableBody>
                       {mismatchedMatches.map((m, idx) => {
                         const qtyDiff = m.differences.find((d) => d.field === "quantity");
-                        const partDiff = m.differences.find((d) => d.field !== "quantity");
+                        const partDiff = m.differences.find((d) => d.field === "partNumber");
+                        const priceDiff = m.differences.find((d) => d.field === "price");
+                        const detailParts = [];
+                        if (partDiff) {
+                          detailParts.push(
+                            `Part no. — invoice: ${partDiff.invoiceValue || "—"}, registered: ${
+                              partDiff.enteredValue || "—"
+                            }`
+                          );
+                        }
+                        if (priceDiff) {
+                          detailParts.push(
+                            `Price — invoice: ${priceDiff.invoiceValue ?? "—"}, registered: ${
+                              priceDiff.enteredValue ?? "—"
+                            }`
+                          );
+                        }
+                        if (detailParts.length === 0 && qtyDiff) detailParts.push("Quantity doesn't match");
                         return (
                           <TableRow key={`mismatch-${idx}`}>
                             <TableCell className="align-top">
@@ -794,11 +827,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
                               {qtyDiff ? qtyDiff.enteredValue ?? "—" : m.stockEntry.quantityReceived}
                             </TableCell>
                             <TableCell className="align-top text-xs text-muted-foreground">
-                              {partDiff
-                                ? `Part no. — invoice: ${partDiff.invoiceValue || "—"}, entered: ${
-                                    partDiff.enteredValue || "—"
-                                  }`
-                                : "Quantity doesn't match"}
+                              {detailParts.join("; ")}
                             </TableCell>
                           </TableRow>
                         );

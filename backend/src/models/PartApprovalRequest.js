@@ -25,6 +25,12 @@ const partApprovalRequestSchema = new mongoose.Schema(
       companyCode: { type: String, trim: true, required: true },
       category: { type: String, trim: true, required: true },
       partTypeBatchNo: { type: String, trim: true, required: true },
+      // Unit of measure (e.g. PCS, KG, MTR) and per-unit price/rate,
+      // captured at registration time and copied onto the Part record the
+      // moment this request is approved (see utils/stockBooking.js). Both
+      // optional — a request can still be raised before the rate is known.
+      unit: { type: String, trim: true, default: "" },
+      price: { type: Number, min: 0, default: null },
       // Uploaded when the request is raised (see partApprovalController.js
       // createRequest) and copied onto the Part record the moment this
       // request is approved (see utils/stockBooking.js).

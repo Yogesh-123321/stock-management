@@ -41,6 +41,8 @@ export const createRequest = async (req, res) => {
       companyCode: req.body.companyCode || "",
       category: req.body.category || "",
       partTypeBatchNo: req.body.partTypeBatchNo || "",
+      unit: req.body.unit || "",
+      price: req.body.price ?? null,
     };
 
     if (!["new_part_number", "alternate_part"].includes(requestType)) {
@@ -93,6 +95,11 @@ export const createRequest = async (req, res) => {
         companyCode: newPart.companyCode,
         category: newPart.category,
         partTypeBatchNo: newPart.partTypeBatchNo,
+        unit: newPart.unit || "",
+        price:
+          newPart.price === "" || newPart.price === undefined || newPart.price === null
+            ? null
+            : Number(newPart.price),
         photoUrl: photoUrl || "",
         datasheetUrl: datasheetUrl || "",
       },
@@ -323,6 +330,7 @@ const EDITABLE_PART_FIELDS = [
   "companyCode",
   "category",
   "partTypeBatchNo",
+  "unit",
 ];
 
 export const updateRequest = async (req, res) => {
@@ -342,6 +350,11 @@ export const updateRequest = async (req, res) => {
     }
     if (!String(doc.newPart.itemDescription || "").trim())
       return res.status(400).json({ message: "Description cannot be empty" });
+
+    // price is numeric, so it's handled separately from the string fields above.
+    if (Object.prototype.hasOwnProperty.call(incoming, "price")) {
+      doc.newPart.price = incoming.price === "" || incoming.price == null ? null : Number(incoming.price);
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "proposedQuantity")) {
       const q = req.body.proposedQuantity;

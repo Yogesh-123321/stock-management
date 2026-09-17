@@ -5,6 +5,7 @@ import KitIssue from "../models/KitIssue.js";
 import Part from "../models/Part.js";
 import Vendor from "../models/Vendor.js";
 import { parseKitWorkbook } from "../utils/parseKitSheet.js";
+import { getAvailableBatches, allocateFromBatches } from "../utils/batchAllocation.js";
 
 // Lines flagged Do Not Populate never consume stock and are never part of
 // what an issue actually deducts — kept on the template for reference only.
@@ -74,6 +75,11 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
 
   const resolvedLines = [];
   const shortages = [];
+  // Batches fetched per part are cached and mutated across this whole
+  // call, so a second line for the same part (e.g. two reference
+  // designators for the same TT number) continues drawing from wherever
+  // the first line left off instead of double-allocating the same units.
+  const batchCache = new Map();
   for (const item of items) {
     const partDoc = byCode.get(item.ttUniquePartNumber);
     const required = item.qtyPerKit * qty;
@@ -107,7 +113,16 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
       });
     }
 
-    resolvedLines.push({ item, partDoc, required, toDeduct, short });
+    let batchBreakdown = [];
+    if (partDoc && toDeduct > 0) {
+      const key = String(partDoc._id);
+      if (!batchCache.has(key)) {
+        batchCache.set(key, await getAvailableBatches(partDoc._id));
+      }
+      batchBreakdown = allocateFromBatches(batchCache.get(key), toDeduct);
+    }
+
+    resolvedLines.push({ item, partDoc, required, toDeduct, short, batchBreakdown });
   }
 
   // Deduct whatever's available for every line — nothing to deduct for a
@@ -148,6 +163,7 @@ async function resolveDraftLines(items, qty, overrideLines) {
 
   const resolvedLines = [];
   const shortages = [];
+  const batchCache = new Map();
   for (const item of items) {
     const partDoc = byCode.get(item.ttUniquePartNumber);
     const required = item.qtyPerKit * qty;
@@ -170,7 +186,20 @@ async function resolveDraftLines(items, qty, overrideLines) {
       });
     }
 
-    resolvedLines.push({ item, partDoc, required, toDeduct: planned, short });
+    // Same FIFO preview as a real issue — indicative only, since nothing
+    // is actually deducted for a draft, so live stock (and therefore
+    // which batch this would draw from) can still move before it's
+    // actually issued.
+    let batchBreakdown = [];
+    if (partDoc && planned > 0) {
+      const key = String(partDoc._id);
+      if (!batchCache.has(key)) {
+        batchCache.set(key, await getAvailableBatches(partDoc._id));
+      }
+      batchBreakdown = allocateFromBatches(batchCache.get(key), planned);
+    }
+
+    resolvedLines.push({ item, partDoc, required, toDeduct: planned, short, batchBreakdown });
   }
 
   return { resolvedLines, shortages };
@@ -178,7 +207,7 @@ async function resolveDraftLines(items, qty, overrideLines) {
 
 // Shapes resolveAndDeductLines' output into KitIssue.lines' schema.
 const linesPayloadFrom = (resolvedLines) =>
-  resolvedLines.map(({ item, partDoc, required, toDeduct, short }) => ({
+  resolvedLines.map(({ item, partDoc, required, toDeduct, short, batchBreakdown }) => ({
     part: partDoc ? partDoc._id : null,
     ttUniquePartNumber: item.ttUniquePartNumber,
     itemDescription: partDoc ? partDoc.itemDescription : item.value || "",
@@ -187,6 +216,7 @@ const linesPayloadFrom = (resolvedLines) =>
     qtyRequired: required,
     qtyIssued: toDeduct,
     qtyShort: short,
+    batchBreakdown: batchBreakdown || [],
   }));
 
 // Base-26 uppercase letter suffix used for the kit-issue edit series:
@@ -220,14 +250,29 @@ async function attachEditLock(issues) {
 // Attaches a live `matchedPart` (or null) to every item of a template —
 // used wherever the frontend needs to know current stock against a
 // template, without ever storing a stale Part reference on the template
-// itself (ttUniquePartNumber is always the source of truth).
+// itself (ttUniquePartNumber is always the source of truth). Also attaches
+// each matched part's current batch breakdown (`batches`, oldest first) so
+// the issuing screen can preview which batch(es) a line will actually draw
+// from before the kit is issued for real.
 async function withResolvedItems(templateDoc) {
   const template = templateDoc.toObject ? templateDoc.toObject() : templateDoc;
   const byCode = await resolvePartsByCode(template.items);
-  template.items = (template.items || []).map((it) => ({
-    ...it,
-    matchedPart: byCode.get(it.ttUniquePartNumber) || null,
-  }));
+
+  const batchesByPart = new Map();
+  await Promise.all(
+    [...byCode.values()].map(async (partDoc) => {
+      batchesByPart.set(String(partDoc._id), await getAvailableBatches(partDoc._id));
+    })
+  );
+
+  template.items = (template.items || []).map((it) => {
+    const matchedPart = byCode.get(it.ttUniquePartNumber) || null;
+    return {
+      ...it,
+      matchedPart,
+      batches: matchedPart ? batchesByPart.get(String(matchedPart._id)) || [] : [],
+    };
+  });
   return template;
 }
 

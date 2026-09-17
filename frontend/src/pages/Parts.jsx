@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ import {
   ArrowUpFromLine,
   Sparkles,
   Download,
+  Paperclip,
 } from "lucide-react";
 
 /**
@@ -129,6 +130,11 @@ const fmtDateTime = (d) =>
       })
     : "—";
 
+const fmtPrice = (n) =>
+  n === null || n === undefined || Number.isNaN(Number(n))
+    ? "—"
+    : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 
 /* ------------------------------------------------------------------ *
  * Edit an approval request — ADMIN ONLY.
@@ -142,6 +148,8 @@ const REQUEST_FIELDS = [
   { key: "companyCode", label: "Company code" },
   { key: "category", label: "Category" },
   { key: "partTypeBatchNo", label: "Part type / batch no." },
+  { key: "unit", label: "Unit" },
+  { key: "price", label: "Price per unit" },
 ];
 
 const REQUEST_STATUSES = [
@@ -226,6 +234,14 @@ function EditRequestDialog({ request, onClose, onSaved }) {
                 </label>
                 {f.key === "category" ? (
                   <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+                ) : f.key === "price" ? (
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.price ?? ""}
+                    onChange={(e) => set("price", e.target.value)}
+                  />
                 ) : (
                   <Input value={form[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
                 )}
@@ -318,6 +334,8 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
     companyCode: "",
     category: "",
     partTypeBatchNo: "",
+    unit: "",
+    price: "",
   });
   const [proposedQuantity, setProposedQuantity] = useState("");
   const [requestRemarks, setRequestRemarks] = useState("");
@@ -447,7 +465,7 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
                 <p className="text-xs text-muted-foreground">Searching…</p>
               )}
               {!searchingAlternate && alternateSearch.trim() && !alternateOfPart && (
-                <p className="text-xs text-destructive">No match found for “{alternateSearch}”.</p>
+                <p className="text-xs text-destructive">No match found for "{alternateSearch}".</p>
               )}
               {alternateOfPart && (
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
@@ -518,14 +536,38 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Unit (optional)
+              </label>
+              <Input
+                value={form.unit}
+                onChange={(e) => set("unit", e.target.value)}
+                placeholder="PCS, KG, MTR, ..."
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Price per unit (optional)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.price}
+                onChange={(e) => set("price", e.target.value)}
+                placeholder="Rate per unit, e.g. 12.50"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Expected quantity (optional)
               </label>
               <Input
                 type="number"
-                min="1"
+                min="0.001"
+                step="any"
                 value={proposedQuantity}
                 onChange={(e) => setProposedQuantity(e.target.value)}
-                placeholder="Booked later, after approval"
+                placeholder="Booked later, after approval — decimals allowed"
               />
             </div>
             <div>
@@ -1032,6 +1074,7 @@ const EDIT_FIELDS = [
   { key: "partTypeBatchNo", label: "Part type / batch no." },
   { key: "hsnCode", label: "HSN code" },
   { key: "unit", label: "Unit" },
+  { key: "price", label: "Price per unit" },
 ];
 
 function EditPartDialog({ part, onClose, onSaved }) {
@@ -1119,6 +1162,14 @@ function EditPartDialog({ part, onClose, onSaved }) {
                 </label>
                 {f.key === "category" ? (
                   <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+                ) : f.key === "price" ? (
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.price ?? ""}
+                    onChange={(e) => set("price", e.target.value)}
+                  />
                 ) : (
                   <Input
                     value={form[f.key] ?? ""}
@@ -1239,6 +1290,7 @@ const DETAIL_FIELDS = [
   { key: "partTypeBatchNo", label: "Part type / batch no." },
   { key: "hsnCode", label: "HSN code" },
   { key: "unit", label: "Unit" },
+  { key: "price", label: "Price per unit" },
 ];
 
 function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
@@ -1450,15 +1502,27 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
 }
 
 /* ------------------------------------------------------------------ *
- * Part history — a bank-statement style ledger of every time stock for
- * this part moved: received from a vendor (live today) and, soon, issued
- * out to whoever it was sent to. Each row shows a running balance the
- * same way a bank statement does, newest activity on top.
+ * Part history — two tabs:
+ *  - Stock movements: the bank-statement style ledger of every time
+ *    stock for this part moved (received / issued), newest on top.
+ *  - Documents: a log of when the photo / datasheet were uploaded,
+ *    replaced or removed, so a lost file can be traced back.
+ *
+ * The documents tab is fetched lazily (only once the user switches to
+ * it) from a separate endpoint, since it's a different data source
+ * (document/audit trail rather than stock-entries / kit-issues).
  * ------------------------------------------------------------------ */
 function PartHistoryDialog({ part, onClose, onPartChanged }) {
+  const [tab, setTab] = useState("stock"); // "stock" | "documents"
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState("");
+  const [docEntries, setDocEntries] = useState([]);
+  const docsLoadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1480,6 +1544,25 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [part._id]);
+
+  // Documents tab loads lazily, the first time it's opened, rather than
+  // up front alongside the stock ledger.
+  useEffect(() => {
+    if (tab !== "documents" || docsLoadedRef.current) return;
+    docsLoadedRef.current = true;
+    setDocsLoading(true);
+    setDocsError("");
+    api
+      .get(`/parts/${part._id}/document-history`)
+      .then(({ data }) => {
+        setDocEntries(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        setDocEntries([]);
+        setDocsError(err.response?.data?.message || "Could not load document history");
+      })
+      .finally(() => setDocsLoading(false));
+  }, [tab, part._id]);
 
   const entries = data?.entries || [];
 
@@ -1530,9 +1613,14 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
     }
   };
 
+  const TABS = [
+    { key: "stock", label: "Stock movements", icon: History },
+    { key: "documents", label: "Documents", icon: Paperclip },
+  ];
+
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold">Part history</h2>
@@ -1545,35 +1633,211 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
           </Button>
         </div>
 
+        {/* tab switcher */}
+        <div className="flex shrink-0 gap-1 border-b border-border bg-secondary/30 px-5 py-2">
+          {TABS.map((t) => (
+            <Button
+              key={t.key}
+              type="button"
+              size="sm"
+              variant={tab === t.key ? "default" : "outline"}
+              onClick={() => setTab(t.key)}
+            >
+              <t.icon className="mr-1.5 h-3.5 w-3.5" />
+              {t.label}
+            </Button>
+          ))}
+        </div>
+
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {loading && <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>}
-
-          {!loading && data && (
+          {tab === "stock" && (
             <>
-              <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-secondary/40 px-4 py-2.5 text-sm">
-                <div>
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Current balance
-                  </span>
-                  <p className="font-mono-tech text-base font-semibold">
-                    {data.closingBalance ?? 0}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <ArrowDownToLine className="h-3.5 w-3.5" />
-                  Received (in)
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <ArrowUpFromLine className="h-3.5 w-3.5" />
-                  Issued (out)
-                </div>
-              </div>
+              {loading && <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>}
 
-              {entries.length === 0 ? (
+              {!loading && data && (
+                <>
+                  <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-secondary/40 px-4 py-2.5 text-sm">
+                    <div>
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Current balance
+                      </span>
+                      <p className="font-mono-tech text-base font-semibold">
+                        {data.closingBalance ?? 0}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <ArrowDownToLine className="h-3.5 w-3.5" />
+                      Received (in)
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <ArrowUpFromLine className="h-3.5 w-3.5" />
+                      Issued (out)
+                    </div>
+                  </div>
+
+                  {entries.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-muted-foreground">
+                      No stock movements recorded for this part yet.
+                    </p>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-border">
+                      <table className="w-full table-fixed text-sm">
+                        <colgroup>
+                          <col className="w-[13%]" />
+                          <col className="w-[27%]" />
+                          <col className="w-[17%]" />
+                          <col className="w-[11%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[11%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[3%]" />
+                        </colgroup>
+                        <thead className="bg-secondary/70">
+                          <tr className="border-b border-border">
+                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Date
+                            </th>
+                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              From / To
+                            </th>
+                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Reference
+                            </th>
+                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Qty
+                            </th>
+                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Price
+                            </th>
+                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Amount
+                            </th>
+                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Balance
+                            </th>
+                            <th className="px-1 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {" "}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
+                          {entries.map((e) => (
+                            <tr key={e._id} className="border-b border-border">
+                              <td className="px-2 py-1.5 align-top text-xs text-muted-foreground">
+                                {fmtDateTime(e.date)}
+                              </td>
+                              <td className="min-w-0 px-2 py-1.5 align-top">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  {e.direction === "out" ? (
+                                    <ArrowUpFromLine className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                                  ) : (
+                                    <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                                  )}
+                                  <span className="truncate" title={e.party?.name || ""}>
+                                    {e.party?.name || "—"}
+                                  </span>
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                  {e.type === "received" && !e.stockApplied && (
+                                    <Badge variant="warning">Pending invoice</Badge>
+                                  )}
+                                  {e.type === "received" && e.batchCode && (
+                                    <Badge variant="secondary" className="font-mono-tech">
+                                      Batch {e.batchCode}
+                                    </Badge>
+                                  )}
+                                  {e.type === "issued" &&
+                                    (e.batchBreakdown || []).map((b, i) => (
+                                      <Badge key={i} variant="secondary" className="font-mono-tech">
+                                        {b.batchCode ? `Batch ${b.batchCode}` : "No batch"}: {b.quantity}
+                                      </Badge>
+                                    ))}
+                                </div>
+                                {e.remarks && (
+                                  <p className="mt-0.5 truncate text-xs text-muted-foreground" title={e.remarks}>
+                                    {e.remarks}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="min-w-0 px-2 py-1.5 align-top text-xs text-muted-foreground">
+                                <span
+                                  className="block truncate"
+                                  title={
+                                    e.reference
+                                      ? `${e.reference.type}${
+                                          e.reference.number ? ` #${e.reference.number}` : ""
+                                        }`
+                                      : ""
+                                  }
+                                >
+                                  {e.reference
+                                    ? `${e.reference.type}${
+                                        e.reference.number ? ` #${e.reference.number}` : ""
+                                      }`
+                                    : "—"}
+                                </span>
+                              </td>
+                              <td
+                                className={`px-2 py-1.5 align-top text-right font-mono-tech ${
+                                  e.direction === "out" ? "text-destructive" : "text-emerald-600"
+                                }`}
+                              >
+                                {e.direction === "out" ? "−" : "+"}
+                                {e.quantity}
+                                {part?.unit ? (
+                                  <span className="ml-0.5 text-[10px] text-muted-foreground">{part.unit}</span>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-right font-mono-tech text-xs text-muted-foreground">
+                                {fmtPrice(part?.price)}
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-right font-mono-tech text-xs text-muted-foreground">
+                                {part?.price != null ? fmtPrice(part.price * e.quantity) : "—"}
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-right font-mono-tech font-semibold">
+                                {e.balance}
+                              </td>
+                              <td className="px-1 py-1.5 align-top text-right">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7"
+                                  title="Delete this history entry"
+                                  disabled={deletingId === e._id}
+                                  onClick={() => deleteEntry(e)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {tab === "documents" && (
+            <>
+              {docsLoading && (
+                <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+              )}
+
+              {!docsLoading && docsError && (
+                <p className="py-8 text-center text-sm text-destructive">{docsError}</p>
+              )}
+
+              {!docsLoading && !docsError && docEntries.length === 0 && (
                 <p className="py-8 text-center text-sm text-muted-foreground">
-                  No stock movements recorded for this part yet.
+                  No photo or datasheet changes recorded for this part yet.
                 </p>
-              ) : (
+              )}
+
+              {!docsLoading && !docsError && docEntries.length > 0 && (
                 <div className="overflow-hidden rounded-lg border border-border">
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
@@ -1582,80 +1846,68 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
                           Date
                         </th>
                         <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          From / To
+                          Field
                         </th>
                         <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Reference
+                          Action
                         </th>
-                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Qty
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          File
                         </th>
-                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Balance
-                        </th>
-                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {" "}
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          By
                         </th>
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                      {entries.map((e) => (
+                      {docEntries.map((e) => (
                         <tr key={e._id} className="border-b border-border">
                           <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
                             {fmtDateTime(e.date)}
                           </td>
                           <td className="px-2.5 py-1.5 align-top">
-                            <div className="flex items-center gap-1.5">
-                              {e.direction === "out" ? (
-                                <ArrowUpFromLine className="h-3.5 w-3.5 shrink-0 text-destructive" />
-                              ) : (
-                                <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                              )}
-                              <span>{e.party?.name || "—"}</span>
-                              {e.type === "received" && !e.stockApplied && (
-                                <Badge variant="warning" className="ml-1">
-                                  Pending invoice
-                                </Badge>
-                              )}
-                              {e.type === "received" && e.batchCode && (
-                                <Badge variant="secondary" className="ml-1 font-mono-tech">
-                                  Batch {e.batchCode}
-                                </Badge>
-                              )}
-                            </div>
-                            {e.remarks && (
-                              <p className="mt-0.5 text-xs text-muted-foreground">{e.remarks}</p>
+                            <Badge variant="secondary" className="capitalize">
+                              {e.field}
+                            </Badge>
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top">
+                            <Badge
+                              variant={
+                                e.action === "removed"
+                                  ? "destructive"
+                                  : e.action === "replaced"
+                                  ? "warning"
+                                  : "success"
+                              }
+                              className="capitalize"
+                            >
+                              {e.action}
+                            </Badge>
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top">
+                            {e.url ? (
+                              <a
+                                href={e.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline text-sm"
+                              >
+                                {fileNameFromUrl(e.url)}
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                            {e.previousUrl && (
+                              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                was:{" "}
+                                <a href={e.previousUrl} target="_blank" rel="noreferrer" className="underline">
+                                  {fileNameFromUrl(e.previousUrl)}
+                                </a>
+                              </p>
                             )}
                           </td>
                           <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
-                            {e.reference
-                              ? `${e.reference.type}${
-                                  e.reference.number ? ` #${e.reference.number}` : ""
-                                }`
-                              : "—"}
-                          </td>
-                          <td
-                            className={`px-2.5 py-1.5 align-top text-right font-mono-tech ${
-                              e.direction === "out" ? "text-destructive" : "text-emerald-600"
-                            }`}
-                          >
-                            {e.direction === "out" ? "−" : "+"}
-                            {e.quantity}
-                          </td>
-                          <td className="px-2.5 py-1.5 align-top text-right font-mono-tech font-semibold">
-                            {e.balance}
-                          </td>
-                          <td className="px-2.5 py-1.5 align-top text-right">
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              title="Delete this history entry"
-                              disabled={deletingId === e._id}
-                              onClick={() => deleteEntry(e)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Button>
+                            {e.changedBy || "—"}
                           </td>
                         </tr>
                       ))}
@@ -1921,6 +2173,7 @@ const COMPARISON_FIELDS = [
   { key: "partTypeBatchNo", label: "Part type / batch no." },
   { key: "hsnCode", label: "HSN code" },
   { key: "unit", label: "Unit" },
+  { key: "price", label: "Price per unit", mono: true, format: (p) => (p.price ?? p.price === 0 ? p.price : "—") },
   {
     key: "quantityInStock",
     label: "Stock qty",
@@ -2131,19 +2384,32 @@ export default function Parts() {
     }
   };
 
+  // Guards against out-of-order responses: the debounce below only stops a
+  // timer that hasn't fired *yet*, so if the user starts typing a search
+  // before the initial (unfiltered, up to 5000-row) load has finished, both
+  // requests end up in flight together. Without this guard, whichever one's
+  // response lands last wins — so the slower unfiltered load can arrive
+  // after the search's filtered results and silently replace them with the
+  // full, unrelated parts list. Each fetch is tagged with an ever-increasing
+  // id; a response is only applied if it's still the most recent one fired.
+  const latestRequestId = useRef(0);
+
   useEffect(() => {
     const t = setTimeout(async () => {
+      const requestId = ++latestRequestId.current;
       setLoading(true);
       try {
         const { data } = await api.get("/parts", { params: search ? { search } : {} });
+        if (requestId !== latestRequestId.current) return; // superseded — ignore
         setParts(data);
         // Fresh results for this search start in relevance order; a manual
         // column-sort choice only applies until the search text changes again.
         setManualSort(false);
       } catch (err) {
+        if (requestId !== latestRequestId.current) return;
         toast.error(err.response?.data?.message || "Could not load parts");
       } finally {
-        setLoading(false);
+        if (requestId === latestRequestId.current) setLoading(false);
       }
     }, 250);
     return () => clearTimeout(t);
@@ -2293,7 +2559,7 @@ export default function Parts() {
                   <TableCell colSpan={colCount} className="py-8 text-center">
                     <p className="text-sm text-muted-foreground">
                       {search.trim()
-                        ? `No part matches “${search.trim()}”.`
+                        ? `No part matches "${search.trim()}".`
                         : "No parts found."}
                     </p>
                     {canRequest && (

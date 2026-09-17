@@ -6,6 +6,7 @@ import {
   suggestParts,
   getPartById,
   getPartHistory,
+  getPartDocumentHistory,
   createPart,
   adjustPartStock,
   getDuplicateParts,
@@ -53,6 +54,7 @@ router.get("/lookup", lookupPart);
 router.get("/suggest", suggestParts);
 router.get("/:id", getPartById);
 router.get("/:id/history", getPartHistory);
+router.get("/:id/document-history", getPartDocumentHistory);
 router.post("/", createPart);
 router.patch("/:id/stock", adjustPartStock);
 

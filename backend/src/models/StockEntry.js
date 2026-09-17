@@ -14,7 +14,10 @@ const stockEntrySchema = new mongoose.Schema(
     purchaseOrder: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseOrder", default: null },
     part: { type: mongoose.Schema.Types.ObjectId, ref: "Part", required: true },
 
-    quantityReceived: { type: Number, required: true, min: 1 },
+    // Decimal-friendly — quantities aren't always whole numbers (e.g.
+    // metres of cable, kilograms of a bulk item). min is a small epsilon
+    // rather than 0 so a genuinely empty/zero entry is still rejected.
+    quantityReceived: { type: Number, required: true, min: 0.001 },
 
     matchType: {
       type: String,
