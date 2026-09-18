@@ -70,9 +70,11 @@ const searchTermsFrom = (search) =>
 
 // Builds a Mongo $or filter matching a part where ANY given term appears
 // in ANY of the searchable fields (part number, mfr part number,
-// description). Multi-term ranking (which terms matched, and how many)
-// happens afterwards in rankByMatchedTerms — this filter just widens the
-// candidate set to everything worth ranking.
+// description, remarks — the free-text note entered at part-registry
+// time, either by the operator raising the request or the admin
+// approving/editing it; see Part.remarks). Multi-term ranking (which
+// terms matched, and how many) happens afterwards in rankByMatchedTerms —
+// this filter just widens the candidate set to everything worth ranking.
 const buildPartSearchFilter = (terms) => {
   if (!terms.length) return {};
   return {
@@ -82,6 +84,7 @@ const buildPartSearchFilter = (terms) => {
         { ttUniquePartNumber: rx },
         { manufacturerPartNumber: rx },
         { itemDescription: rx },
+        { remarks: rx },
       ];
     }),
   };
@@ -96,7 +99,12 @@ const buildPartSearchFilter = (terms) => {
 function rankByMatchedTerms(parts, terms) {
   const termRegexes = terms.map((t) => new RegExp(escapeRegex(t), "i"));
   const scored = parts.map((part, idx) => {
-    const haystack = [part.ttUniquePartNumber, part.manufacturerPartNumber, part.itemDescription]
+    const haystack = [
+      part.ttUniquePartNumber,
+      part.manufacturerPartNumber,
+      part.itemDescription,
+      part.remarks,
+    ]
       .filter(Boolean)
       .join(" ");
     let matchCount = 0;
