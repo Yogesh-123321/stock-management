@@ -178,6 +178,12 @@ const QTY_REMARKS_SCHEMA = {
     regex: "positiveDecimal",
     min: 0.001,
   },
+  // Both optional — the rate actually charged on THIS delivery, distinct
+  // from the part's registered master rate. Left blank, the entry just
+  // carries no price of its own and history/analysis falls back to the
+  // master rate, same as before this field existed.
+  unit: { regex: "alphaNumSpace", maxLength: 20 },
+  entryPrice: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
   remarks: { maxLength: 500 },
 };
 
@@ -210,6 +216,11 @@ export default function StockEntryStep({
   purchaseOrder,
   deliveryDocs = [],
   expectedQuantities = {},
+  // The current "Receive material" session's id. Stamped onto every line
+  // logged here so lines already entered before a "Save & exit" reappear on
+  // "Resume" — this is the reliable link, since most deliveries never get a
+  // PO/PI attached to key off of instead. See the restore effect below.
+  sessionId = null,
   onFinish,
 }) {
   // "lookup" -> "matched" | "approved-request" -> "choose-alternate" -> "new-part" -> "lookup"
@@ -217,6 +228,12 @@ export default function StockEntryStep({
   const [quantityReceived, setQuantityReceived] = useState("");
   const [enteredBy, setEnteredBy] = useState("");
   const [remarks, setRemarks] = useState("");
+  // Unit + rate for THIS delivery — separate from a part's own registered
+  // unit/price on the master record. Pre-filled from the matched part /
+  // approved request as a starting point, but always editable, since the
+  // vendor's actual rate on a given delivery can differ from that.
+  const [entryUnit, setEntryUnit] = useState("");
+  const [entryPrice, setEntryPrice] = useState("");
 
   const [matchedPart, setMatchedPart] = useState(null);
   const [alternateOfPart, setAlternateOfPart] = useState(null); // set when registering as an alternate
@@ -286,6 +303,10 @@ export default function StockEntryStep({
   // arrive in parts (10 today, 2 next week) against the same still-open PO.
   const [priorTotal, setPriorTotal] = useState(0);
   const [priorLoading, setPriorLoading] = useState(false);
+  // Guards the one-time restore of sessionEntries below, so a later
+  // docsKey change (or the query re-resolving) never clobbers lines the
+  // operator has since added by hand in this same mount.
+  const restoredSessionRef = useRef(false);
 
   const docsKey = useMemo(
     () =>
@@ -305,8 +326,15 @@ export default function StockEntryStep({
     }
     setPriorLoading(true);
     fetchReceivedTotal(ids)
-      .then(({ total }) => {
-        if (!cancelled) setPriorTotal(total);
+      .then(({ entries }) => {
+        if (cancelled) return;
+        // Lines logged under this same session are restored separately
+        // below (and already counted in sessionEntries), so they're
+        // excluded here to avoid double-counting them into priorTotal.
+        const priorEntries = sessionId
+          ? entries.filter((e) => String(e.receivingSession || "") !== String(sessionId))
+          : entries;
+        setPriorTotal(priorEntries.reduce((sum, e) => sum + Number(e.quantityReceived || 0), 0));
       })
       .finally(() => {
         if (!cancelled) setPriorLoading(false);
@@ -314,9 +342,40 @@ export default function StockEntryStep({
     return () => {
       cancelled = true;
     };
-    // Fetched once per delivery: entries logged in this session are tracked
-    // locally in sessionEntries and added on top of this baseline.
-  }, [docsKey]);
+  }, [docsKey, sessionId]);
+
+  // Every StockEntry logged in this wizard is saved to the database the
+  // moment it's entered (see submitEntry below) — sessionEntries is only an
+  // in-memory list for display, so it starts empty on every fresh mount of
+  // this component. Without this restore, "Save & exit" then "Resume" made
+  // already-entered lines look like they'd vanished, even though the stock
+  // itself was never lost. Most deliveries have no PO/PI to key off of, so
+  // this looks entries up directly by receivingSession (stamped on every
+  // line — see submitEntry) rather than relying on any document.
+  useEffect(() => {
+    if (!sessionId || restoredSessionRef.current) return undefined;
+    let cancelled = false;
+    api
+      .get("/stock-entries", { params: { receivingSession: sessionId } })
+      .then(({ data }) => {
+        if (cancelled) return;
+        restoredSessionRef.current = true;
+        const restored = Array.isArray(data) ? data : [];
+        if (restored.length > 0) {
+          setSessionEntries(
+            [...restored].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+          );
+        }
+      })
+      .catch(() => {
+        // Non-fatal — the operator can still see/enter lines going forward,
+        // they just won't see earlier-this-session lines pre-populated.
+        restoredSessionRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   const enteredTotal = useMemo(
     () => sessionEntries.reduce((sum, e) => sum + Number(e.quantityReceived || 0), 0),
@@ -370,6 +429,10 @@ export default function StockEntryStep({
     setPhase("matched");
     setOpen(false);
     setSearchTerm(part.ttUniquePartNumber);
+    // Starting point only — the operator can override either field for
+    // what this specific delivery actually says.
+    setEntryUnit(part.unit || "");
+    setEntryPrice(part.price != null ? String(part.price) : "");
   };
 
   // Book stock against a part number that has already cleared approval.
@@ -377,6 +440,8 @@ export default function StockEntryStep({
     setActiveRequest(request);
     setMatchedPart(null);
     setQuantityReceived(request.proposedQuantity ? String(request.proposedQuantity) : "");
+    setEntryUnit(request.newPart?.unit || "");
+    setEntryPrice(request.newPart?.price != null ? String(request.newPart.price) : "");
     setOpen(false);
     setPhase("approved-request");
   };
@@ -386,6 +451,8 @@ export default function StockEntryStep({
     setSearchTerm("");
     setQuantityReceived("");
     setRemarks("");
+    setEntryUnit("");
+    setEntryPrice("");
     setMatchedPart(null);
     setAlternateOfPart(null);
     setActiveRequest(null);
@@ -409,9 +476,12 @@ export default function StockEntryStep({
       const { data } = await api.post("/stock-entries", {
         vendor: vendor._id,
         purchaseOrder: purchaseOrder?._id ?? null,
+        receivingSession: sessionId || null,
         quantityReceived: Number(quantityReceived),
         enteredBy,
         remarks,
+        unit: entryUnit || "",
+        price: entryPrice === "" ? null : Number(entryPrice),
         ...payload,
       });
       // An approval can create exactly one part — close it out.
@@ -439,7 +509,7 @@ export default function StockEntryStep({
 
   const handleConfirmExisting = (e) => {
     e.preventDefault();
-    if (!vQty.validateAll({ quantityReceived, remarks })) {
+    if (!vQty.validateAll({ quantityReceived, unit: entryUnit, entryPrice, remarks })) {
       toast.error("Fix the highlighted field before continuing");
       return;
     }
@@ -450,7 +520,7 @@ export default function StockEntryStep({
   const handleConfirmApproved = (e) => {
     e.preventDefault();
     if (!activeRequest) return;
-    if (!vQty.validateAll({ quantityReceived, remarks })) {
+    if (!vQty.validateAll({ quantityReceived, unit: entryUnit, entryPrice, remarks })) {
       toast.error("Fix the highlighted field before continuing");
       return;
     }
@@ -865,6 +935,44 @@ export default function StockEntryStep({
                 />
                 <FieldError error={vQty.fieldError("quantityReceived")} />
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
+                <div className="space-y-1.5">
+                  <Label>Unit (optional)</Label>
+                  <Input
+                    value={entryUnit}
+                    onChange={(e) => setEntryUnit(e.target.value)}
+                    onBlur={() =>
+                      vQty.handleBlur("unit", entryUnit, { quantityReceived, unit: entryUnit, entryPrice, remarks })
+                    }
+                    placeholder={matchedPart.unit || "PCS, KG, MTR, ..."}
+                  />
+                  <FieldError error={vQty.fieldError("unit")} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Price per unit (optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={entryPrice}
+                    onChange={(e) => setEntryPrice(e.target.value)}
+                    onBlur={() =>
+                      vQty.handleBlur("entryPrice", entryPrice, {
+                        quantityReceived,
+                        unit: entryUnit,
+                        entryPrice,
+                        remarks,
+                      })
+                    }
+                    placeholder="Rate on this delivery, e.g. 12.50"
+                  />
+                  <FieldError error={vQty.fieldError("entryPrice")} />
+                  <p className="text-[11px] text-muted-foreground">
+                    What this delivery actually cost per unit — used for this part's price history, separate
+                    from its registered rate{matchedPart.price != null ? ` (currently ₹${matchedPart.price})` : ""}.
+                  </p>
+                </div>
+              </div>
               <AiSuggestedWarnings warnings={aiWarnings} loading={aiWarningsLoading} />
               <div className="space-y-1.5">
                 <Label>Remarks (optional)</Label>
@@ -923,6 +1031,40 @@ export default function StockEntryStep({
                   onBlur={() => vQty.handleBlur("quantityReceived", quantityReceived, { quantityReceived, remarks })}
                 />
                 <FieldError error={vQty.fieldError("quantityReceived")} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
+                <div className="space-y-1.5">
+                  <Label>Unit (optional)</Label>
+                  <Input
+                    value={entryUnit}
+                    onChange={(e) => setEntryUnit(e.target.value)}
+                    onBlur={() =>
+                      vQty.handleBlur("unit", entryUnit, { quantityReceived, unit: entryUnit, entryPrice, remarks })
+                    }
+                    placeholder={activeRequest.newPart?.unit || "PCS, KG, MTR, ..."}
+                  />
+                  <FieldError error={vQty.fieldError("unit")} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Price per unit (optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={entryPrice}
+                    onChange={(e) => setEntryPrice(e.target.value)}
+                    onBlur={() =>
+                      vQty.handleBlur("entryPrice", entryPrice, {
+                        quantityReceived,
+                        unit: entryUnit,
+                        entryPrice,
+                        remarks,
+                      })
+                    }
+                    placeholder="Rate on this delivery, e.g. 12.50"
+                  />
+                  <FieldError error={vQty.fieldError("entryPrice")} />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Remarks (optional)</Label>

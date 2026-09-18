@@ -292,6 +292,7 @@ export default function ReceiveMaterial() {
               purchaseOrder={primaryDoc}
               deliveryDocs={[purchaseOrderDoc, proformaInvoiceDoc]}
               expectedQuantities={expectedQuantities}
+              sessionId={sessionId}
               onFinish={({ enteredQuantity = 0 } = {}) => {
                 setStockEntryDone(true);
                 setStockQuantity(enteredQuantity);

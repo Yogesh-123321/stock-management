@@ -6,12 +6,13 @@ import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { bookExistingPart, bookNewPart, BookingError } from "../utils/stockBooking.js";
 import { notifyApprovers } from "../utils/notify.js";
 
-// GET /api/stock-entries?purchaseOrder=&vendor=&part=
+// GET /api/stock-entries?purchaseOrder=&vendor=&part=&receivingSession=
 export const getStockEntries = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.purchaseOrder) filter.purchaseOrder = req.query.purchaseOrder;
   if (req.query.vendor) filter.vendor = req.query.vendor;
   if (req.query.part) filter.part = req.query.part;
+  if (req.query.receivingSession) filter.receivingSession = req.query.receivingSession;
 
   const entries = await StockEntry.find(filter)
     .populate([
@@ -28,6 +29,17 @@ export const getStockEntries = asyncHandler(async (req, res) => {
   POST /api/stock-entries
   Body:
     purchaseOrder, vendor, quantityReceived, enteredBy, remarks
+    receivingSession            - optional: the "Receive material" wizard
+                                  session this line belongs to, so a saved
+                                  and resumed delivery can restore its
+                                  already-logged lines even when there's no
+                                  PO/PI to key off of.
+    unit, price                - optional: unit of measure and per-unit rate
+                                  for THIS delivery, as entered at receiving
+                                  time (separate from the part master's own
+                                  registered unit/price) — carried onto the
+                                  StockEntry and read back by Part history /
+                                  the AI Price Analyzer.
     scannedPartNumber          - part number as written on the material/box
     matchType                  - "existing_part_number" | "new_part_number" | "alternate_part"
     existingPartId              - required when matchType = existing_part_number
@@ -52,6 +64,7 @@ export const getStockEntries = asyncHandler(async (req, res) => {
 export const createStockEntry = asyncHandler(async (req, res) => {
   const {
     purchaseOrder,
+    receivingSession,
     vendor,
     quantityReceived,
     enteredBy,
@@ -61,6 +74,8 @@ export const createStockEntry = asyncHandler(async (req, res) => {
     alternateOfPartId,
     newPart,
     approvedRequestId,
+    unit,
+    price,
   } = req.body;
 
   if (!vendor || !quantityReceived || !matchType) {
@@ -88,10 +103,13 @@ export const createStockEntry = asyncHandler(async (req, res) => {
       populated = await bookExistingPart({
         vendor,
         purchaseOrder: poDoc ? poDoc._id : null,
+        receivingSession: receivingSession || null,
         quantityReceived,
         enteredBy,
         remarks,
         existingPartId,
+        unit,
+        price,
       });
     } else if (matchType === "new_part_number" || matchType === "alternate_part") {
       // The part itself was already created in the master when the request
@@ -104,6 +122,7 @@ export const createStockEntry = asyncHandler(async (req, res) => {
       populated = await bookNewPart({
         vendor,
         purchaseOrder: poDoc ? poDoc._id : null,
+        receivingSession: receivingSession || null,
         quantityReceived,
         enteredBy,
         remarks,
@@ -111,6 +130,8 @@ export const createStockEntry = asyncHandler(async (req, res) => {
         isAlternate: matchType === "alternate_part",
         alternateOfPartId,
         approvedRequest,
+        unit,
+        price,
       });
     } else {
       res.status(400);

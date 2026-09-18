@@ -57,10 +57,13 @@ async function touchPurchaseOrder(purchaseOrderId) {
 export async function bookExistingPart({
   vendor,
   purchaseOrder,
+  receivingSession,
   quantityReceived,
   enteredBy,
   remarks,
   existingPartId,
+  unit,
+  price,
 }) {
   const partDoc = await Part.findById(existingPartId);
   if (!partDoc) throw new BookingError("Matched part not found", 404);
@@ -75,11 +78,14 @@ export async function bookExistingPart({
   const entry = await StockEntry.create({
     vendor,
     purchaseOrder: purchaseOrder || null,
+    receivingSession: receivingSession || null,
     part: partDoc._id,
     quantityReceived,
     matchType: "existing_part_number",
     enteredBy,
     remarks,
+    unit: unit || "",
+    price: price === "" || price == null ? null : Number(price),
     stockApplied: false,
   });
 
@@ -171,6 +177,7 @@ export async function createPartFromApprovedRequest(request) {
 export async function bookNewPart({
   vendor,
   purchaseOrder,
+  receivingSession,
   quantityReceived,
   enteredBy,
   remarks,
@@ -178,6 +185,8 @@ export async function bookNewPart({
   isAlternate = false,
   alternateOfPartId = null,
   approvedRequest = null,
+  unit,
+  price,
 }) {
   let partDoc = approvedRequest?.createdPart ? await Part.findById(approvedRequest.createdPart) : null;
   let alternateOfPart = null;
@@ -235,12 +244,18 @@ export async function bookNewPart({
   const entry = await StockEntry.create({
     vendor,
     purchaseOrder: purchaseOrder || null,
+    receivingSession: receivingSession || null,
     part: partDoc._id,
     quantityReceived,
     matchType: isAlternate ? "alternate_part" : "new_part_number",
     alternateOfPart: alternateOfPart ? alternateOfPart._id : null,
     enteredBy,
     remarks,
+    // Falls back to the rate registered on the part itself (set from the
+    // "new part" form's own Unit/Price fields) so a first-time delivery
+    // still carries a price even if the per-entry field is left blank.
+    unit: unit || partDoc.unit || "",
+    price: price === "" || price == null ? partDoc.price ?? null : Number(price),
     stockApplied: false,
   });
 

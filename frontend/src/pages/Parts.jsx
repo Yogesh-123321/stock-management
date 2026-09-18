@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import api from "@/lib/api";
 import CategorySelect from "@/components/CategorySelect";
+import PriceTrendChart from "@/components/PriceTrendChart";
 import { useAuth } from "@/lib/auth";
 import {
   Search,
@@ -1518,7 +1519,8 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-
+const [analysis, setAnalysis] = useState(null);
+const [analysisLoading, setAnalysisLoading] = useState(false);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
   const [docEntries, setDocEntries] = useState([]);
@@ -1544,7 +1546,27 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [part._id]);
+useEffect(() => {
+  let cancelled = false;
 
+  setAnalysisLoading(true);
+
+  api
+    .get(`/stock-entries/analysis/${part._id}`)
+    .then(({ data }) => {
+      if (!cancelled) setAnalysis(data);
+    })
+    .catch(() => {
+      if (!cancelled) setAnalysis(null);
+    })
+    .finally(() => {
+      if (!cancelled) setAnalysisLoading(false);
+    });
+
+  return () => {
+    cancelled = true;
+  };
+}, [part._id]);
   // Documents tab loads lazily, the first time it's opened, rather than
   // up front alongside the stock ledger.
   useEffect(() => {
@@ -1656,7 +1678,162 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
 
               {!loading && data && (
                 <>
+                <Card className="mb-4 border-purple-500/30">
+  <CardHeader>
+    <CardTitle className="flex items-center gap-2">
+      <Sparkles className="h-4 w-4" />
+      AI Price Analyzer
+    </CardTitle>
+  </CardHeader>
+
+  <CardContent>
+    {analysisLoading ? (
+      <p className="text-sm text-muted-foreground">
+        Analysing purchase history...
+      </p>
+    ) : analysis && analysis.trend?.length ? (
+      <>
+        {/* AI insight */}
+        <div className="mb-4 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-purple-600">
+            <Sparkles className="h-3.5 w-3.5" />
+            AI insight
+          </div>
+          <p className="text-sm leading-relaxed">{analysis.aiInsight || analysis.summary}</p>
+        </div>
+
+        {/* Indicators */}
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Average price</div>
+            <div className="font-semibold">₹{Number(analysis.avgPrice).toFixed(2)}</div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Median price</div>
+            <div className="font-semibold">₹{Number(analysis.medianPrice).toFixed(2)}</div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Volatility</div>
+            <div className="font-semibold">
+              ±{Number(analysis.volatilityPercent).toFixed(1)}%
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                {analysis.volatilityPercent > 15 ? "high" : "low"}
+              </span>
+            </div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Trend</div>
+            <div
+              className={`font-semibold ${
+                analysis.trendDirection === "rising"
+                  ? "text-red-500"
+                  : analysis.trendDirection === "falling"
+                  ? "text-emerald-600"
+                  : ""
+              }`}
+            >
+              {analysis.trendDirection === "rising" && "▲ Rising"}
+              {analysis.trendDirection === "falling" && "▼ Falling"}
+              {analysis.trendDirection === "stable" && "● Stable"}
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                {Math.abs(Number(analysis.momentumPercent)).toFixed(1)}%
+              </span>
+            </div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Highest price</div>
+            <div className="font-semibold">₹{analysis.highestPrice}</div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Lowest price</div>
+            <div className="font-semibold">₹{analysis.lowestPrice}</div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Range (low → high)</div>
+            <div className="font-semibold text-red-500">{analysis.increasePercent}%</div>
+          </div>
+          <div className="rounded border border-border p-2.5">
+            <div className="text-[11px] text-muted-foreground">Latest vs average</div>
+            <div className={`font-semibold ${analysis.latestVsAvgPercent > 0 ? "text-red-500" : "text-emerald-600"}`}>
+              {analysis.latestVsAvgPercent > 0 ? "+" : ""}
+              {Number(analysis.latestVsAvgPercent).toFixed(1)}%
+            </div>
+          </div>
+        </div>
+
+        {/* Trend chart */}
+        <div className="mb-4 rounded-lg border border-border p-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Price trend
+          </div>
+          <PriceTrendChart data={analysis.trend} />
+        </div>
+
+        {/* Suggested vendor */}
+        {analysis.suggestedVendor && (
+          <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              <Sparkles className="h-3.5 w-3.5" />
+              Suggested vendor for this purchase
+            </div>
+            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+              <span className="text-sm font-semibold">{analysis.suggestedVendor.vendor}</span>
+              <Badge variant="success">Recommended</Badge>
+              <span className="text-xs text-muted-foreground">
+                Avg ₹{Number(analysis.suggestedVendor.avgPrice).toFixed(2)} · {analysis.suggestedVendor.count} purchase
+                {analysis.suggestedVendor.count > 1 ? "s" : ""}
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed">{analysis.suggestedVendor.reason}</p>
+          </div>
+        )}
+
+        {/* Vendor comparison */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Vendor comparison
+          </div>
+          {analysis.vendorAnalysis?.map((v) => {
+            const isBest = analysis.bestVendor?.vendor === v.vendor;
+            const isWorst = analysis.worstVendor?.vendor === v.vendor;
+            return (
+              <div
+                key={v.vendor}
+                className={`rounded border p-2.5 ${
+                  isBest ? "border-emerald-500/40 bg-emerald-500/5" : isWorst ? "border-red-500/40 bg-red-500/5" : "border-border"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium">{v.vendor}</span>
+                  {isBest && <Badge variant="success">Best pricing</Badge>}
+                  {isWorst && <Badge variant="destructive">Highest pricing</Badge>}
+                  {typeof v.vsAvgPercent === "number" && (
+                    <span className="text-xs text-muted-foreground">
+                      {v.vsAvgPercent > 0 ? "+" : ""}
+                      {v.vsAvgPercent}% vs avg
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-muted-foreground">
+                  <span>Avg: ₹{Number(v.avgPrice).toFixed(2)}</span>
+                  <span>Highest: ₹{v.highest}</span>
+                  <span>Lowest: ₹{v.lowest}</span>
+                  <span>Purchases: {v.count}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    ) : (
+      <p className="text-sm text-muted-foreground">
+        {analysis?.summary || "No analysis available."}
+      </p>
+    )}
+  </CardContent>
+</Card>
                   <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-secondary/40 px-4 py-2.5 text-sm">
+                    
                     <div>
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Current balance
@@ -1789,10 +1966,16 @@ function PartHistoryDialog({ part, onClose, onPartChanged }) {
                                 ) : null}
                               </td>
                               <td className="px-2 py-1.5 align-top text-right font-mono-tech text-xs text-muted-foreground">
-                                {fmtPrice(part?.price)}
+                                {/* The rate entered on this specific delivery, if any — falls
+                                    back to the part's registered rate for older entries logged
+                                    before per-entry pricing existed. */}
+                                {fmtPrice(e.price ?? part?.price)}
                               </td>
                               <td className="px-2 py-1.5 align-top text-right font-mono-tech text-xs text-muted-foreground">
-                                {part?.price != null ? fmtPrice(part.price * e.quantity) : "—"}
+                                {(() => {
+                                  const rate = e.price ?? part?.price;
+                                  return rate != null ? fmtPrice(rate * e.quantity) : "—";
+                                })()}
                               </td>
                               <td className="px-2 py-1.5 align-top text-right font-mono-tech font-semibold">
                                 {e.balance}

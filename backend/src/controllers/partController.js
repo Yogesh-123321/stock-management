@@ -297,6 +297,11 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     matchType: entry.matchType,
     enteredBy: entry.enteredBy || null,
     remarks: entry.remarks || null,
+    // Per-delivery unit/rate entered at receiving time — null on entries
+    // logged before this field existed, in which case the ledger falls
+    // back to the part's registered rate (see Parts.jsx).
+    unit: entry.unit || null,
+    price: entry.price ?? null,
     // Whether this line's quantity has actually been credited to
     // quantityInStock yet — false while its tax invoice hasn't arrived.
     stockApplied: !!entry.stockApplied,

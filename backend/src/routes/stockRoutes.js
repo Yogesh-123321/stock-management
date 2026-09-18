@@ -9,9 +9,12 @@ import {
 import { parseStockImport, commitStockImport } from "../controllers/stockImportController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadStockSheet } from "../middleware/upload.js";
-
+import { getPartPriceAnalysis } from "../controllers/stockAnalysisController.js";
 const router = express.Router();
-
+router.get(
+  "/analysis/:partId",
+  getPartPriceAnalysis
+);
 // Specific GET/POST paths first so they aren't shadowed by "/" or "/:id".
 router.get("/suggest-warnings", getStockEntrySuggestions);
 router.post("/report-mismatch", reportQuantityMismatch);
