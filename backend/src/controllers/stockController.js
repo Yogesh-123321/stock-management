@@ -13,6 +13,7 @@ export const getStockEntries = asyncHandler(async (req, res) => {
   if (req.query.vendor) filter.vendor = req.query.vendor;
   if (req.query.part) filter.part = req.query.part;
   if (req.query.receivingSession) filter.receivingSession = req.query.receivingSession;
+  if (req.query.iqcStatus) filter.iqcStatus = req.query.iqcStatus;
 
   const entries = await StockEntry.find(filter)
     .populate([

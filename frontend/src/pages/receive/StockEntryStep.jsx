@@ -121,7 +121,7 @@ function SessionLog({ entries, view }) {
             ) : (
               <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
                 <Clock className="h-3 w-3" />
-                Pending — added once the tax invoice is uploaded
+                Pending — goes to IQC stock once the tax invoice is uploaded
               </p>
             )}
           </div>
@@ -154,7 +154,7 @@ function SessionLog({ entries, view }) {
               ) : (
                 <span className="inline-flex items-center gap-1 text-amber-600">
                   <Clock className="h-3 w-3" />
-                  Pending invoice
+                  Pending invoice / IQC
                 </span>
               )}
             </TableCell>
@@ -496,7 +496,7 @@ export default function StockEntryStep({
       toast.success(
         data.stockApplied
           ? `Stock updated for ${data.part.ttUniquePartNumber}`
-          : `Logged ${data.part.ttUniquePartNumber} — will be added to stock once the tax invoice is uploaded`
+          : `Logged ${data.part.ttUniquePartNumber} — goes to IQC stock once the tax invoice is uploaded`
       );
       setSessionEntries((prev) => [...prev, data]);
       resetLine();

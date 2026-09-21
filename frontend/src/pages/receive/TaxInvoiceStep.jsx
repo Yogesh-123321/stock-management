@@ -135,9 +135,9 @@ export default function TaxInvoiceStep({
         headers: { "Content-Type": "multipart/form-data" },
       });
       toast.success("Tax invoice uploaded");
-      if (data?.stockApplied?.count > 0) {
+      if (data?.iqcPending?.count > 0) {
         toast.success(
-          `${data.stockApplied.totalQuantity} unit(s) across ${data.stockApplied.count} line(s) added to stock`
+          `${data.iqcPending.totalQuantity} unit(s) across ${data.iqcPending.count} line(s) moved to IQC stock — awaiting inspection`
         );
       }
       const rec = data?.reconciliation;
@@ -187,8 +187,10 @@ export default function TaxInvoiceStep({
         <CardTitle>Step 5 · Tax invoice</CardTitle>
         <CardDescription>
           Once stock entry is done, upload the tax invoice for this delivery from <strong>{vendor.companyName}</strong>.
-          If it hasn't arrived yet, skip for now — receiving is still marked complete. When the invoice, PO/PI and the
-          stock entered all agree on quantity, the PO and PI are closed automatically.
+          Uploading moves the lines entered into <strong>IQC stock</strong> — they are inspected separately from the
+          Parts master (MISC stock → IQC stock) and reach main stock once accepted. If the invoice hasn't arrived
+          yet, skip for now — receiving is still marked complete. When the invoice, PO/PI and the stock entered all agree on quantity, the PO and PI
+          are closed automatically.
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
@@ -288,7 +290,7 @@ export default function TaxInvoiceStep({
           </Button>
           <Button type="submit" disabled={submitting}>
             <UploadCloud className="h-4 w-4 mr-2" />
-            {submitting ? "Uploading..." : "Upload & finish"}
+            {submitting ? "Uploading..." : "Upload & continue"}
           </Button>
         </CardFooter>
       </form>

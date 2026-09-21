@@ -9,6 +9,7 @@ import {
   getPartDocumentHistory,
   createPart,
   adjustPartStock,
+  issueRndStock,
   getDuplicateParts,
   getDuplicateCriteria,
   deletePart,
@@ -57,6 +58,15 @@ router.get("/:id/history", getPartHistory);
 router.get("/:id/document-history", getPartDocumentHistory);
 router.post("/", createPart);
 router.patch("/:id/stock", adjustPartStock);
+
+// Issuing R&D stock is done from the (admin-only) part-edit popup, so it
+// carries the same part.approve permission as editing/deleting the part.
+router.patch(
+  "/:id/rnd-stock",
+  protect,
+  requirePermission("part.approve"),
+  issueRndStock
+);
 
 // Editing and deleting the parts master is ADMIN ONLY — part.approve is
 // flagged adminOnly in permissions.js.

@@ -21,6 +21,27 @@ const documentHistoryEntrySchema = new mongoose.Schema(
 );
 
 /*
+  One entry per time stock was issued out to R&D — appended by
+  issueRndStock (partController.js) whenever an admin pulls quantity out
+  of quantityInStock and into rndStock from the part-edit popup. Read back
+  by the Parts master table (hover on the "R&D stock" column) and the part
+  details popup to show who has what. `person` links back to the User the
+  stock was issued to (picked from a dropdown of users, not free text) —
+  `personName` is a snapshot of their name at issue time, so the ledger
+  still reads correctly even if that user is later renamed or deactivated.
+*/
+const rndIssueEntrySchema = new mongoose.Schema(
+  {
+    person: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    personName: { type: String, trim: true, required: true },
+    quantity: { type: Number, required: true, min: 1 },
+    issuedBy: { type: String, trim: true, default: "" },
+    remarks: { type: String, trim: true, default: "" },
+  },
+  { timestamps: { createdAt: "date", updatedAt: false } }
+);
+
+/*
   Mirrors the structure of the Master Part Database workbook:
   TT UNIQUE PART NUMBER = COMPANY CODE + CATEGORY + PART TYPE/BATCH NO.
   e.g. TT + AY + FAN => TTAYFAN
@@ -76,6 +97,14 @@ const partSchema = new mongoose.Schema(
     lastEditedAt: { type: Date, default: null },
 
     quantityInStock: { type: Number, default: 0, min: 0 },
+
+    // Stock pulled out of quantityInStock and set aside for R&D use.
+    // Issuing R&D stock subtracts from quantityInStock and adds here — see
+    // issueRndStock (controllers/partController.js) — so the two always
+    // account for all physical stock between them. rndIssues is the
+    // running log of who each chunk of it was handed to.
+    rndStock: { type: Number, default: 0, min: 0 },
+    rndIssues: { type: [rndIssueEntrySchema], default: [] },
 
     // Every vendor this part has ever been received from. Populated with
     // companyName and rendered as "VendorA / VendorB" wherever the part is

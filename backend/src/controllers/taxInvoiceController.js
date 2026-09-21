@@ -438,24 +438,33 @@ export const reconcileDelivery = async (primaryDoc, invoiceQuantity) => {
 };
 
 /*
-  Credits stock for a delivery once its tax invoice has arrived.
+  Moves a delivery's stock into IQC once its tax invoice has arrived.
 
   Material entered in Step 4 of the receiving wizard is logged as a
   StockEntry right away, but is deliberately kept OUT of the part's
-  quantityInStock (stockApplied: false) until this point — the parts master
-  should only ever reflect quantity that has actually been billed.
+  quantityInStock (stockApplied: false, iqcStatus: "awaiting_invoice") until
+  the tax invoice for the same delivery shows up. This function is that
+  trigger — but it no longer credits stock directly. Instead it hands the
+  line to IQC (Incoming Quality Control):
 
-  Finds every not-yet-applied StockEntry for this delivery — matched the
+    - the line's iqcStatus becomes "in_iqc_stock" — held in "IQC stock",
+      separate from the part's main stock
+    - it stays there, out of quantityInStock, until someone fills out an
+      IQC report for it and marks it accepted or rejected (see
+      submitIqcReport in iqcInspectionController.js)
+    - only an "accepted" decision ever credits Part.quantityInStock; a
+      line left unresolved, or marked "rejected", never does
+
+  Finds every not-yet-processed StockEntry for this delivery — matched the
   same way getTaxInvoiceStockEntries matches them (by PO/PI id, and its
-  cross-linked sibling, or by vendor when neither document exists) — credits
-  each entry's quantity to its part, marks the entry applied, and stamps it
-  with a batch code (WW/YY) built from the invoice's own invoiceDate — see
-  utils/batchCode.js. If the invoice didn't carry a date, invoiceDate is
-  null and no batch code is generated (left blank rather than guessed from
-  "today", since that would be exactly the stock-entry date this is meant
-  to be independent of).
+  cross-linked sibling, or by vendor when neither document exists) — and
+  stamps each with a batch code (WW/YY) built from the invoice's own
+  invoiceDate — see utils/batchCode.js. If the invoice didn't carry a date,
+  invoiceDate is null and no batch code is generated (left blank rather than
+  guessed from "today", since that would be exactly the stock-entry date
+  this is meant to be independent of).
 */
-const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId, invoiceDate) => {
+const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate) => {
   const docIds = [];
   if (poDoc) {
     docIds.push(poDoc._id);
@@ -467,28 +476,23 @@ const applyPendingStockForInvoice = async (poDoc, vendorId, invoiceId, invoiceDa
 
   const filter =
     docIds.length > 0
-      ? { purchaseOrder: { $in: docIds }, stockApplied: false }
-      : { vendor: vendorId, purchaseOrder: null, stockApplied: false };
+      ? { purchaseOrder: { $in: docIds }, iqcStatus: "awaiting_invoice" }
+      : { vendor: vendorId, purchaseOrder: null, iqcStatus: "awaiting_invoice" };
 
   const pending = await StockEntry.find(filter).populate("part");
   const batchCode = generateBatchCode(invoiceDate);
 
-  const appliedEntries = [];
+  const movedEntries = [];
   for (const entry of pending) {
-    if (entry.part) {
-      await Part.findByIdAndUpdate(entry.part._id, {
-        $inc: { quantityInStock: Number(entry.quantityReceived) || 0 },
-      });
-    }
-    entry.stockApplied = true;
+    entry.iqcStatus = "in_iqc_stock";
     entry.appliedAt = new Date();
     entry.appliedVia = invoiceId;
     if (batchCode) entry.batchCode = batchCode;
     await entry.save();
-    appliedEntries.push(entry);
+    movedEntries.push(entry);
   }
 
-  return appliedEntries;
+  return movedEntries;
 };
 
 // POST /api/tax-invoices (upload the tax invoice for a delivery, after stock entry)
@@ -532,23 +536,27 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
     originalFileName: req.file.originalname,
   });
 
-  // The invoice has now arrived — credit every stock entry for this
-  // delivery that was still pending, into the parts master, and stamp
-  // each with a batch code derived from the invoice's own date.
-  const appliedEntries = await applyPendingStockForInvoice(
+  // The invoice has now arrived — every stock entry for this delivery that
+  // was still pending moves into IQC stock (not the parts master yet — see
+  // moveDeliveryStockToIqc above) and is stamped with a batch code derived
+  // from the invoice's own date.
+  const movedEntries = await moveDeliveryStockToIqc(
     poDoc,
     vendor,
     invoice._id,
     invoice.invoiceDate
   );
-  const stockApplied = {
-    count: appliedEntries.length,
-    totalQuantity: appliedEntries.reduce((sum, e) => sum + (Number(e.quantityReceived) || 0), 0),
+  const iqcPending = {
+    count: movedEntries.length,
+    totalQuantity: movedEntries.reduce((sum, e) => sum + (Number(e.quantityReceived) || 0), 0),
+    entryIds: movedEntries.map((e) => String(e._id)),
   };
 
   // Close the PO/PI automatically when everything lines up, else leave open.
+  // (Reconciliation is purely about quantities entered vs. the PO/PI/invoice
+  // documents, so it runs regardless of IQC outcome.)
   const reconciliation = await reconcileDelivery(poDoc, invoiceQuantity);
 
   const populated = await invoice.populate("vendor purchaseOrder");
-  res.status(201).json({ ...populated.toObject(), reconciliation, stockApplied });
+  res.status(201).json({ ...populated.toObject(), reconciliation, iqcPending });
 });

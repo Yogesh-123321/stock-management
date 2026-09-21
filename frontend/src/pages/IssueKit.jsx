@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import VendorSearchSelect from "@/components/VendorSearchSelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
+import IssueRndStockPanel from "@/components/IssueRndStockPanel";
 import {
   Table,
   TableHeader,
@@ -36,6 +37,9 @@ import {
   FolderClock,
   PlayCircle,
   FilePenLine,
+  FlaskConical,
+  Download,
+  Loader2,
 } from "lucide-react";
 
 const fmtDateTime = (d) =>
@@ -48,6 +52,40 @@ const fmtDateTime = (d) =>
         minute: "2-digit",
       })
     : "—";
+
+// Downloads an .xlsx from a GET endpoint. The filename is chosen here rather
+// than read from Content-Disposition, which browsers hide on cross-origin
+// requests (the frontend and backend live on different domains in prod).
+async function downloadXlsx(path, filename) {
+  try {
+    const res = await api.get(path, { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([res.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    return true;
+  } catch (err) {
+    // With responseType "blob" an error body arrives as a Blob — read it
+    // so the server's message (e.g. "Please sign in") still shows up.
+    let msg = "Could not download the Excel file";
+    try {
+      const text = await err.response?.data?.text?.();
+      if (text) msg = JSON.parse(text).message || msg;
+    } catch {
+      /* keep the default message */
+    }
+    toast.error(msg);
+    return false;
+  }
+}
+
+// File name for one issued kit's Excel download, e.g. kit-issue-ABC11A.xlsx
+const issueXlsxName = (issue) =>
+  `kit-issue-${String(issue.issueCode || issue.kitName || "kit").replace(/[^A-Za-z0-9._-]+/g, "_")}.xlsx`;
 
 // Client-side mirror of the backend's FIFO batch walk (see
 // utils/batchAllocation.js) — used only to preview, before a kit is
@@ -81,15 +119,21 @@ function formatBatchBreakdown(breakdown) {
 
 /* ------------------------------------------------------------------ *
  * Edit an already-issued kit — never touches the entry it was opened
- * from. Submitting always creates a brand-new KitIssue, re-checked
- * against live stock the same way a fresh issue is, and the backend
- * gives it the next code in that issue's edit series (ABC11 -> ABC11A ->
- * ABC11B, ...) regardless of which entry in the chain this was opened
- * from. Prefilled from the issue's own snapshot lines, whose `part` is
- * populated with live stock (see getKitIssues), so no separate template
- * fetch is needed here.
+ * from. Saving does NOT issue anything: it stores the edited version as a
+ * saved kit (a draft, nothing deducted from stock), which is then issued
+ * from the "Saved kits" tab — that's when it takes the next code in the
+ * kit's edit series (ABC11 -> ABC11A -> ABC11B, ...). The same dialog is
+ * reused to keep editing such a saved edit (`issue.status === "draft"`),
+ * which just updates it in place. Prefilled from the issue's own snapshot
+ * lines, whose `part` is populated with live stock (see getKitIssues /
+ * getKitDrafts), so no separate template fetch is needed here.
  * ------------------------------------------------------------------ */
 function EditKitIssueDialog({ issue, onClose, onSaved }) {
+  // true = re-opened from the Saved kits tab to keep editing a saved edit.
+  const isDraft = issue.status === "draft";
+  const sourceLabel = isDraft
+    ? issue.editedFrom?.issueCode || issue.editedFrom?.kitName || issue.kitName
+    : issue.issueCode || issue.kitName;
   const [quantity, setQuantity] = useState(String(issue.quantity || 1));
   const [vendor, setVendor] = useState(issue.vendor || null);
   const [remarks, setRemarks] = useState(issue.remarks || "");
@@ -185,18 +229,22 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 
     setSubmitting(true);
     try {
-      const { data } = await api.post(`/kits/issues/${issue._id}/edit`, {
+      const body = {
         quantity: qtyNum,
         vendor: vendor._id,
         remarks,
         lines: linesPayload,
         extraItems: extraItemsPayload,
-      });
-      toast.success(data.message || `Created ${data.issueCode}`);
+      };
+      // First save creates the saved kit; later saves update it in place.
+      const { data } = isDraft
+        ? await api.patch(`/kits/drafts/${issue._id}`, body)
+        : await api.post(`/kits/issues/${issue._id}/edit`, body);
+      toast.success(data.message || "Saved — issue it from the Saved kits tab");
       onSaved?.();
       onClose();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Could not create the edited kit issue");
+      toast.error(err.response?.data?.message || "Could not save the edited kit");
     } finally {
       setSubmitting(false);
     }
@@ -209,11 +257,13 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
               <Pencil className="h-4 w-4 text-accent" />
-              Edit issued kit — {issue.issueCode || issue.kitName}
+              {isDraft ? "Edit saved kit" : "Edit issued kit"} — {sourceLabel}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              <span className="font-mono-tech">{issue.issueCode || issue.kitName}</span> stays exactly as
-              it is — saving here never changes it, it only creates a new entry, next in its edit series.
+              <span className="font-mono-tech">{sourceLabel}</span> stays exactly as it is — saving here
+              never changes it and deducts nothing from stock. Your edit is kept in the{" "}
+              <span className="font-medium">Saved kits</span> tab; issue it from there when you're
+              ready.
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -274,7 +324,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                       "Description",
                       "Qty/kit",
                       "Required",
-                      "Previously issued",
+                      isDraft ? "Last saved" : "Previously issued",
                       "Available",
                       "Qty issuing",
                       "Status",
@@ -444,8 +494,8 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
             Cancel
           </Button>
           <Button type="submit" form="edit-kit-issue-form" disabled={submitting}>
-            <Send className="mr-1.5 h-4 w-4" />
-            {submitting ? "Creating…" : "Create edited entry"}
+            <Save className="mr-1.5 h-4 w-4" />
+            {submitting ? "Saving…" : isDraft ? "Save changes" : "Save edited kit"}
           </Button>
         </div>
       </div>
@@ -460,6 +510,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
  * ------------------------------------------------------------------ */
 function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
   const lines = issue.lines || [];
+  const [downloading, setDownloading] = useState(false);
+
+  // This issued kit — who it went to, who issued it, every material — as Excel.
+  const downloadContents = async () => {
+    setDownloading(true);
+    await downloadXlsx(`/kits/issues/${issue._id}/export`, issueXlsxName(issue));
+    setDownloading(false);
+  };
 
   return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
@@ -594,10 +652,18 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
           <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>
+          <Button type="button" variant="outline" onClick={downloadContents} disabled={downloading}>
+            {downloading ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-1.5 h-4 w-4" />
+            )}
+            {downloading ? "Preparing…" : "Download Excel"}
+          </Button>
           {onEdit && (
             <Button type="button" onClick={onEdit}>
               <Pencil className="mr-1.5 h-4 w-4" />
-              Edit — creates a new entry
+              Edit — saves to Saved kits
             </Button>
           )}
         </div>
@@ -621,6 +687,7 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
   const [busyIssueId, setBusyIssueId] = useState(null);
   const [editingIssue, setEditingIssue] = useState(null);
   const [previewingIssue, setPreviewingIssue] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   // ---- Saved kits (drafts) state ----
   const [loadingDrafts, setLoadingDrafts] = useState(true);
@@ -657,6 +724,13 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
     loadIssues();
     loadDrafts();
   }, [loadIssues, loadDrafts, reloadKey]);
+
+  // One issued kit as an Excel slip (materials, vendor, issued by).
+  const downloadIssue = async (iss) => {
+    setDownloadingId(iss._id);
+    await downloadXlsx(`/kits/issues/${iss._id}/export`, issueXlsxName(iss));
+    setDownloadingId(null);
+  };
 
   // -- Issued kits actions --
   const revertLine = async (issue) => {
@@ -776,13 +850,14 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                   <TableHead>Vendor</TableHead>
                   <TableHead className="w-[60px] text-right">Qty</TableHead>
                   <TableHead className="w-[130px]">Issued by</TableHead>
+                  <TableHead className="w-[60px] text-center">Excel</TableHead>
                   {canManage && <TableHead className="w-[100px] text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loadingIssues && <TableEmpty colSpan={canManage ? 7 : 6}>Loading…</TableEmpty>}
+                {loadingIssues && <TableEmpty colSpan={canManage ? 8 : 7}>Loading…</TableEmpty>}
                 {!loadingIssues && issues.length === 0 && (
-                  <TableEmpty colSpan={canManage ? 7 : 6}>No kits issued yet.</TableEmpty>
+                  <TableEmpty colSpan={canManage ? 8 : 7}>No kits issued yet.</TableEmpty>
                 )}
                 {!loadingIssues &&
                   issues.map((iss) => (
@@ -831,6 +906,22 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                       <TableCell className="text-xs text-muted-foreground truncate">
                         {iss.issuedBy || "—"}
                       </TableCell>
+                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          title="Download this kit's issued materials as Excel"
+                          onClick={() => downloadIssue(iss)}
+                          disabled={downloadingId !== null}
+                        >
+                          {downloadingId === iss._id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </TableCell>
                       {canManage && (
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1">
@@ -841,7 +932,7 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                               title={
                                 iss.isEditable === false
                                   ? "Superseded by a later edit — view only, can no longer be edited"
-                                  : "Edit — creates a new entry, leaves this one untouched"
+                                  : "Edit — saves your changes as a saved kit; this entry stays untouched"
                               }
                               onClick={() => setEditingIssue(iss)}
                               disabled={busyIssueId !== null || iss.isEditable === false}
@@ -867,7 +958,8 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
             </Table>
             <p className="mt-2 text-xs text-muted-foreground">
               Undo reverts one line's quantity back onto the part's stock. Edit never changes the entry
-              itself — it creates a new one (e.g. ABC11 → ABC11A → ABC11B) so the original stays as
+              itself — it saves your changes as a new kit under Saved kits; issue it from there and it
+              becomes the next entry (e.g. ABC11 → ABC11A → ABC11B) so the original stays as
               permanent history. Open a part's own history from the Parts master for full line-by-line
               control when an issue has several parts.
             </p>
@@ -908,6 +1000,12 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                               Open in form
                             </Badge>
                           )}
+                          {d.editedFrom && (
+                            <Badge variant="secondary" className="gap-1">
+                              <Pencil className="h-3 w-3" />
+                              Edit of {d.editedFrom.issueCode || d.editedFrom.kitName}
+                            </Badge>
+                          )}
                           {d.hasShortage && (
                             <Badge variant="destructive" className="gap-1">
                               <AlertTriangle className="h-3 w-3" />
@@ -927,8 +1025,14 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                             type="button"
                             size="icon"
                             variant="ghost"
-                            title="Continue editing — loads this back into the form above"
-                            onClick={() => onResume?.(d)}
+                            title={
+                              d.editedFrom
+                                ? "Continue editing this saved edit"
+                                : "Continue editing — loads this back into the form above"
+                            }
+                            // A saved edit of an issued kit re-opens in the edit screen (it can
+                            // carry added parts); an ordinary saved kit goes back to the form.
+                            onClick={() => (d.editedFrom ? setEditingIssue(d) : onResume?.(d))}
                             disabled={busyDraftId !== null}
                           >
                             <FilePenLine className="h-3.5 w-3.5" />
@@ -973,6 +1077,8 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
           onClose={() => setEditingIssue(null)}
           onSaved={() => {
             loadIssues();
+            loadDrafts();
+            setTab("saved"); // the edit lives under Saved kits until it's issued
             onEdited?.();
           }}
         />
@@ -1002,6 +1108,10 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
 export default function IssueKit() {
   const { can } = useAuth();
   const canManage = can?.("kit.manage");
+  // Issuing R&D stock is admin-only (part.approve) — same right the
+  // backend checks on PATCH /parts/:id/rnd-stock — so only they see that tab.
+  const canIssueRnd = can?.("part.approve");
+  const [mainTab, setMainTab] = useState("kit"); // "kit" | "rnd"
 
   const [templates, setTemplates] = useState([]);
   const [templateId, setTemplateId] = useState("");
@@ -1262,25 +1372,13 @@ export default function IssueKit() {
     }
   };
 
-  return (
+  const kitIssueSection = (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold flex items-center gap-2">
-          <PackageOpen className="h-5 w-5" />
-          Issue kit
-          {draftCount > 0 && (
-            <Badge variant="warning" className="gap-1">
-              <FolderClock className="h-3 w-3" />
-              {draftCount} saved
-            </Badge>
-          )}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pick a kit template, enter the quantity, and it's checked against live stock before anything
-          is deducted. Issuing can take a while — use "Save for later" to keep your progress and come
-          back to it, then issue it once everything's ready.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Pick a kit template, enter the quantity, and it's checked against live stock before anything
+        is deducted. Issuing can take a while — use "Save for later" to keep your progress and come
+        back to it, then issue it once everything's ready.
+      </p>
 
       <Card>
         <CardHeader>
@@ -1320,7 +1418,7 @@ export default function IssueKit() {
                 </Select>
                 {templates.length === 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    No active kit templates yet — ask an admin to create one under "Kits".
+                    No active kit templates yet — ask an admin to create one under "Templates".
                   </p>
                 )}
               </div>
@@ -1516,6 +1614,45 @@ export default function IssueKit() {
         onChanged={handleDraftListChange}
         onCount={setDraftCount}
       />
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="font-display text-2xl font-semibold flex items-center gap-2">
+          <PackageOpen className="h-5 w-5" />
+          {canIssueRnd ? "Issue kit & R&D stock" : "Issue kit"}
+          {draftCount > 0 && (
+            <Badge variant="warning" className="gap-1">
+              <FolderClock className="h-3 w-3" />
+              {draftCount} saved
+            </Badge>
+          )}
+        </h1>
+      </div>
+
+      {canIssueRnd ? (
+        <Tabs value={mainTab} onValueChange={setMainTab}>
+          <TabsList>
+            <TabsTrigger value="kit" className="gap-1.5">
+              <PackageOpen className="h-3.5 w-3.5" />
+              Kit issue
+            </TabsTrigger>
+            <TabsTrigger value="rnd" className="gap-1.5">
+              <FlaskConical className="h-3.5 w-3.5" />
+              Issue R&amp;D stock
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="kit">{kitIssueSection}</TabsContent>
+          <TabsContent value="rnd">
+            <IssueRndStockPanel />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        kitIssueSection
+      )}
     </div>
   );
 }

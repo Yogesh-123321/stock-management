@@ -7,6 +7,7 @@ import {
   reportQuantityMismatch,
 } from "../controllers/stockController.js";
 import { parseStockImport, commitStockImport } from "../controllers/stockImportController.js";
+import { getIqcStockEntries, submitIqcReport } from "../controllers/iqcInspectionController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadStockSheet } from "../middleware/upload.js";
 import { getPartPriceAnalysis } from "../controllers/stockAnalysisController.js";
@@ -18,6 +19,14 @@ router.get(
 // Specific GET/POST paths first so they aren't shadowed by "/" or "/:id".
 router.get("/suggest-warnings", getStockEntrySuggestions);
 router.post("/report-mismatch", reportQuantityMismatch);
+
+// IQC inspection — lines held in "IQC stock" / "rejected stock" once the tax
+// invoice has arrived, and the endpoint used to fill out a checklist and
+// resolve one of them (accept -> main stock, reject -> rejected stock).
+// Open to every signed-in user (no receive.manage needed): IQC is done by
+// whoever is asked to inspect the material, and the inspector is recorded.
+router.get("/iqc-stock", protect, getIqcStockEntries);
+router.post("/:id/iqc-report", protect, submitIqcReport);
 
 router.get("/", getStockEntries);
 router.post("/", createStockEntry);

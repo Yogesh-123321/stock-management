@@ -6,7 +6,7 @@ import Vendors from "@/pages/Vendors";
 import Buyers from "@/pages/Buyers";
 import Parts from "@/pages/Parts";
 import PartCategories from "@/pages/PartCategories";
-import Kits from "@/pages/Kits";
+import Templates from "@/pages/Templates";
 import IssueKit from "@/pages/IssueKit";
 import Documents from "@/pages/Documents";
 import PiGenerator from "@/pages/PiGenerator";
@@ -39,7 +39,12 @@ export default function App() {
           <Route path="/buyers" element={guard("buyer.create", <Buyers />)} />
           <Route path="/parts" element={<Parts />} />
           <Route path="/part-categories" element={guard("part.approve", <PartCategories />)} />
-          <Route path="/kits" element={guard("kit.manage", <Kits />)} />
+          {/* Kit + IQC templates now share one Templates page (tabs) — the tabs check their own rights. */}
+          <Route path="/templates" element={<Templates />} />
+          <Route path="/iqc-templates" element={<Navigate to="/templates?tab=iqc" replace />} />
+          {/* IQC stock now lives inside Parts master (MISC stock column) — keep old links working. */}
+          <Route path="/iqc-stock" element={<Navigate to="/parts" replace />} />
+          <Route path="/kits" element={<Navigate to="/templates?tab=kit" replace />} />
           <Route path="/issue-kit" element={guard("kit.issue", <IssueKit />)} />
           <Route path="/documents" element={guard("documents.view", <Documents />)} />
           <Route path="/purchase-orders" element={<Navigate to="/documents" replace />} />

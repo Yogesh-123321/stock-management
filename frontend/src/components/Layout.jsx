@@ -31,9 +31,19 @@ const navItems = [
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
+  // Kit templates + IQC templates live together on one page, as tabs.
+  { to: "/templates", label: "Templates", icon: Layers, anyOf: ["kit.manage", "iqc.manage"] },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
-  { to: "/kits", label: "Kits", icon: Layers, permission: "kit.manage" },
-  { to: "/issue-kit", label: "Issue kit", icon: PackageOpen, permission: "kit.issue" },
+  {
+    to: "/issue-kit",
+    label: "Issue kit",
+    icon: PackageOpen,
+    permission: "kit.issue",
+    // Admins can also issue R&D stock from this page (second tab), so
+    // their sidebar entry says so.
+    altLabel: "Issue kit & R&D stock",
+    altPermission: "part.approve",
+  },
   { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: true },
@@ -72,11 +82,13 @@ function changePasswordFlow() {
 }
 
 export default function Layout() {
-  const { user, can, signOut } = useAuth();
+  const { user, can, canAny, signOut } = useAuth();
   const navigate = useNavigate();
   const pendingApprovals = useApprovalBadge();
 
-  const visible = navItems.filter((i) => !i.permission || can(i.permission));
+  const visible = navItems
+    .filter((i) => (i.anyOf ? canAny(...i.anyOf) : !i.permission || can(i.permission)))
+    .map((i) => (i.altLabel && can(i.altPermission) ? { ...i, label: i.altLabel } : i));
 
   const onSignOut = () => {
     signOut();

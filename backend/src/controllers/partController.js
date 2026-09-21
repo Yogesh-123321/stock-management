@@ -1,9 +1,12 @@
 import asyncHandler from "express-async-handler";
+import mongoose from "mongoose";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
+import User from "../models/User.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
 import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
+import { notifyUsers } from "../utils/notify.js";
 
 /*
   Attaches, to each part, how much of it has actually gone out through
@@ -313,6 +316,13 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     // Whether this line's quantity has actually been credited to
     // quantityInStock yet — false while its tax invoice hasn't arrived.
     stockApplied: !!entry.stockApplied,
+    // Where this line stands in IQC: awaiting_invoice (tax invoice not in
+    // yet) | in_iqc_stock (invoice in, waiting for inspection) | accepted |
+    // rejected. stockApplied alone can't tell "no invoice" from "invoice
+    // in but not inspected", so the ledger needs this to label the line.
+    iqcStatus: entry.iqcStatus || null,
+    iqcInspectedBy: entry.iqcReport?.inspectedBy || null,
+    iqcRejectionReason: entry.iqcReport?.rejectionReason || null,
     // WW/YY lot code stamped on once the tax invoice arrives — see
     // utils/batchCode.js. Empty while the entry is still pending.
     batchCode: entry.batchCode || null,
@@ -360,7 +370,25 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     }
   }
 
-  const movements = [...receiptMovements, ...kitMovements];
+  // Every time stock was issued to R&D (see issueRndStock above) becomes
+  // its own "out" ledger line as well, so the running balance on this
+  // ledger keeps matching quantityInStock exactly.
+  const rndMovements = (part.rndIssues || []).map((issue) => ({
+    _id: issue._id,
+    date: issue.date || issue.createdAt,
+    direction: "out",
+    type: "rnd_issued",
+    quantity: issue.quantity,
+    party: { role: "rnd", id: null, name: issue.personName },
+    reference: { type: "R&D issue", number: null, id: null },
+    matchType: null,
+    enteredBy: issue.issuedBy || null,
+    remarks: issue.remarks || null,
+    stockApplied: true,
+    entryType: "rnd_issue",
+  }));
+
+  const movements = [...receiptMovements, ...kitMovements, ...rndMovements];
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was
@@ -449,6 +477,82 @@ export const adjustPartStock = asyncHandler(async (req, res) => {
   }
   part.quantityInStock = Math.max(0, part.quantityInStock + Number(quantity));
   await part.save();
+  res.json(part);
+});
+
+/*
+  PATCH /api/parts/:id/rnd-stock  (issue quantity out of the main stock
+  into the R&D stock, against a named person)
+  Body: { quantity, personId, remarks }
+
+  quantity is always a positive amount being moved OUT of quantityInStock
+  and INTO rndStock — this endpoint only issues; it never lets rndStock go
+  back the other way. personId must be an existing, active user (picked
+  from a dropdown on the frontend, not typed freely) — that user is then
+  notified that R&D stock was issued to them. Each call is also logged as
+  its own line in part.rndIssues (who, how much, who issued it) so the
+  Parts master can show, on hover, everyone who's been given R&D stock of
+  this part.
+*/
+export const issueRndStock = asyncHandler(async (req, res) => {
+  const { quantity, personId, remarks } = req.body;
+
+  const qty = Number(quantity);
+  if (!qty || Number.isNaN(qty) || qty <= 0) {
+    res.status(400);
+    throw new Error("Quantity must be a positive number");
+  }
+  if (!personId || !mongoose.Types.ObjectId.isValid(personId)) {
+    res.status(400);
+    throw new Error("Select the person this stock is being issued to");
+  }
+
+  const person = await User.findById(personId);
+  if (!person || !person.isActive) {
+    res.status(400);
+    throw new Error("Selected person is not a valid, active user");
+  }
+
+  const part = await Part.findById(req.params.id);
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+  if (qty > part.quantityInStock) {
+    res.status(400);
+    throw new Error(
+      `Only ${part.quantityInStock} unit(s) available in main stock — cannot issue ${qty} to R&D`
+    );
+  }
+
+  part.quantityInStock -= qty;
+  part.rndStock += qty;
+  part.rndIssues.push({
+    person: person._id,
+    personName: person.name,
+    quantity: qty,
+    issuedBy: req.user?.name || req.user?.username || "",
+    remarks: remarks ? String(remarks).trim() : "",
+  });
+
+  await part.save();
+
+  try {
+    await notifyUsers([person._id], {
+      type: "info",
+      title: "R&D stock issued to you",
+      message: `${req.user?.name || req.user?.username || "An admin"} issued ${qty} unit(s) of ${
+        part.ttUniquePartNumber
+      } (${part.itemDescription}) to you for R&D use.`,
+      link: "/parts",
+      entityType: "part",
+      entityId: part._id,
+      actor: req.user?._id || null,
+    });
+  } catch (e) {
+    console.error("rnd stock issue notification failed:", e.message);
+  }
+
   res.json(part);
 });
 
@@ -719,6 +823,8 @@ export const exportPartsCsv = asyncHandler(async (req, res) => {
     "HSN code",
     "Unit",
     "Quantity in stock",
+    "R&D stock",
+    "R&D stock issued to",
     "Vendor(s)",
     "Is alternate part",
     "Alternate of",
@@ -741,6 +847,11 @@ export const exportPartsCsv = asyncHandler(async (req, res) => {
     p.hsnCode || "",
     p.unit || "",
     p.quantityInStock ?? 0,
+    p.rndStock ?? 0,
+    (p.rndIssues || [])
+      .map((i) => `${i.personName} (${i.quantity})`)
+      .filter(Boolean)
+      .join(" / "),
     (p.vendors || []).map((v) => v.companyName).filter(Boolean).join(" / "),
     p.isAlternatePart ? "Yes" : "No",
     p.alternateOf?.ttUniquePartNumber || "",

@@ -129,7 +129,7 @@ export default function ReceiveMaterial() {
     setProformaInvoiceDoc(s.proformaInvoiceDoc || null);
     setStockEntryDone(!!s.stockEntryDone);
     setStockQuantity(s.stockQuantity || 0);
-    setStep(s.currentStep || 2);
+    setStep(Math.min(s.currentStep || 2, 5));
     setDone(false);
     setSavedAndExited(false);
     setMode("wizard");
@@ -240,7 +240,9 @@ export default function ReceiveMaterial() {
           <CheckCircle2 className="h-10 w-10 mx-auto text-success" />
           <h2 className="font-display text-lg font-medium">Receiving complete</h2>
           <p className="text-sm text-muted-foreground">
-            Stock has been updated for {vendor?.companyName}. Start a new receiving session for the next delivery.
+            Receiving is complete for {vendor?.companyName}. Material covered by a tax invoice is now in IQC stock —
+            it is inspected from the Parts master (MISC stock → IQC stock) and reaches main stock once accepted. Start
+            a new receiving session for the next delivery.
           </p>
           <div className="flex justify-center gap-2">
             <Button onClick={startNew}>Receive next delivery</Button>
@@ -308,6 +310,9 @@ export default function ReceiveMaterial() {
               deliveryDocs={[purchaseOrderDoc, proformaInvoiceDoc]}
               expectedQuantities={expectedQuantities}
               enteredQuantity={stockQuantity}
+              // Tax invoice is the last step. Uploading it moves the lines into
+              // IQC stock; inspection is done separately (by any user) from the
+              // Parts master, so the delivery is finished here.
               onUploaded={finishSession}
               onSkip={finishSession}
             />

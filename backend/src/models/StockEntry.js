@@ -48,13 +48,73 @@ const stockEntrySchema = new mongoose.Schema(
 
     // A stock entry is logged the moment material is entered in Step 4 of the
     // receiving wizard, but the quantity is only credited to the part's
-    // quantityInStock once the tax invoice for the same delivery arrives.
-    // Until then this line sits here as a "pending" record so nothing shows
-    // up in the parts master that hasn't been billed yet.
+    // quantityInStock once it has cleared IQC (Incoming Quality Control) —
+    // see iqcStatus below. stockApplied is only ever set true by an
+    // "accepted" IQC decision (see submitIqcReport in
+    // iqcInspectionController.js); a rejected or still-pending IQC line
+    // never touches Part.quantityInStock.
     stockApplied: { type: Boolean, default: false },
     appliedAt: { type: Date, default: null },
-    // The tax invoice whose upload caused this line to be credited to stock.
+    // The tax invoice whose upload moved this line out of "awaiting_invoice"
+    // and into IQC (see moveDeliveryStockToIqc in taxInvoiceController.js).
     appliedVia: { type: mongoose.Schema.Types.ObjectId, ref: "TaxInvoice", default: null },
+
+    // IQC (Incoming Quality Control) status for this line:
+    //   awaiting_invoice - tax invoice hasn't arrived yet; not yet eligible
+    //                       for inspection (the pre-existing "pending" state)
+    //   in_iqc_stock      - the tax invoice has arrived but no IQC report has
+    //                        been filled (or it just hasn't been resolved
+    //                        yet) — held in "IQC stock", separate from the
+    //                        part's main stock, until someone inspects it
+    //   accepted          - an IQC report was filled, every point on it was
+    //                        checked, and it was marked accepted -> credited
+    //                        to Part.quantityInStock (stockApplied: true)
+    //   rejected          - an IQC report was filled, every point on it was
+    //                        checked, and it was marked rejected -> never
+    //                        credited to main stock; held in "rejected stock"
+    iqcStatus: {
+      type: String,
+      enum: ["awaiting_invoice", "in_iqc_stock", "accepted", "rejected"],
+      default: "awaiting_invoice",
+    },
+
+    // The filled-out IQC checklist for this line, if one was done. Points
+    // are copied from an IqcTemplate (models/IqcTemplate.js) at the moment
+    // of inspection, so this stays a true record of what was checked even
+    // if the template is edited or deleted afterwards.
+    iqcReport: {
+      template: { type: mongoose.Schema.Types.ObjectId, ref: "IqcTemplate", default: null },
+      materialName: { type: String, trim: true, default: "" },
+      items: {
+        type: [
+          {
+            name: { type: String, trim: true },
+            specification: { type: String, trim: true, default: "" },
+            unit: { type: String, trim: true, default: "" },
+            checked: { type: Boolean, default: false },
+          },
+        ],
+        default: [],
+      },
+      decision: { type: String, enum: ["accepted", "rejected", null], default: null },
+      // Partial approval: the inspector enters how much of the delivered
+      // quantity they approve; the rest is rejected and needs a reason.
+      // When only part of a line is approved the line is split in two
+      // (see submitIqcReport): the accepted line keeps the approved
+      // quantity and a new rejected line holds the remainder — both carry
+      // the same figures below so either one tells the whole story.
+      originalQuantity: { type: Number, default: null },
+      acceptedQuantity: { type: Number, default: null },
+      rejectedQuantity: { type: Number, default: null },
+      rejectionReason: { type: String, trim: true, default: "" },
+      // Who ran the inspection — stamped from the signed-in user by
+      // submitIqcReport (never taken from the request body). The name is
+      // copied onto the line so the record survives a renamed / removed
+      // account; the id links back to the User.
+      inspectedBy: { type: String, trim: true, default: "" },
+      inspectedByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      inspectedAt: { type: Date, default: null },
+    },
 
     // Lot code in WW/YY format (ISO week / 2-digit year), stamped on once
     // the tax invoice arrives and this entry is applied to stock — see

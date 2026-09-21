@@ -39,6 +39,13 @@ export const PERMISSIONS = [
   // Kits
   { key: "kit.manage", group: "Kits", label: "Create / edit kit templates", adminOnly: true },
   { key: "kit.issue", group: "Kits", label: "Issue kits to a vendor" },
+  // Quality
+  {
+    key: "iqc.manage",
+    group: "Quality",
+    label: "Create / edit IQC templates",
+    adminOnly: true,
+  },
   // Administration
   { key: "users.manage", group: "Administration", label: "Manage users & permissions", adminOnly: true },
   { key: "logs.view", group: "Administration", label: "View the activity log", adminOnly: true },

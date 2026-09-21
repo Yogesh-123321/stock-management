@@ -8,6 +8,7 @@ import {
   parseKitImport,
   getIssuesForTemplate,
   getKitIssues,
+  exportKitIssueById,
   getKitIssueById,
   issueKit,
   editKitIssue,
@@ -26,6 +27,9 @@ const router = express.Router();
 
 // Declared before "/:id" so they're never swallowed by the id route.
 router.get("/issues", getKitIssues);
+// Excel download of ONE issued kit (who it went to, who issued it, every
+// material) — a per-kit slip, never a dump of all kits.
+router.get("/issues/:id/export", protect, exportKitIssueById);
 router.get("/issues/:id", getKitIssueById);
 // Never touches the original entry — always creates a new KitIssue in
 // that entry's edit series (see editKitIssue). Same permission as issuing

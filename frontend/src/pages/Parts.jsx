@@ -18,6 +18,9 @@ import {
 import api from "@/lib/api";
 import CategorySelect from "@/components/CategorySelect";
 import PriceTrendChart from "@/components/PriceTrendChart";
+import RndStockHover from "@/components/RndStockHover";
+import MiscStockMenu from "@/components/MiscStockMenu";
+import IqcStockDialog from "@/pages/IqcStock";
 import { useAuth } from "@/lib/auth";
 import {
   Search,
@@ -105,6 +108,16 @@ const COLUMNS = [
     width: "w-[80px]",
     align: "right",
     sortValue: (p) => Number(p.totalQtyInKits ?? 0),
+  },
+  {
+    // "MISC stock" — the figure shown depends on the view picked from the
+    // header dropdown (R&D / Rejected), so the real sort value is worked
+    // out in the component (see miscValue); this one is only a fallback.
+    key: "miscStock",
+    label: "MISC stock",
+    width: "w-[110px]",
+    align: "right",
+    sortValue: (p) => Number(p.rndStock ?? 0),
   },
   {
     key: "isAlternatePart",
@@ -1146,7 +1159,8 @@ function EditPartDialog({ part, onClose, onSaved }) {
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold">Edit part</h2>
             <p className="break-all text-xs text-muted-foreground">
-              {part.ttUniquePartNumber} · stock {part.quantityInStock ?? 0}
+              {part.ttUniquePartNumber} · stock {part.quantityInStock ?? 0} · R&amp;D stock{" "}
+              {part.rndStock ?? 0}
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -1406,6 +1420,17 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
 
                 <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    R&amp;D stock
+                  </p>
+                  <p className="font-mono-tech text-sm">
+                    <RndStockHover issues={part.rndIssues}>
+                      <span>{part.rndStock ?? 0}</span>
+                    </RndStockHover>
+                  </p>
+                </div>
+
+                <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
+                  <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Vendor(s)
                   </p>
                   <p className="text-sm">
@@ -1599,6 +1624,10 @@ useEffect(() => {
         ? `Undo this kit issue line? ${entry.quantity} unit(s) will be added back to the current stock.`
         : entry.stockApplied
         ? `Delete this history line? ${entry.quantity} unit(s) will be removed from the current stock as well.`
+        : entry.iqcStatus === "in_iqc_stock"
+        ? "Delete this history line? It is still in IQC stock (not inspected yet) so main stock is unaffected."
+        : entry.iqcStatus === "rejected"
+        ? "Delete this history line? It was rejected in IQC, so main stock is unaffected."
         : "Delete this history line? It was still pending (invoice not uploaded) so stock is unaffected."
     );
     if (!ok) return;
@@ -1915,8 +1944,32 @@ useEffect(() => {
                                   </span>
                                 </div>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                                  {e.type === "received" && !e.stockApplied && (
-                                    <Badge variant="warning">Pending invoice</Badge>
+                                  {/* Label the line by where it really is: no tax invoice
+                                      yet, invoice in but waiting on IQC, rejected in IQC, or
+                                      accepted (credited to stock). */}
+                                  {e.type === "received" &&
+                                    !e.stockApplied &&
+                                    (e.iqcStatus === "in_iqc_stock" ? (
+                                      <Badge variant="warning" title="Tax invoice received — waiting for IQC inspection">
+                                        In IQC stock
+                                      </Badge>
+                                    ) : e.iqcStatus === "rejected" ? (
+                                      <Badge
+                                        variant="destructive"
+                                        title={`Rejected in IQC${e.iqcInspectedBy ? ` by ${e.iqcInspectedBy}` : ""}`}
+                                      >
+                                        Rejected in IQC
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="warning">Pending invoice</Badge>
+                                    ))}
+                                  {e.type === "received" && e.iqcStatus === "accepted" && (
+                                    <Badge
+                                      variant="success"
+                                      title={e.iqcInspectedBy ? `IQC accepted by ${e.iqcInspectedBy}` : "IQC accepted"}
+                                    >
+                                      IQC accepted
+                                    </Badge>
                                   )}
                                   {e.type === "received" && e.batchCode && (
                                     <Badge variant="secondary" className="font-mono-tech">
@@ -1930,6 +1983,14 @@ useEffect(() => {
                                       </Badge>
                                     ))}
                                 </div>
+                                {e.type === "received" && e.iqcStatus === "rejected" && e.iqcRejectionReason && (
+                                  <p
+                                    className="mt-0.5 truncate text-xs text-destructive"
+                                    title={e.iqcRejectionReason}
+                                  >
+                                    Reason: {e.iqcRejectionReason}
+                                  </p>
+                                )}
                                 {e.remarks && (
                                   <p className="mt-0.5 truncate text-xs text-muted-foreground" title={e.remarks}>
                                     {e.remarks}
@@ -2540,6 +2601,61 @@ export default function Parts() {
   const [myRequestsReloadKey, setMyRequestsReloadKey] = useState(0);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
 
+  // "MISC stock" column: the header dropdown picks which bucket the column
+  // shows ("rnd" | "rejected"); "IQC stock" instead opens the IQC approve /
+  // reject window. IQC is done by whoever is asked to inspect the material,
+  // so all three options are available to every signed-in user.
+  const [miscView, setMiscView] = useState("rnd");
+  const [showIqcStock, setShowIqcStock] = useState(false);
+  const [rejectedByPart, setRejectedByPart] = useState({});
+  const [iqcReloadKey, setIqcReloadKey] = useState(0);
+
+  const miscOptions = [
+    { key: "rnd", label: "R&D stock" },
+    { key: "rejected", label: "Rejected stock" },
+    { key: "iqc", label: "IQC stock", opensWindow: true },
+  ];
+  const miscViewLabel = miscView === "rejected" ? "Rejected" : "R&D";
+
+  // Rejected quantity per part, totalled from the rejected IQC lines. Only
+  // fetched while the column is actually showing rejected stock.
+  useEffect(() => {
+    if (miscView !== "rejected") return undefined;
+    let alive = true;
+    api
+      .get("/stock-entries/iqc-stock", { params: { status: "rejected" } })
+      .then(({ data }) => {
+        if (!alive) return;
+        const totals = {};
+        (Array.isArray(data) ? data : []).forEach((e) => {
+          const id = e.part?._id || e.part;
+          if (!id) return;
+          totals[id] = (totals[id] || 0) + Number(e.quantityReceived || 0);
+        });
+        setRejectedByPart(totals);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        toast.error(err.response?.data?.message || "Could not load rejected stock");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [miscView, iqcReloadKey]);
+
+  const miscValue = useCallback(
+    (p) => (miscView === "rejected" ? Number(rejectedByPart[p._id] ?? 0) : Number(p.rndStock ?? 0)),
+    [miscView, rejectedByPart]
+  );
+
+  const handleMiscSelect = (key) => {
+    if (key === "iqc") {
+      setShowIqcStock(true);
+      return;
+    }
+    setMiscView(key);
+  };
+
   // "Download parts" — admin only. Two separate CSVs (parts master +
   // part/vendor details), each saved as its own file, same as the
   // activity log's "Export CSV" button — never zipped together.
@@ -2613,14 +2729,15 @@ export default function Parts() {
     const col = COLUMNS.find((c) => c.key === sort.key);
     if (!col) return parts;
     const dir = sort.dir === "asc" ? 1 : -1;
+    const valueOf = col.key === "miscStock" ? miscValue : col.sortValue;
     return [...parts].sort((a, b) => {
-      const av = col.sortValue(a);
-      const bv = col.sortValue(b);
+      const av = valueOf(a);
+      const bv = valueOf(b);
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
       return 0;
     });
-  }, [parts, sort, isMultiTermSearch, manualSort]);
+  }, [parts, sort, isMultiTermSearch, manualSort, miscValue]);
 
   const SortIcon = ({ colKey }) => {
     if (sort.key !== colKey) return <ArrowUpDown className="ml-1 inline h-3 w-3 opacity-40" />;
@@ -2722,14 +2839,26 @@ export default function Parts() {
                       col.align === "right" ? "text-right" : "text-left"
                     } select-none`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(col.key)}
-                      className="inline-flex items-center gap-0.5 font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {col.label}
-                      <SortIcon colKey={col.key} />
-                    </button>
+                    {col.key === "miscStock" ? (
+                      <MiscStockMenu
+                        options={miscOptions}
+                        activeKey={miscView}
+                        activeLabel={miscViewLabel}
+                        onSelect={handleMiscSelect}
+                        onSort={() => toggleSort(col.key)}
+                      >
+                        <SortIcon colKey={col.key} />
+                      </MiscStockMenu>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col.key)}
+                        className="inline-flex items-center gap-0.5 font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {col.label}
+                        <SortIcon colKey={col.key} />
+                      </button>
+                    )}
                   </TableHead>
                 ))}
                 {isApprover && <TableHead className="w-[110px] text-right">Actions</TableHead>}
@@ -2815,6 +2944,20 @@ export default function Parts() {
                     >
                       {p.totalQtyInKits ?? 0}
                     </TableCell>
+                    <TableCell className="align-top py-1 text-right font-mono-tech">
+                      {miscView === "rejected" ? (
+                        <span
+                          className={miscValue(p) > 0 ? "text-destructive" : "text-muted-foreground"}
+                          title="Quantity rejected during IQC"
+                        >
+                          {miscValue(p)}
+                        </span>
+                      ) : (
+                        <RndStockHover issues={p.rndIssues}>
+                          <span>{p.rndStock ?? 0}</span>
+                        </RndStockHover>
+                      )}
+                    </TableCell>
                     <TableCell className="align-top py-1">
                       {p.isAlternatePart ? (
                         <Badge variant="warning">Alternate</Badge>
@@ -2874,6 +3017,17 @@ export default function Parts() {
           onPartUpdated={(updated) =>
             setParts((list) => list.map((p) => (p._id === updated._id ? { ...p, ...updated } : p)))
           }
+        />
+      )}
+
+      {showIqcStock && (
+        <IqcStockDialog
+          onClose={() => setShowIqcStock(false)}
+          onChanged={() => {
+            // Accepted lines add to main stock, rejected ones to rejected stock.
+            setReloadKey((k) => k + 1);
+            setIqcReloadKey((k) => k + 1);
+          }}
         />
       )}
 

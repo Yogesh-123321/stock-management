@@ -1,11 +1,18 @@
 import asyncHandler from "express-async-handler";
 import xlsx from "xlsx";
+import ExcelJS from "exceljs";
 import KitTemplate from "../models/KitTemplate.js";
 import KitIssue from "../models/KitIssue.js";
 import Part from "../models/Part.js";
 import Vendor from "../models/Vendor.js";
 import { parseKitWorkbook } from "../utils/parseKitSheet.js";
 import { getAvailableBatches, allocateFromBatches } from "../utils/batchAllocation.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LOGO_PATH = path.join(__dirname, "..", "assets", "tispl-logo.jpeg");
 
 // Lines flagged Do Not Populate never consume stock and are never part of
 // what an issue actually deducts — kept on the template for reference only.
@@ -232,6 +239,46 @@ function editLetterSuffix(n) {
   return out;
 }
 
+// Parts added to ONE kit on top of its template (the "Add part" button on
+// the edit screen) are stored as lines with qtyPerKit 0, since they aren't
+// on the template. Saving / issuing a saved kit rebuilds its item list from
+// the template, so these extras have to be carried over explicitly or they
+// would silently drop off. `savedLines` = the kit's existing lines,
+// `extraItems` = parts newly added in this request.
+const withExtraItems = (baseItems, savedLines = [], extraItems = []) => {
+  const items = [...baseItems];
+  const have = new Set(items.map((it) => it.ttUniquePartNumber));
+  const add = (code, referenceDesignator, value) => {
+    const c = String(code || "").trim().toUpperCase();
+    if (!c || have.has(c)) return;
+    have.add(c);
+    items.push({
+      ttUniquePartNumber: c,
+      referenceDesignator: String(referenceDesignator || "").trim(),
+      qtyPerKit: 0,
+      value: value || "",
+    });
+  };
+  for (const l of savedLines || []) {
+    if ((l.qtyPerKit || 0) === 0) add(l.ttUniquePartNumber, l.referenceDesignator, l.itemDescription);
+  }
+  for (const ex of extraItems || []) add(ex?.ttUniquePartNumber, ex?.referenceDesignator, "");
+  return items;
+};
+
+// Quantities the request didn't mention for those extra parts fall back to
+// what's already saved on the kit (otherwise they'd default to 0).
+const withSavedExtraQty = (overrideLines, savedLines = []) => {
+  const out = Array.isArray(overrideLines) ? [...overrideLines] : [];
+  const named = new Set(out.map((l) => String(l?.ttUniquePartNumber || "").trim().toUpperCase()));
+  for (const l of savedLines || []) {
+    if ((l.qtyPerKit || 0) === 0 && !named.has(l.ttUniquePartNumber)) {
+      out.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: l.qtyIssued });
+    }
+  }
+  return out;
+};
+
 // A kit issue is editable only while nothing has been created "from" it
 // yet — the moment an edit is made (Kit 1 -> Kit 1A, or Kit 1A -> Kit 1B),
 // the entry that edit was made from is permanently superseded: it stays
@@ -240,7 +287,12 @@ function editLetterSuffix(n) {
 async function attachEditLock(issues) {
   const list = Array.isArray(issues) ? issues : [issues];
   if (list.length === 0) return issues;
-  const supersededIds = new Set((await KitIssue.distinct("editedFrom")).map((id) => String(id)));
+  // Only edits that have actually been ISSUED supersede their source — an
+  // edit still sitting in "Saved kits" (a draft) leaves it editable, so
+  // discarding that saved edit puts everything back as it was.
+  const supersededIds = new Set(
+    (await KitIssue.distinct("editedFrom", { status: "issued" })).map((id) => String(id))
+  );
   for (const iss of list) {
     iss.isEditable = !supersededIds.has(String(iss._id));
   }
@@ -484,6 +536,217 @@ export const getKitIssues = asyncHandler(async (req, res) => {
   res.json(plain);
 });
 
+// GET /api/kits/issues/:id/export
+// Downloads ONE issued kit as a formatted .xlsx "material issue slip": who
+// it was issued to, who issued it, when, and every material that went out
+// (part, description, qty per kit / required / issued / short, FIFO
+// batches), with totals and signature lines. Only the kit asked for —
+// there is deliberately no "export everything" endpoint.
+export const exportKitIssueById = asyncHandler(async (req, res) => {
+  const issue = await KitIssue.findById(req.params.id)
+    .populate("vendor", "companyName address phone email contactPersonName taxRegistrationNo")
+    .populate("lines.part", "itemDescription");
+  if (!issue || issue.status !== "issued") {
+    res.status(404);
+    throw new Error("Kit issue not found");
+  }
+  const iss = issue.toObject();
+  const v = iss.vendor || {};
+  const lines = iss.lines || [];
+
+  // The issue time is written as fixed text (India time, same look as the
+  // on-screen table) taken from the timestamp stored on the record — not as
+  // an Excel date cell — so nothing in Excel can ever re-evaluate it.
+  const fmtIst = (d) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        })
+      : "—";
+  const batchText = (b = []) =>
+    b.length ? b.map((x) => `${x.batchCode || "No batch"}: ${x.quantity}`).join(", ") : "";
+
+  const THIN = { style: "thin", color: { argb: "FF9CA3AF" } };
+  const BOX = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  const NAVY = "FF1F3A5F";
+  const LAST_COL = 9; // I
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Inventory Platform";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Issued Kit", {
+    pageSetup: {
+      orientation: "landscape",
+      paperSize: 9, // A4
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    },
+  });
+  ws.columns = [
+    { width: 7 }, // A  S.No
+    { width: 20 }, // B  TT part no
+    { width: 42 }, // C  description
+    { width: 20 }, // D  ref designator
+    { width: 10 }, // E  qty / kit
+    { width: 13 }, // F  required
+    { width: 12 }, // G  issued
+    { width: 11 }, // H  short
+    { width: 32 }, // I  batches
+  ];
+
+  // ---- Title ----
+  ws.mergeCells("C1:I1");
+  ws.getCell("C1").value = "TECHNOTRENDZ INNOVATIVE SOLUTIONS PVT. LTD";
+  ws.getCell("C1").font = { bold: true, size: 14 };
+  ws.getCell("C1").alignment = { vertical: "middle", horizontal: "center" };
+  ws.mergeCells("C2:I2");
+  ws.getCell("C2").value = "KIT ISSUE SLIP — MATERIAL ISSUED";
+  ws.getCell("C2").font = { bold: true, size: 12, color: { argb: NAVY } };
+  ws.getCell("C2").alignment = { vertical: "middle", horizontal: "center" };
+  ws.getRow(1).height = 30;
+  ws.getRow(2).height = 26;
+  ws.getRow(3).height = 16;
+  if (fs.existsSync(LOGO_PATH)) {
+    const imageId = wb.addImage({ filename: LOGO_PATH, extension: "jpeg" });
+    ws.addImage(imageId, { tl: { col: 0.15, row: 0.1 }, ext: { width: 70, height: 72 } });
+  }
+
+  // ---- Details block: label (A:B) + value (C:I) ----
+  const contact = [v.contactPersonName, v.phone].filter(Boolean).join(" · ");
+  const details = [
+    ["Kit", iss.kitName],
+    ["Kit Code", iss.kitCode || "—"],
+    ["Issue Code", iss.issueCode || "—"],
+    ["Issued To (Vendor)", v.companyName || "—"],
+    v.address ? ["Vendor Address", v.address] : null,
+    contact ? ["Vendor Contact", contact] : null,
+    v.taxRegistrationNo ? ["Vendor GSTIN / Tax No", v.taxRegistrationNo] : null,
+    ["Issued By (Person)", iss.issuedBy || "—"],
+    ["Issued On", fmtIst(iss.createdAt)],
+    ["Kits Issued", iss.quantity],
+    ["Shortage", iss.hasShortage ? "Yes — some parts were issued short (see Qty Short)" : "No"],
+    iss.remarks ? ["Remarks", iss.remarks] : null,
+  ].filter(Boolean);
+
+  for (const [label, value] of details) {
+    const row = ws.addRow([]);
+    const r = row.number;
+    ws.mergeCells(`A${r}:B${r}`);
+    ws.mergeCells(`C${r}:I${r}`);
+    const l = ws.getCell(`A${r}`);
+    l.value = label;
+    l.font = { bold: true };
+    l.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF2F7" } };
+    l.alignment = { vertical: "middle" };
+    const val = ws.getCell(`C${r}`);
+    val.value = value;
+    val.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+    for (let c = 1; c <= LAST_COL; c += 1) ws.getCell(r, c).border = BOX;
+    if (label === "Vendor Address" || label === "Remarks") row.height = 32;
+  }
+  ws.addRow([]);
+
+  // ---- Materials table ----
+  ws.addRow(["MATERIALS ISSUED"]).font = { bold: true, color: { argb: NAVY } };
+  const header = ws.addRow([
+    "S.No",
+    "TT Part No",
+    "Description",
+    "Ref. Designator",
+    "Qty / Kit",
+    "Qty Required",
+    "Qty Issued",
+    "Qty Short",
+    "Batches (FIFO)",
+  ]);
+  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+  header.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  header.height = 24;
+  for (let c = 1; c <= LAST_COL; c += 1) header.getCell(c).border = BOX;
+
+  const firstDataRow = header.number + 1;
+  lines.forEach((ln, i) => {
+    const row = ws.addRow([
+      i + 1,
+      ln.ttUniquePartNumber || "",
+      ln.part?.itemDescription || ln.itemDescription || "",
+      ln.referenceDesignator || "",
+      ln.qtyPerKit,
+      ln.qtyRequired,
+      ln.qtyIssued,
+      ln.qtyShort || 0,
+      batchText(ln.batchBreakdown),
+    ]);
+    row.alignment = { vertical: "top", wrapText: true };
+    [1, 5, 6, 7, 8].forEach((c) => {
+      row.getCell(c).alignment = { vertical: "top", horizontal: "center" };
+    });
+    for (let c = 1; c <= LAST_COL; c += 1) row.getCell(c).border = BOX;
+    if (ln.qtyShort > 0) {
+      row.getCell(8).font = { bold: true, color: { argb: "FFB91C1C" } };
+    }
+  });
+  const lastDataRow = header.number + lines.length;
+
+  if (lines.length === 0) {
+    const r = ws.addRow(["This issue has no lines."]).number;
+    ws.mergeCells(`A${r}:I${r}`);
+    ws.getCell(`A${r}`).alignment = { horizontal: "center" };
+  } else {
+    const sum = (key) => lines.reduce((t, l) => t + (Number(l[key]) || 0), 0);
+    const tot = ws.addRow([]);
+    const r = tot.number;
+    ws.mergeCells(`A${r}:E${r}`);
+    ws.getCell(`A${r}`).value = "Total";
+    ws.getCell(`A${r}`).alignment = { horizontal: "right" };
+    [
+      ["F", "qtyRequired"],
+      ["G", "qtyIssued"],
+      ["H", "qtyShort"],
+    ].forEach(([col, key]) => {
+      ws.getCell(`${col}${r}`).value = {
+        formula: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`,
+        result: sum(key),
+      };
+      ws.getCell(`${col}${r}`).alignment = { horizontal: "center" };
+    });
+    tot.font = { bold: true };
+    tot.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF2F7" } };
+    for (let c = 1; c <= LAST_COL; c += 1) tot.getCell(c).border = BOX;
+  }
+
+  // ---- Signature lines ----
+  ws.addRow([]);
+  ws.addRow([]);
+  const sig = ws.addRow([]);
+  const sr = sig.number;
+  ws.mergeCells(`A${sr}:C${sr}`);
+  ws.mergeCells(`F${sr}:I${sr}`);
+  ws.getCell(`A${sr}`).value = `Issued By: ${iss.issuedBy || ""}`;
+  ws.getCell(`F${sr}`).value = "Received By (Name & Signature):";
+  for (const c of [1, 2, 3, 6, 7, 8, 9]) {
+    sig.getCell(c).border = { top: THIN };
+  }
+  sig.font = { bold: true };
+
+  const base = String(iss.issueCode || iss.kitName || "kit").replace(/[^A-Za-z0-9._-]+/g, "_");
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="kit-issue-${base}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
 // GET /api/kits/issues/:id
 export const getKitIssueById = asyncHandler(async (req, res) => {
   const issue = await KitIssue.findById(req.params.id)
@@ -610,39 +873,41 @@ export const issueKit = asyncHandler(async (req, res) => {
 
 /*
   POST /api/kits/issues/:issueId/edit
-  Body: { quantity, vendor, issuedBy, remarks, lines?, extraItems? } — the
-  first four are the same shape as POST /api/kits/:id/issue. `extraItems`
-  (optional): [{ ttUniquePartNumber, referenceDesignator? }, ...] — parts
-  to add to this edit that weren't on the original issue (or the current
-  template); the actual quantity for each still comes through `lines`,
-  same as any other line.
+  Body: { quantity, vendor?, remarks, lines?, extraItems? } — `lines`:
+  [{ ttUniquePartNumber, qtyIssued }, ...] (same shape as POST
+  /api/kits/:id/issue). `extraItems` (optional): [{ ttUniquePartNumber,
+  referenceDesignator? }, ...] — parts to add that weren't on the original
+  issue (or the current template); the quantity for each still comes
+  through `lines`.
 
-  Never touches the issue that's being "edited" — from here on that entry
-  stays exactly as it was, untouched, permanent history. This instead
-  re-resolves against live stock and creates a brand-new KitIssue, and
-  gives IT the next code in that issue's own edit series: the original
-  issue at the start of the chain keeps whatever issueCode it was given at
-  creation ("Kit 1", "Kit 2", ... — see issueKit), and every edit appends
-  the next letter — "Kit 1" -> "Kit 1A" -> "Kit 1B" — no matter which
-  entry in the chain "Edit" was actually clicked on. Only the entry
-  currently at the head of the chain (nothing edited from it yet) may be
-  edited — see the isEditable/alreadySuperseded check below.
+  Editing an issued kit now SAVES the edited version as a saved kit (a
+  draft) — nothing is deducted from stock and no issue code is used up.
+  The person then issues it from the "Saved kits" tab
+  (POST /api/kits/drafts/:draftId/issue), which is where the stock is
+  deducted and the entry gets the next code in this issue's edit series
+  ("Kit 1" -> "Kit 1A" -> "Kit 1B", ... — see issueKitDraft).
+
+  Never touches the issue that's being "edited" — it stays exactly as it
+  was, permanent history — and it only becomes locked once the edit is
+  actually ISSUED (see attachEditLock), so discarding the saved edit
+  leaves it editable as before. Only the entry at the head of its chain may
+  be edited, and only one saved edit per entry can be waiting at a time.
 */
 export const editKitIssue = asyncHandler(async (req, res) => {
   const { issueId } = req.params;
-  const { quantity, vendor, issuedBy, remarks, lines: overrideLines, extraItems } = req.body;
+  const { quantity, vendor, remarks, lines: overrideLines, extraItems } = req.body;
 
   const original = await KitIssue.findById(issueId);
-  if (!original) {
+  if (!original || original.status !== "issued") {
     res.status(404);
     throw new Error("Kit issue not found");
   }
 
-  // Once something has already been created "from" this entry (Kit 1 ->
-  // Kit 1A, Kit 1A -> Kit 1B, ...), this entry is permanently superseded —
-  // it stays as untouched history and can only be viewed from here on.
-  // Only the current head of the chain can be edited further.
-  const alreadySuperseded = await KitIssue.exists({ editedFrom: original._id });
+  // Once an edit has been ISSUED from this entry (Kit 1 -> Kit 1A, Kit 1A
+  // -> Kit 1B, ...), this entry is permanently superseded — it stays as
+  // untouched history and can only be viewed from here on. Only the
+  // current head of the chain can be edited further.
+  const alreadySuperseded = await KitIssue.exists({ editedFrom: original._id, status: "issued" });
   if (alreadySuperseded) {
     res.status(400);
     throw new Error(
@@ -650,9 +915,18 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     );
   }
 
+  // One saved edit at a time per entry, so two people can't end up with
+  // competing versions of the same kit.
+  const waiting = await KitIssue.exists({ editedFrom: original._id, status: "draft" });
+  if (waiting) {
+    res.status(400);
+    throw new Error(
+      `A saved edit of ${original.issueCode || original.kitName} is already waiting in the Saved kits tab — open it from there to keep editing or issue it, or discard it first.`
+    );
+  }
+
   // Always count from the start of the chain, not from whichever entry
-  // was clicked — so editing an already-edited entry still lands on the
-  // next letter after the last one, e.g. editing ABC11A gives ABC11B.
+  // was clicked.
   const rootId = original.rootIssue || original._id;
   const rootDoc = original.rootIssue ? await KitIssue.findById(rootId) : original;
   if (!rootDoc) {
@@ -665,37 +939,25 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("Quantity must be a whole number of at least 1");
   }
-  if (!vendor) {
-    res.status(400);
-    throw new Error("Select the vendor this kit is being issued to");
-  }
 
-  const vendorDoc = await Vendor.findById(vendor);
-  if (!vendorDoc) {
-    res.status(404);
-    throw new Error("Vendor not found");
-  }
-  if ((vendorDoc.activeStatus || "active") === "inactive") {
-    res.status(400);
-    throw new Error(`${vendorDoc.companyName} has been marked inactive — cannot issue a kit to them`);
+  let vendorDoc = null;
+  if (vendor) {
+    vendorDoc = await Vendor.findById(vendor);
+    if (!vendorDoc) {
+      res.status(404);
+      throw new Error("Vendor not found");
+    }
   }
 
   // Prefer the live template (so this edit picks up any item / qty-per-kit
   // changes made since the original was issued); fall back to the
   // original issue's own snapshot lines if the template has since been
-  // deleted, so an edit is still possible even then.
+  // deleted, so an edit is still possible even then. (Whether the template
+  // is still active is checked when the saved kit is actually issued.)
   let items = null;
   if (original.kitTemplate) {
     const template = await KitTemplate.findById(original.kitTemplate);
-    if (template) {
-      if (!template.isActive) {
-        res.status(400);
-        throw new Error(
-          "This kit template has been deactivated by the admin and can no longer be issued"
-        );
-      }
-      items = issuableItems(template.items);
-    }
+    if (template) items = issuableItems(template.items);
   }
   if (!items || items.length === 0) {
     items = (original.lines || []).map((l) => ({
@@ -705,76 +967,48 @@ export const editKitIssue = asyncHandler(async (req, res) => {
       value: l.itemDescription,
     }));
   }
-  // Parts added on THIS edit only — not on the template or the original
-  // issue's own snapshot. Given qtyPerKit: 0 so they never inflate
-  // `required` for the kit's normal per-kit math; the actual quantity to
-  // deduct still comes through `overrideLines` (`lines`) exactly like
-  // every other line, keyed by ttUniquePartNumber. Duplicates of a code
-  // already in `items` are ignored — that line is edited in place instead.
-  if (Array.isArray(extraItems) && extraItems.length) {
-    const existingCodes = new Set(items.map((it) => it.ttUniquePartNumber));
-    for (const ex of extraItems) {
-      const code = String(ex?.ttUniquePartNumber || "").trim().toUpperCase();
-      if (!code || existingCodes.has(code)) continue;
-      existingCodes.add(code);
-      items.push({
-        ttUniquePartNumber: code,
-        referenceDesignator: String(ex?.referenceDesignator || "").trim(),
-        qtyPerKit: 0,
-        value: "",
-      });
-    }
-  }
+  // Parts added to the original by an earlier edit, plus any added now —
+  // stored with qtyPerKit: 0 so they never inflate `required` for the kit's
+  // normal per-kit math; the quantity comes through `lines`.
+  items = withExtraItems(items, original.lines, extraItems);
 
   if (items.length === 0) {
     res.status(400);
-    throw new Error("This kit has no issuable items to re-issue");
+    throw new Error("This kit has no issuable items to save");
   }
 
-  let resolvedLines, shortages;
-  try {
-    ({ resolvedLines, shortages } = await resolveAndDeductLines(items, qty, overrideLines));
-  } catch (err) {
-    res.status(err.status || 400);
-    throw err;
-  }
+  // Preview only — nothing is deducted until the saved kit is issued.
+  const { resolvedLines, shortages } = await resolveDraftLines(
+    items,
+    qty,
+    withSavedExtraQty(overrideLines, original.lines)
+  );
 
-  // Next letter in this chain — counted across every edit already made
-  // from this same root, so it keeps incrementing even if edits happen
-  // out of order or from different entries in the chain.
-  const priorEdits = await KitIssue.find({ rootIssue: rootDoc._id }).select("editIndex").lean();
-  const nextIndex = priorEdits.reduce((max, e) => Math.max(max, e.editIndex || 0), 0) + 1;
-  const issueCode = `${rootDoc.issueCode || rootDoc.kitName}${editLetterSuffix(nextIndex)}`;
-
-  const created = await KitIssue.create({
-    status: "issued",
+  const draft = await KitIssue.create({
+    status: "draft",
     kitTemplate: original.kitTemplate,
     kitName: original.kitName,
     kitCode: original.kitCode,
-    issueCode,
+    // issueCode / editIndex are assigned when this is issued.
     rootIssue: rootDoc._id,
     editedFrom: original._id,
-    editIndex: nextIndex,
     quantity: qty,
-    vendor: vendorDoc._id,
-    issuedBy: issuedBy || req.user?.name || req.user?.username || "",
+    vendor: vendorDoc ? vendorDoc._id : original.vendor || null,
+    issuedBy: req.user?.name || req.user?.username || "",
     issuedByUser: req.user?._id || null,
     remarks: remarks || "",
     hasShortage: shortages.length > 0,
     lines: linesPayloadFrom(resolvedLines),
   });
 
-  const populated = await KitIssue.findById(created._id)
+  const populated = await KitIssue.findById(draft._id)
     .populate("vendor", "companyName")
+    .populate("editedFrom", "issueCode kitName")
     .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
 
   res.status(201).json({
     ...populated.toObject(),
-    isEditable: true, // brand new — nothing has been edited from it yet
-    message:
-      shortages.length > 0
-        ? `Created ${issueCode} — ${shortages.length} part(s) were short and only partially deducted`
-        : `Created ${issueCode}, based on ${rootDoc.issueCode || rootDoc.kitName}`,
+    message: `Saved your edit of ${original.issueCode || original.kitName} — open the Saved kits tab to issue it (nothing is deducted until then)`,
     shortages,
   });
 });
@@ -908,6 +1142,8 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
       value: l.itemDescription,
     }));
   }
+  // Carry over parts added to this one kit (and any added right now).
+  items = withExtraItems(items, draft.lines, req.body.extraItems);
   if (items.length === 0) {
     res.status(400);
     throw new Error("This kit has no issuable items to save");
@@ -923,7 +1159,11 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
   }
 
   const qty = Number(quantity) > 0 ? Number(quantity) : 1;
-  const { resolvedLines, shortages } = await resolveDraftLines(items, qty, overrideLines);
+  const { resolvedLines, shortages } = await resolveDraftLines(
+    items,
+    qty,
+    withSavedExtraQty(overrideLines, draft.lines)
+  );
 
   draft.quantity = qty;
   draft.vendor = vendorDoc ? vendorDoc._id : null;
@@ -952,6 +1192,7 @@ export const getKitDrafts = asyncHandler(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
   const drafts = await KitIssue.find({ status: "draft" })
     .populate("vendor", "companyName")
+    .populate("editedFrom", "issueCode kitName")
     .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock")
     .sort({ updatedAt: -1 })
     .limit(limit);
@@ -964,6 +1205,7 @@ export const getKitDrafts = asyncHandler(async (req, res) => {
 export const getKitDraftById = asyncHandler(async (req, res) => {
   const draft = await KitIssue.findById(req.params.draftId)
     .populate("vendor")
+    .populate("editedFrom", "issueCode kitName")
     .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
   if (!draft || draft.status !== "draft") {
     res.status(404);
@@ -1048,6 +1290,8 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
       value: l.itemDescription,
     }));
   }
+  // Parts added to this one kit on top of the template (see editKitIssue).
+  items = withExtraItems(items, draft.lines);
   if (items.length === 0) {
     res.status(400);
     throw new Error("This kit has no issuable items to issue");
@@ -1057,8 +1301,42 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
   // straight from the saved-kits list, without needing the form open.
   const linesToUse =
     Array.isArray(overrideLines) && overrideLines.length
-      ? overrideLines
+      ? withSavedExtraQty(overrideLines, draft.lines)
       : draft.lines.map((l) => ({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: l.qtyIssued }));
+
+  // A saved EDIT of an issued kit (made from the edit screen) takes the
+  // next code in that kit's edit series when it's issued: Kit 1 -> Kit 1A ->
+  // Kit 1B. Checked BEFORE any stock is deducted, so a stale saved edit
+  // (its source was already edited and issued another way) is refused
+  // cleanly instead of after the fact.
+  let editMeta = null;
+  if (draft.editedFrom) {
+    const supersededElsewhere = await KitIssue.exists({
+      editedFrom: draft.editedFrom,
+      status: "issued",
+      _id: { $ne: draft._id },
+    });
+    if (supersededElsewhere) {
+      res.status(400);
+      throw new Error(
+        "The kit this edit was made from has since been edited and issued — this saved edit is out of date. Discard it and edit the latest entry instead."
+      );
+    }
+    const rootDoc = await KitIssue.findById(draft.rootIssue || draft.editedFrom);
+    if (!rootDoc) {
+      res.status(404);
+      throw new Error("The original kit issue in this series could not be found");
+    }
+    const priorEdits = await KitIssue.find({ rootIssue: rootDoc._id, status: "issued" })
+      .select("editIndex")
+      .lean();
+    const nextIndex = priorEdits.reduce((max, e) => Math.max(max, e.editIndex || 0), 0) + 1;
+    editMeta = {
+      nextIndex,
+      baseCode: rootDoc.issueCode || rootDoc.kitName,
+      issueCode: `${rootDoc.issueCode || rootDoc.kitName}${editLetterSuffix(nextIndex)}`,
+    };
+  }
 
   let resolvedLines, shortages;
   try {
@@ -1068,12 +1346,18 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
     throw err;
   }
 
-  const priorRootIssues = await KitIssue.countDocuments({
-    kitTemplate: draft.kitTemplate,
-    rootIssue: null,
-    status: "issued",
-  });
-  const issueCode = `Kit ${priorRootIssues + 1}`;
+  let issueCode;
+  if (editMeta) {
+    issueCode = editMeta.issueCode;
+    draft.editIndex = editMeta.nextIndex;
+  } else {
+    const priorRootIssues = await KitIssue.countDocuments({
+      kitTemplate: draft.kitTemplate,
+      rootIssue: null,
+      status: "issued",
+    });
+    issueCode = `Kit ${priorRootIssues + 1}`;
+  }
 
   draft.status = "issued";
   draft.issueCode = issueCode;
@@ -1096,6 +1380,8 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
     message:
       shortages.length > 0
         ? `Issued ${qty} × "${draft.kitName}" as ${issueCode} — ${shortages.length} part(s) were short and only partially deducted`
+        : editMeta
+        ? `Issued ${qty} × "${draft.kitName}" as ${issueCode}, based on ${editMeta.baseCode}`
         : `Issued ${qty} × "${draft.kitName}" as ${issueCode}`,
     shortages,
   });
