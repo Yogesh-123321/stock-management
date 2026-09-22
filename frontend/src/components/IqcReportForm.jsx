@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CheckCircle2, XCircle, ClipboardList } from "lucide-react";
+import IqcReferenceViewer from "@/components/IqcReferenceViewer";
 
 // One line's IQC checklist. Nothing is submitted until every point is
 // checked. The inspector then enters how much of the received quantity they
@@ -35,16 +36,28 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templates, entry?._id]);
 
+  const selectedTemplate = templates?.find((t) => t._id === templateId) || null;
+
+  const templateOptions = useMemo(
+    () =>
+      (templates || []).map((t) => ({
+        value: t._id,
+        label: t.materialName,
+        sublabel: `${t.parameters?.length || 0} parameter${(t.parameters?.length || 0) === 1 ? "" : "s"}`,
+      })),
+    [templates]
+  );
+
   useEffect(() => {
-    const template = templates?.find((t) => t._id === templateId);
     setItems(
-      (template?.parameters || []).map((p) => ({
+      (selectedTemplate?.parameters || []).map((p) => ({
         name: p.name,
         specification: p.specification || "",
         unit: p.unit || "",
         checked: false,
       }))
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId, templates]);
 
   // A fresh line starts with everything approved and no reason.
@@ -127,50 +140,65 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
 
       <div className="space-y-1.5">
         <Label className="text-xs">Checklist template</Label>
-        <Select value={templateId} onValueChange={setTemplateId}>
-          <SelectTrigger>
-            <SelectValue placeholder="Choose an IQC template…" />
-          </SelectTrigger>
-          {/* z-[200]: the IQC window is z-[130] and Radix portals this list to
-              <body> at z-50, so without this it opens behind the window. */}
-          <SelectContent className="z-[200]">
-            {templates.map((t) => (
-              <SelectItem key={t._id} value={t._id}>
-                {t.materialName}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SearchableSelect
+          options={templateOptions}
+          value={templateId}
+          onChange={setTemplateId}
+          placeholder="Choose an IQC template…"
+          searchPlaceholder="Search templates…"
+          emptyText="No template matches."
+          contentClassName="z-[200]"
+        />
       </div>
 
-      {items.length > 0 && (
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            Check every point ({items.filter((i) => i.checked).length}/{items.length})
-          </Label>
-          <ul className="space-y-1.5">
-            {items.map((it, idx) => (
-              <li key={idx} className="flex items-start gap-2 rounded border border-border bg-card px-2.5 py-1.5">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
-                  checked={it.checked}
-                  onChange={() => toggleItem(idx)}
-                  id={`iqc-${entry._id}-${idx}`}
-                />
-                <label htmlFor={`iqc-${entry._id}-${idx}`} className="text-sm leading-tight">
-                  <span className="font-medium">{it.name}</span>
-                  {(it.specification || it.unit) && (
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      {it.specification}
-                      {it.specification && it.unit ? " " : ""}
-                      {it.unit}
-                    </span>
-                  )}
-                </label>
-              </li>
-            ))}
-          </ul>
+      {/* Comparison window: the checklist next to the template's reference
+          image/PDF (when one was attached), so the inspector can look at
+          the approved-sample photo/drawing while deciding to accept or
+          reject what was actually received. */}
+      {(items.length > 0 || selectedTemplate?.referenceFileUrl) && (
+        <div className={selectedTemplate?.referenceFileUrl ? "grid gap-3 sm:grid-cols-2" : ""}>
+          {items.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">
+                Check every point ({items.filter((i) => i.checked).length}/{items.length})
+              </Label>
+              <ul className="space-y-1.5">
+                {items.map((it, idx) => (
+                  <li key={idx} className="flex items-start gap-2 rounded border border-border bg-card px-2.5 py-1.5">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
+                      checked={it.checked}
+                      onChange={() => toggleItem(idx)}
+                      id={`iqc-${entry._id}-${idx}`}
+                    />
+                    <label htmlFor={`iqc-${entry._id}-${idx}`} className="text-sm leading-tight">
+                      <span className="font-medium">{it.name}</span>
+                      {(it.specification || it.unit) && (
+                        <span className="ml-1.5 text-xs text-muted-foreground">
+                          {it.specification}
+                          {it.specification && it.unit ? " " : ""}
+                          {it.unit}
+                        </span>
+                      )}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {selectedTemplate?.referenceFileUrl && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Compare against reference</Label>
+              <IqcReferenceViewer
+                url={selectedTemplate.referenceFileUrl}
+                label={`Reference — ${selectedTemplate.materialName}`}
+                fileLabel={selectedTemplate.referenceFileName}
+                height="320px"
+              />
+            </div>
+          )}
         </div>
       )}
 

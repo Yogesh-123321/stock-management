@@ -123,7 +123,7 @@ export default function IqcStock({ onClose, onChanged }) {
 
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">

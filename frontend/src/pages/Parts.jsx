@@ -49,6 +49,7 @@ import {
   Sparkles,
   Download,
   Paperclip,
+  ClipboardList,
 } from "lucide-react";
 
 /**
@@ -2601,10 +2602,9 @@ export default function Parts() {
   const [myRequestsReloadKey, setMyRequestsReloadKey] = useState(0);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
 
-  // "MISC stock" column: the header dropdown picks which bucket the column
-  // shows ("rnd" | "rejected"); "IQC stock" instead opens the IQC approve /
-  // reject window. IQC is done by whoever is asked to inspect the material,
-  // so all three options are available to every signed-in user.
+  // "MISC stock" column: the header dropdown just picks which bucket the
+  // column shows ("rnd" | "rejected"). IQC stock has its own toolbar button
+  // above the table now, so it isn't one of this dropdown's options.
   const [miscView, setMiscView] = useState("rnd");
   const [showIqcStock, setShowIqcStock] = useState(false);
   const [rejectedByPart, setRejectedByPart] = useState({});
@@ -2613,7 +2613,6 @@ export default function Parts() {
   const miscOptions = [
     { key: "rnd", label: "R&D stock" },
     { key: "rejected", label: "Rejected stock" },
-    { key: "iqc", label: "IQC stock", opensWindow: true },
   ];
   const miscViewLabel = miscView === "rejected" ? "Rejected" : "R&D";
 
@@ -2649,10 +2648,6 @@ export default function Parts() {
   );
 
   const handleMiscSelect = (key) => {
-    if (key === "iqc") {
-      setShowIqcStock(true);
-      return;
-    }
     setMiscView(key);
   };
 
@@ -2787,6 +2782,18 @@ export default function Parts() {
               {downloadingCsv ? "Preparing…" : "Download parts"}
             </Button>
           )}
+          {/* Same IQC approve/reject window the "MISC stock" column opens for
+              a single part — this is the page-level way in, open to every
+              signed-in user (IQC inspection isn't restricted to approvers). */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowIqcStock(true)}
+            title="View material awaiting, accepted, or rejected in IQC"
+          >
+            <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
+            IQC stock
+          </Button>
           <Button type="button" variant="outline" onClick={() => setShowDuplicates(true)}>
             <Copy className="mr-1.5 h-3.5 w-3.5" />
             Find duplicate part numbers

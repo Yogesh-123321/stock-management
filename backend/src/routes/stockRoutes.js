@@ -18,7 +18,10 @@ router.get(
 );
 // Specific GET/POST paths first so they aren't shadowed by "/" or "/:id".
 router.get("/suggest-warnings", getStockEntrySuggestions);
-router.post("/report-mismatch", reportQuantityMismatch);
+// `protect` was missing here even though reportQuantityMismatch reads
+// req.user?._id to attribute the notification — it was always undefined,
+// and the action logged as "Anonymous".
+router.post("/report-mismatch", protect, reportQuantityMismatch);
 
 // IQC inspection — lines held in "IQC stock" / "rejected stock" once the tax
 // invoice has arrived, and the endpoint used to fill out a checklist and
@@ -29,7 +32,9 @@ router.get("/iqc-stock", protect, getIqcStockEntries);
 router.post("/:id/iqc-report", protect, submitIqcReport);
 
 router.get("/", getStockEntries);
-router.post("/", createStockEntry);
+// Every other mutating route in this file requires `protect` — this one
+// didn't, so booking a stock entry was always logged as "Anonymous".
+router.post("/", protect, createStockEntry);
 router.delete("/:id", protect, requirePermission("receive.manage"), deleteStockEntry);
 
 // Bulk import from a vendor's own inward-stock workbook (e.g. the KKTRON

@@ -48,3 +48,9 @@ export const uploadKitSheet = makeUploader();
 // (a screen that also needs the file stored uploads it separately through
 // its own existing endpoint, same as today).
 export const uploadForAiExtract = makeUploader();
+
+// IQC template's optional reference image/PDF (e.g. an approved-sample
+// photo or drawing), attached when the template is created/edited and
+// shown alongside the checklist at IQC approval/rejection time for a
+// side-by-side visual comparison. See iqcTemplateController.js.
+export const uploadIqcTemplateDoc = makeUploader();

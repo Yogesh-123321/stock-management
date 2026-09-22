@@ -13,6 +13,12 @@ import mongoose from "mongoose";
   categories are readable by everyone but only editable by an admin —
   this is what will power the IQC checklist shown during material
   receiving/inspection.
+
+  referenceFileUrl / referenceFileName hold an optional reference image
+  or PDF (e.g. a labelled photo, a drawing, an approved-sample datasheet)
+  uploaded when the template is created. It is shown alongside the
+  checklist during IQC approval/rejection so the inspector can visually
+  compare the received material against it (see IqcReportForm.jsx).
 */
 const iqcParameterSchema = new mongoose.Schema(
   {
@@ -33,6 +39,10 @@ const iqcTemplateSchema = new mongoose.Schema(
         message: "At least one parameter is required",
       },
     },
+    // Optional reference image/PDF (e.g. approved sample photo or
+    // drawing) uploaded to Cloudinary when the template is created/edited.
+    referenceFileUrl: { type: String, trim: true, default: "" },
+    referenceFileName: { type: String, trim: true, default: "" },
     addedBy: { type: String, trim: true, default: "" },
   },
   { timestamps: true }

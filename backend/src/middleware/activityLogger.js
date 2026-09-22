@@ -57,7 +57,17 @@ const LABEL = {
 
 function describe(req, segment, entityType) {
   const tail = req.path.split("/").filter(Boolean).pop() || "";
-  const actionish = ["approve", "reject", "consume", "close", "activate", "deactivate", "copy"];
+  const actionish = [
+    "approve",
+    "reject",
+    "consume",
+    "close",
+    "activate",
+    "deactivate",
+    "copy",
+    "issue",
+    "edit",
+  ];
   if (actionish.includes(tail)) return `${tail}d the ${LABEL[entityType]}`.replace("eed", "ed");
   if (segment === "auth" && tail === "login") return "signed in";
   if (segment === "auth" && tail === "logout") return "signed out";
@@ -67,7 +77,18 @@ function describe(req, segment, entityType) {
 
 function actionKey(req, segment) {
   const tail = req.path.split("/").filter(Boolean).pop() || "";
-  const known = ["approve", "reject", "consume", "close", "copy", "login", "logout", "download"];
+  const known = [
+    "approve",
+    "reject",
+    "consume",
+    "close",
+    "copy",
+    "login",
+    "logout",
+    "download",
+    "issue",
+    "edit",
+  ];
   const suffix = known.includes(tail)
     ? tail
     : { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete", GET: "read" }[
@@ -92,10 +113,13 @@ export function activityLogger(options = {}) {
 
     if (!shouldLog) return next();
 
-    // Snapshot the body now — controllers sometimes mutate it.
-    const bodySnapshot = safeMeta(req.body || {});
-
     res.on("finish", () => {
+      // Snapshot the body here, once the request has fully run its course —
+      // not before `next()`. Taking it earlier missed every multipart/
+      // form-data request (vendor/buyer docs, kit & stock imports, IQC
+      // templates, ...), because those bodies are only populated by multer
+      // further down the chain, well after this middleware first runs.
+      const bodySnapshot = safeMeta(req.body || {});
       const entityType = ENTITY_BY_SEGMENT[segment] || "other";
       const user = req.user || null;
       const success = res.statusCode < 400;
@@ -115,6 +139,8 @@ export function activityLogger(options = {}) {
           bodySnapshot?.invoiceNo ||
           bodySnapshot?.ttUniquePartNumber ||
           bodySnapshot?.companyName ||
+          bodySnapshot?.kitName ||
+          bodySnapshot?.kitCode ||
           bodySnapshot?.name ||
           "",
         method: req.method,

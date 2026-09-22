@@ -24,16 +24,13 @@ import NotificationBell from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
 import { ScrollText } from "lucide-react";
 /** `permission: null` = visible to everyone who is signed in. */
+// Kept in alphabetical order by label — add new entries in their
+// alphabetically correct spot rather than at the end.
 const navItems = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: null },
-  { to: "/receive", label: "Receive material", icon: PackagePlus, permission: "receive.manage" },
-  { to: "/vendors", label: "Vendors", icon: UsersIcon, permission: "vendor.create" },
+  { to: "/activity-log", label: "Activity log", icon: ScrollText, permission: "logs.view" },
+  { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: true },
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
-  { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
-  { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
-  // Kit templates + IQC templates live together on one page, as tabs.
-  { to: "/templates", label: "Templates", icon: Layers, anyOf: ["kit.manage", "iqc.manage"] },
-  { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: null },
   {
     to: "/issue-kit",
     label: "Issue kit",
@@ -44,11 +41,16 @@ const navItems = [
     altLabel: "Issue kit & R&D stock",
     altPermission: "part.approve",
   },
-  { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
+  { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
+  { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
-  { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: true },
+  { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
+  { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
+  { to: "/receive", label: "Receive material", icon: PackagePlus, permission: "receive.manage" },
+  // Kit templates + IQC templates live together on one page, as tabs.
+  { to: "/templates", label: "Templates", icon: Layers, anyOf: ["kit.manage", "iqc.manage"] },
   { to: "/users", label: "Users & rights", icon: UserCog, permission: "users.manage" },
-{ to: "/activity-log", label: "Activity log", icon: ScrollText, permission: "logs.view" },
+  { to: "/vendors", label: "Vendors", icon: UsersIcon, permission: "vendor.create" },
 ];
 
 function useApprovalBadge() {
