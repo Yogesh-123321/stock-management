@@ -53,10 +53,15 @@ export const getTaxInvoiceById = asyncHandler(async (req, res) => {
   res.json(invoice);
 });
 
-// Shared by getTaxInvoiceStockEntries and getTaxInvoiceLineMatch: every
-// stock entry booked against this invoice's PO/PI (and its cross-linked
-// sibling document), or — when there's no PO/PI on record — every
-// PO/PI-less stock entry for the same vendor.
+// Shared by getTaxInvoiceStockEntries and getTaxInvoiceLineMatch: the stock
+// entries THIS invoice actually pulled into IQC when it was uploaded (see
+// moveDeliveryStockToIqc) — i.e. only what was entered in that one
+// receiving session before this invoice arrived, not the PO/PI's whole
+// receiving history. Every entry moved into IQC by an invoice upload is
+// stamped appliedVia = that invoice's id at the time, so that stamp is the
+// reliable scope here — matching by PO/PI id alone (the old approach)
+// pulled in stock entered on other days / other sessions against the same
+// still-open PO/PI, which is the bug this fixes.
 const resolveStockEntriesForInvoice = async (invoice) => {
   const docIds = [];
   const linkedDocs = [];
@@ -66,7 +71,9 @@ const resolveStockEntriesForInvoice = async (invoice) => {
     linkedDocs.push(invoice.purchaseOrder);
 
     // The PO and PI of one delivery are cross-linked — stock may have been
-    // booked against either of them, so include the sibling as well.
+    // booked against either of them, so include the sibling as well (this
+    // only affects the "linked documents" info chips shown in the dialog,
+    // not which stock entries are listed).
     const sibling =
       (invoice.purchaseOrder.linkedDocument &&
         (await PurchaseOrder.findById(invoice.purchaseOrder.linkedDocument))) ||
@@ -86,27 +93,14 @@ const resolveStockEntriesForInvoice = async (invoice) => {
     lifecycleStatus: d.lifecycleStatus,
   }));
 
-  let entries;
-  let matchedBy;
+  const entries = await StockEntry.find({ appliedVia: invoice._id })
+    .populate("part")
+    .sort({ createdAt: -1 });
 
-  if (docIds.length > 0) {
-    // Normal case: invoice has a PO/PI on record — match stock entries
-    // booked against that document (or its cross-linked sibling).
-    entries = await StockEntry.find({ purchaseOrder: { $in: docIds } })
-      .populate("part")
-      .sort({ createdAt: -1 });
-    matchedBy = "purchase_order";
-  } else {
-    // No PO/PI on record for this invoice (material/paperwork arrived
-    // without one). StockEntry.purchaseOrder is also optional and can be
-    // null in the same situation — so the only safe join left is vendor,
-    // restricted to stock entries that are *also* PO/PI-less. Matching by
-    // vendor alone would pull in unrelated, properly-linked deliveries.
-    entries = await StockEntry.find({ vendor: invoice.vendor?._id, purchaseOrder: null })
-      .populate("part")
-      .sort({ createdAt: -1 });
-    matchedBy = "vendor_without_document";
-  }
+  // Purely informational now (shown as a note in the dialog when there was
+  // no PO/PI on record for this invoice) — no longer used to pick the
+  // entries query above.
+  const matchedBy = docIds.length > 0 ? "purchase_order" : "vendor_without_document";
 
   return { entries, matchedBy, linkedDocuments };
 };

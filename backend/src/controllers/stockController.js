@@ -150,6 +150,53 @@ export const createStockEntry = asyncHandler(async (req, res) => {
 });
 
 /*
+  PATCH /api/stock-entries/:id
+  Body: { quantityReceived }
+
+  Lets a line logged in Step 4 be corrected before the tax invoice is
+  uploaded — a typo'd quantity no longer has to be deleted and re-entered.
+  Only the quantity is editable here (part/vendor/match-type are left alone;
+  delete + re-add is still the way to fix those). If the line had somehow
+  already been credited to stock (stockApplied), the part's quantityInStock
+  is adjusted by the difference so it stays correct either way.
+*/
+export const updateStockEntry = asyncHandler(async (req, res) => {
+  const { quantityReceived } = req.body;
+  const qty = Number(quantityReceived);
+
+  if (!quantityReceived || Number.isNaN(qty) || qty <= 0) {
+    res.status(400);
+    throw new Error("Enter a valid quantity greater than 0");
+  }
+
+  const entry = await StockEntry.findById(req.params.id);
+  if (!entry) {
+    res.status(404);
+    throw new Error("Stock entry not found");
+  }
+
+  if (entry.stockApplied && entry.part) {
+    const partDoc = await Part.findById(entry.part);
+    if (partDoc) {
+      const diff = qty - Number(entry.quantityReceived || 0);
+      partDoc.quantityInStock = Math.max(0, partDoc.quantityInStock + diff);
+      await partDoc.save();
+    }
+  }
+
+  entry.quantityReceived = qty;
+  await entry.save();
+  await entry.populate([
+    { path: "part", populate: { path: "vendors", select: "companyName" } },
+    { path: "vendor" },
+    { path: "purchaseOrder" },
+    { path: "alternateOfPart" },
+  ]);
+
+  res.json(entry);
+});
+
+/*
   DELETE /api/stock-entries/:id
   Removes one line from a part's history (used from the "Part history"
   ledger in the Parts master). If the line had already been credited to

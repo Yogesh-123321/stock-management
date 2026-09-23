@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import api from "@/lib/api";
 import { fetchReceivedTotal } from "@/lib/receivedTotal";
 import { useAutoExtractOnUpload } from "@/lib/useAutoExtractOnUpload";
@@ -12,7 +13,17 @@ import { findMismatches } from "@/lib/documentVerify";
 import DocumentMismatchWarning from "@/components/DocumentMismatchWarning";
 import FieldError from "@/components/FieldError";
 import { useFormValidation } from "@/lib/useFormValidation";
-import { UploadCloud, SkipForward, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import {
+  UploadCloud,
+  SkipForward,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+} from "lucide-react";
 
 const TAX_INVOICE_SCHEMA = {
   invoiceNumber: { required: true, regex: "docNumber" },
@@ -36,6 +47,11 @@ export default function TaxInvoiceStep({
   deliveryDocs = [],
   expectedQuantities = {},
   enteredQuantity = 0,
+  // The "Receive material" session this delivery belongs to — used to pull
+  // back the exact lines logged in Step 4 so they can still be corrected
+  // (quantity fixed, or a line removed entirely) right up until the tax
+  // invoice is uploaded.
+  sessionId = null,
   onUploaded,
   onSkip,
 }) {
@@ -80,7 +96,18 @@ export default function TaxInvoiceStep({
 
   // Everything ever booked against this PO/PI — including part receipts made on
   // earlier days — not just what was entered in this session.
-  const [receivedTotal, setReceivedTotal] = useState(Number(enteredQuantity) || 0);
+  const [priorTotal, setPriorTotal] = useState(0);
+
+  // The lines actually logged in Step 4 for THIS delivery — fetched by
+  // receivingSession (the reliable link, since most deliveries never get a
+  // PO/PI attached to key off of instead — see StockEntryStep). Shown below
+  // as an editable list so a wrong quantity can be fixed, or a line
+  // dropped, before the invoice is uploaded and they move on to IQC stock.
+  const [sessionEntries, setSessionEntries] = useState([]);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [rowBusyId, setRowBusyId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState("");
 
   const docsKey = useMemo(
     () =>
@@ -94,14 +121,102 @@ export default function TaxInvoiceStep({
   useEffect(() => {
     let cancelled = false;
     const ids = docsKey ? docsKey.split(",") : [];
-    if (ids.length === 0) return undefined;
-    fetchReceivedTotal(ids).then(({ total }) => {
-      if (!cancelled) setReceivedTotal(total);
+    if (ids.length === 0) {
+      setPriorTotal(0);
+      return undefined;
+    }
+    fetchReceivedTotal(ids).then(({ entries }) => {
+      if (cancelled) return;
+      // Lines logged under this same session are counted separately via
+      // sessionEntries below, so they're excluded here to avoid double-
+      // counting them into priorTotal.
+      const prior = sessionId
+        ? entries.filter((e) => String(e.receivingSession || "") !== String(sessionId))
+        : entries;
+      setPriorTotal(prior.reduce((sum, e) => sum + Number(e.quantityReceived || 0), 0));
     });
     return () => {
       cancelled = true;
     };
-  }, [docsKey]);
+  }, [docsKey, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    let cancelled = false;
+    setEntriesLoading(true);
+    api
+      .get("/stock-entries", { params: { receivingSession: sessionId } })
+      .then(({ data }) => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? data : [];
+        setSessionEntries([...list].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)));
+      })
+      .catch(() => {
+        if (!cancelled) setSessionEntries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setEntriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  const enteredTotal = useMemo(
+    () => sessionEntries.reduce((sum, e) => sum + Number(e.quantityReceived || 0), 0),
+    [sessionEntries]
+  );
+  const receivedTotal = priorTotal + enteredTotal;
+
+  const startEdit = (e) => {
+    setEditingId(e._id);
+    setEditValue(String(e.quantityReceived));
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue("");
+  };
+  const handleEditEntryQty = async (entry, rawValue) => {
+    const qty = Number(rawValue);
+    if (!rawValue || Number.isNaN(qty) || qty <= 0) {
+      toast.error("Enter a valid quantity greater than 0");
+      return;
+    }
+    if (qty === Number(entry.quantityReceived)) {
+      cancelEdit();
+      return;
+    }
+    setRowBusyId(entry._id);
+    try {
+      const { data } = await api.patch(`/stock-entries/${entry._id}`, { quantityReceived: qty });
+      setSessionEntries((prev) => prev.map((e) => (e._id === entry._id ? { ...e, ...data } : e)));
+      toast.success("Quantity updated");
+      cancelEdit();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not update the quantity");
+    } finally {
+      setRowBusyId(null);
+    }
+  };
+  const handleDeleteEntry = async (entry) => {
+    if (
+      !window.confirm(
+        `Remove this line — ${entry.part?.ttUniquePartNumber || "part"}, qty ${entry.quantityReceived}?`
+      )
+    ) {
+      return;
+    }
+    setRowBusyId(entry._id);
+    try {
+      await api.delete(`/stock-entries/${entry._id}`);
+      setSessionEntries((prev) => prev.filter((e) => e._id !== entry._id));
+      toast.success("Entry removed");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not remove the entry");
+    } finally {
+      setRowBusyId(null);
+    }
+  };
 
   const invQty = invoiceQuantity === "" ? null : Number(invoiceQuantity);
   const allQtys = [...docQtys.map((d) => d.qty), Number(receivedTotal)];
@@ -193,6 +308,115 @@ export default function TaxInvoiceStep({
           are closed automatically.
         </CardDescription>
       </CardHeader>
+
+      {(entriesLoading || sessionEntries.length > 0) && (
+        <CardContent className="pt-0 space-y-2">
+          <Label className="text-xs text-muted-foreground">
+            Stock entered for this delivery
+            {sessionEntries.length > 0
+              ? ` (${sessionEntries.length} ${sessionEntries.length === 1 ? "line" : "lines"})`
+              : ""}
+          </Label>
+          {entriesLoading && sessionEntries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Loading entered stock…</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[150px]">Part no.</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-[110px] text-right">Qty</TableHead>
+                  <TableHead className="w-[90px] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sessionEntries.map((e) => {
+                  const editable = !e.stockApplied && e._id;
+                  const isEditing = editingId === e._id;
+                  const isBusy = rowBusyId === e._id;
+                  return (
+                    <TableRow key={e._id}>
+                      <TableCell className="font-mono text-xs">{e.part?.ttUniquePartNumber}</TableCell>
+                      <TableCell className="truncate max-w-0" title={e.part?.itemDescription}>
+                        {e.part?.itemDescription}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {isEditing ? (
+                          <Input
+                            autoFocus
+                            type="number"
+                            min="0.001"
+                            step="any"
+                            value={editValue}
+                            onChange={(ev) => setEditValue(ev.target.value)}
+                            className="h-7 w-20 ml-auto px-1.5 text-right text-xs"
+                            disabled={isBusy}
+                          />
+                        ) : (
+                          `+${e.quantityReceived}`
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!editable ? null : isEditing ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditEntryQty(e, editValue)}
+                              disabled={isBusy}
+                              className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                              title="Save"
+                            >
+                              {isBusy ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Check className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEdit}
+                              disabled={isBusy}
+                              className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                              title="Cancel"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(e)}
+                              className="text-muted-foreground hover:text-foreground"
+                              title="Edit quantity"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteEntry(e)}
+                              disabled={isBusy}
+                              className="text-destructive hover:text-destructive/80 disabled:opacity-50"
+                              title="Remove entry"
+                            >
+                              {isBusy ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      )}
+
       <form onSubmit={handleSubmit}>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
@@ -266,7 +490,7 @@ export default function TaxInvoiceStep({
                     {docQtys.map((d) => ` · ${d.label}: ${d.qty}`)}
                     {invQty != null ? ` · Invoice: ${invQty}` : ""}
                   </p>
-                  {Number(enteredQuantity) > 0 && receivedTotal !== Number(enteredQuantity) && (
+                  {priorTotal > 0 && (
                     <p className="text-xs">Includes receipts booked on earlier days for the same PO/PI.</p>
                   )}
                   <p className="text-xs">

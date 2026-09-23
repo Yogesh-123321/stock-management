@@ -32,6 +32,10 @@ import {
   Clock,
   FileSpreadsheet,
   Sparkles,
+  Pencil,
+  Trash2,
+  Check,
+  X,
 } from "lucide-react";
 
 // Debounced fetch of the lightweight "AI suggested checks" for the line
@@ -98,34 +102,112 @@ function AiSuggestedWarnings({ warnings, loading }) {
 }
 
 // Entries logged in this session, shown either as a compact list or as a
-// grid of cards so the person can scan what has been entered so far.
-function SessionLog({ entries, view }) {
+// grid of cards so the person can scan what has been entered so far. Any
+// line still awaiting its tax invoice (i.e. not yet credited to stock) can
+// be corrected here — its quantity edited or the whole line removed —
+// before it moves on to the tax invoice / IQC stage.
+function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState("");
+
   if (entries.length === 0) return null;
+
+  const startEdit = (e) => {
+    setEditingId(e._id);
+    setEditValue(String(e.quantityReceived));
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue("");
+  };
+  const saveEdit = async (e) => {
+    const ok = await onEditQty(e, editValue);
+    if (ok) cancelEdit();
+  };
 
   if (view === "grid") {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        {entries.map((e, i) => (
-          <div key={i} className="rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5">
-                {e.part.ttUniquePartNumber}
-              </span>
-              <span className="text-sm font-semibold text-primary">+{e.quantityReceived}</span>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground line-clamp-2" title={e.part.itemDescription}>
-              {e.part.itemDescription}
-            </p>
-            {e.stockApplied ? (
-              <p className="mt-1 text-[11px] text-muted-foreground">In stock now: {e.part.quantityInStock}</p>
-            ) : (
-              <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
-                <Clock className="h-3 w-3" />
-                Pending — goes to IQC stock once the tax invoice is uploaded
+        {entries.map((e, i) => {
+          const editable = !e.stockApplied && e._id;
+          const isEditing = editingId === e._id;
+          const isBusy = busyId === e._id;
+          return (
+            <div key={e._id || i} className="rounded-md border border-border bg-card p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5">
+                  {e.part.ttUniquePartNumber}
+                </span>
+                {isEditing ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      autoFocus
+                      type="number"
+                      min="0.001"
+                      step="any"
+                      value={editValue}
+                      onChange={(ev) => setEditValue(ev.target.value)}
+                      className="h-6 w-16 px-1.5 text-right text-xs"
+                      disabled={isBusy}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveEdit(e)}
+                      disabled={isBusy}
+                      className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                      title="Save"
+                    >
+                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      disabled={isBusy}
+                      className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      title="Cancel"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-sm font-semibold text-primary">+{e.quantityReceived}</span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground line-clamp-2" title={e.part.itemDescription}>
+                {e.part.itemDescription}
               </p>
-            )}
-          </div>
-        ))}
+              {e.stockApplied ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">In stock now: {e.part.quantityInStock}</p>
+              ) : (
+                <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
+                  <Clock className="h-3 w-3" />
+                  Pending — goes to IQC stock once the tax invoice is uploaded
+                </p>
+              )}
+              {editable && !isEditing && (
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(e)}
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit qty
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(e)}
+                    disabled={isBusy}
+                    className="flex items-center gap-1 text-[11px] text-destructive hover:text-destructive/80 disabled:opacity-50"
+                  >
+                    {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -136,30 +218,95 @@ function SessionLog({ entries, view }) {
         <TableRow>
           <TableHead className="w-[150px]">Part no.</TableHead>
           <TableHead>Description</TableHead>
-          <TableHead className="w-[90px] text-right">Qty</TableHead>
+          <TableHead className="w-[110px] text-right">Qty</TableHead>
           <TableHead className="w-[140px] text-right">Stock status</TableHead>
+          <TableHead className="w-[90px] text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {entries.map((e, i) => (
-          <TableRow key={i}>
-            <TableCell className="font-mono text-xs">{e.part.ttUniquePartNumber}</TableCell>
-            <TableCell className="truncate max-w-0" title={e.part.itemDescription}>
-              {e.part.itemDescription}
-            </TableCell>
-            <TableCell className="text-right font-medium">+{e.quantityReceived}</TableCell>
-            <TableCell className="text-right">
-              {e.stockApplied ? (
-                <span className="text-muted-foreground">In stock: {e.part.quantityInStock}</span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-amber-600">
-                  <Clock className="h-3 w-3" />
-                  Pending invoice / IQC
-                </span>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
+        {entries.map((e, i) => {
+          const editable = !e.stockApplied && e._id;
+          const isEditing = editingId === e._id;
+          const isBusy = busyId === e._id;
+          return (
+            <TableRow key={e._id || i}>
+              <TableCell className="font-mono text-xs">{e.part.ttUniquePartNumber}</TableCell>
+              <TableCell className="truncate max-w-0" title={e.part.itemDescription}>
+                {e.part.itemDescription}
+              </TableCell>
+              <TableCell className="text-right font-medium">
+                {isEditing ? (
+                  <Input
+                    autoFocus
+                    type="number"
+                    min="0.001"
+                    step="any"
+                    value={editValue}
+                    onChange={(ev) => setEditValue(ev.target.value)}
+                    className="h-7 w-20 ml-auto px-1.5 text-right text-xs"
+                    disabled={isBusy}
+                  />
+                ) : (
+                  `+${e.quantityReceived}`
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {e.stockApplied ? (
+                  <span className="text-muted-foreground">In stock: {e.part.quantityInStock}</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-amber-600">
+                    <Clock className="h-3 w-3" />
+                    Pending invoice / IQC
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {!editable ? null : isEditing ? (
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveEdit(e)}
+                      disabled={isBusy}
+                      className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                      title="Save"
+                    >
+                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      disabled={isBusy}
+                      className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      title="Cancel"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(e)}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Edit quantity"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(e)}
+                      disabled={isBusy}
+                      className="text-destructive hover:text-destructive/80 disabled:opacity-50"
+                      title="Remove entry"
+                    >
+                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -253,6 +400,9 @@ export default function StockEntryStep({
   const [submitting, setSubmitting] = useState(false);
   const [sessionEntries, setSessionEntries] = useState([]);
   const [logView, setLogView] = useState("grid"); // "grid" | "list"
+  // id of the session-log row currently being saved/deleted, so only that
+  // row's controls show a spinner rather than the whole list.
+  const [rowBusyId, setRowBusyId] = useState(null);
   const vQty = useFormValidation(QTY_REMARKS_SCHEMA);
   const vNewPart = useFormValidation(NEW_PART_SCHEMA);
 
@@ -507,6 +657,46 @@ export default function StockEntryStep({
     }
   };
 
+  // Lines logged this session are still "pending" — nothing has been
+  // credited to stock yet, so a line can be corrected or dropped right up
+  // until the tax invoice is uploaded for this delivery.
+  const handleEditEntryQty = async (entry, rawValue) => {
+    const qty = Number(rawValue);
+    if (!rawValue || Number.isNaN(qty) || qty <= 0) {
+      toast.error("Enter a valid quantity greater than 0");
+      return false;
+    }
+    if (qty === Number(entry.quantityReceived)) return true; // nothing changed
+    setRowBusyId(entry._id);
+    try {
+      const { data } = await api.patch(`/stock-entries/${entry._id}`, { quantityReceived: qty });
+      setSessionEntries((prev) => prev.map((e) => (e._id === entry._id ? { ...e, ...data } : e)));
+      toast.success("Quantity updated");
+      return true;
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not update the quantity");
+      return false;
+    } finally {
+      setRowBusyId(null);
+    }
+  };
+
+  const handleDeleteEntry = async (entry) => {
+    if (!window.confirm(`Remove this line — ${entry.part.ttUniquePartNumber}, qty ${entry.quantityReceived}?`)) {
+      return;
+    }
+    setRowBusyId(entry._id);
+    try {
+      await api.delete(`/stock-entries/${entry._id}`);
+      setSessionEntries((prev) => prev.filter((e) => e._id !== entry._id));
+      toast.success("Entry removed");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not remove the entry");
+    } finally {
+      setRowBusyId(null);
+    }
+  };
+
   const handleConfirmExisting = (e) => {
     e.preventDefault();
     if (!vQty.validateAll({ quantityReceived, unit: entryUnit, entryPrice, remarks })) {
@@ -683,7 +873,13 @@ export default function StockEntryStep({
             <Label className="text-xs text-muted-foreground">
               Logged this session ({sessionEntries.length} {sessionEntries.length === 1 ? "line" : "lines"})
             </Label>
-            <SessionLog entries={sessionEntries} view={logView} />
+            <SessionLog
+              entries={sessionEntries}
+              view={logView}
+              onEditQty={handleEditEntryQty}
+              onDelete={handleDeleteEntry}
+              busyId={rowBusyId}
+            />
           </div>
         )}
         <div className="flex justify-end">
@@ -1410,7 +1606,13 @@ export default function StockEntryStep({
               </Button>
             </div>
           </div>
-          <SessionLog entries={sessionEntries} view={logView} />
+          <SessionLog
+              entries={sessionEntries}
+              view={logView}
+              onEditQty={handleEditEntryQty}
+              onDelete={handleDeleteEntry}
+              busyId={rowBusyId}
+            />
         </div>
       )}
 

@@ -310,6 +310,7 @@ export default function ReceiveMaterial() {
               deliveryDocs={[purchaseOrderDoc, proformaInvoiceDoc]}
               expectedQuantities={expectedQuantities}
               enteredQuantity={stockQuantity}
+              sessionId={sessionId}
               // Tax invoice is the last step. Uploading it moves the lines into
               // IQC stock; inspection is done separately (by any user) from the
               // Parts master, so the delivery is finished here.

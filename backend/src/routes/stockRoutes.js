@@ -2,6 +2,7 @@ import express from "express";
 import {
   getStockEntries,
   createStockEntry,
+  updateStockEntry,
   deleteStockEntry,
   getStockEntrySuggestions,
   reportQuantityMismatch,
@@ -35,6 +36,7 @@ router.get("/", getStockEntries);
 // Every other mutating route in this file requires `protect` — this one
 // didn't, so booking a stock entry was always logged as "Anonymous".
 router.post("/", protect, createStockEntry);
+router.patch("/:id", protect, requirePermission("receive.manage"), updateStockEntry);
 router.delete("/:id", protect, requirePermission("receive.manage"), deleteStockEntry);
 
 // Bulk import from a vendor's own inward-stock workbook (e.g. the KKTRON
