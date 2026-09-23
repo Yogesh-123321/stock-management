@@ -43,6 +43,51 @@ export const getTaxInvoices = asyncHandler(async (req, res) => {
   res.json(invoices);
 });
 
+// GET /api/tax-invoices/check-duplicate?vendor=&invoiceNumber=
+// Used by Step 5 of the receiving wizard: the moment an invoice number is
+// typed in (or filled in by the AI auto-read of the uploaded file), this
+// checks whether the same vendor already has a tax invoice on file with
+// that same number — same-number-different-casing/spacing counts as the
+// same invoice — so the operator is warned before uploading what's likely
+// a duplicate, rather than after. Matching is scoped to the vendor only
+// (not the PO/PI), since the same invoice number should never repeat for
+// one vendor regardless of which delivery it's tied to.
+export const checkTaxInvoiceDuplicate = asyncHandler(async (req, res) => {
+  const vendorId = req.query.vendor;
+  const invoiceNumber = String(req.query.invoiceNumber || "").trim();
+
+  if (!vendorId || !invoiceNumber) {
+    return res.json({ duplicate: false });
+  }
+
+  const existing = await TaxInvoice.findOne({
+    vendor: vendorId,
+    invoiceNumber: { $regex: `^${escapeRegex(invoiceNumber)}$`, $options: "i" },
+  })
+    .populate("purchaseOrder")
+    .sort({ createdAt: -1 });
+
+  if (!existing) {
+    return res.json({ duplicate: false });
+  }
+
+  res.json({
+    duplicate: true,
+    invoice: {
+      _id: existing._id,
+      invoiceNumber: existing.invoiceNumber,
+      invoiceDate: existing.invoiceDate,
+      createdAt: existing.createdAt,
+      purchaseOrder: existing.purchaseOrder
+        ? {
+            documentType: existing.purchaseOrder.documentType,
+            documentNumber: existing.purchaseOrder.documentNumber,
+          }
+        : null,
+    },
+  });
+});
+
 // GET /api/tax-invoices/:id
 export const getTaxInvoiceById = asyncHandler(async (req, res) => {
   const invoice = await TaxInvoice.findById(req.params.id).populate("vendor purchaseOrder");
@@ -500,6 +545,24 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
   if (!req.file) {
     res.status(400);
     throw new Error("Tax invoice file is required");
+  }
+
+  // Reject a duplicate invoice number for this vendor outright — this is
+  // the same check as GET /check-duplicate above (used by Step 5 to warn
+  // before upload), repeated here server-side so a stale/bypassed frontend
+  // check can never actually create a second invoice under the same number.
+  const trimmedInvoiceNumber = String(invoiceNumber || "").trim();
+  if (trimmedInvoiceNumber) {
+    const dup = await TaxInvoice.findOne({
+      vendor,
+      invoiceNumber: { $regex: `^${escapeRegex(trimmedInvoiceNumber)}$`, $options: "i" },
+    });
+    if (dup) {
+      res.status(409);
+      throw new Error(
+        `Invoice ${trimmedInvoiceNumber} has already been uploaded for this vendor. Change the invoice number before uploading again.`
+      );
+    }
   }
 
   // A PO/PI link is optional — the invoice may be the only paperwork received.

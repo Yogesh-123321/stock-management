@@ -15,6 +15,7 @@ import {
   deletePart,
   exportPartsCsv,
   exportPartVendorLinksCsv,
+  getPartsCsvFields,
 } from "../controllers/partController.js";
 import { updatePart } from "../controllers/partAdminController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
@@ -37,6 +38,12 @@ router.get("/count", getPartsCount);
 // CSV export for the "Download parts" button on the Parts master —
 // ADMIN ONLY, same as editing/deleting parts. Declared before "/:id" so
 // "export" is never swallowed as an id.
+router.get(
+  "/export/parts-csv-fields",
+  protect,
+  requirePermission("part.approve"),
+  getPartsCsvFields
+);
 router.get(
   "/export/parts-csv",
   protect,

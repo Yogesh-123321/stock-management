@@ -2577,6 +2577,184 @@ function PartComparisonDialog({ group, onClose, onPartUpdated, onPartDeleted }) 
 
 /* ------------------------------------------------------------------ */
 
+// Remembers the last field selection/order the "Customise report" dialog
+// was used with, per browser — so a returning admin doesn't have to
+// rebuild their preferred column set every time.
+const PARTS_CSV_FIELDS_STORAGE_KEY = "partsCsvExportFields";
+
+// Lets the admin pick which columns the "parts master" CSV includes, and
+// in what order, before downloading. The field list itself (key + label)
+// comes from the backend, so it can never list a column the export
+// doesn't know how to produce. Only the parts-master file is
+// customisable this way — the part/vendor-details CSV stays fixed.
+function CustomizePartsCsvDialog({ onClose, onDownload, downloading }) {
+  const [fields, setFields] = useState(null); // null while loading
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get("/parts/export/parts-csv-fields")
+      .then(({ data }) => {
+        if (!alive) return;
+        const all = Array.isArray(data) ? data : [];
+
+        let saved = null;
+        try {
+          const raw = localStorage.getItem(PARTS_CSV_FIELDS_STORAGE_KEY);
+          if (raw) saved = JSON.parse(raw);
+        } catch {
+          saved = null;
+        }
+
+        const byKey = new Map(all.map((f) => [f.key, f]));
+        let ordered;
+        if (Array.isArray(saved) && saved.length > 0) {
+          ordered = saved.map((key) => byKey.get(key)).filter(Boolean).map((f) => ({ ...f, checked: true }));
+          const usedKeys = new Set(ordered.map((f) => f.key));
+          all.forEach((f) => {
+            if (!usedKeys.has(f.key)) ordered.push({ ...f, checked: false });
+          });
+        } else {
+          ordered = all.map((f) => ({ ...f, checked: true }));
+        }
+        setFields(ordered);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setLoadError(err.response?.data?.message || "Could not load the field list");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const toggle = (key) =>
+    setFields((list) => list.map((f) => (f.key === key ? { ...f, checked: !f.checked } : f)));
+
+  const move = (index, dir) =>
+    setFields((list) => {
+      const target = index + dir;
+      if (target < 0 || target >= list.length) return list;
+      const next = [...list];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+
+  const selectAll = () => setFields((list) => list.map((f) => ({ ...f, checked: true })));
+  const clearAll = () => setFields((list) => list.map((f) => ({ ...f, checked: false })));
+
+  const selectedCount = fields ? fields.filter((f) => f.checked).length : 0;
+
+  const handleDownload = () => {
+    if (!fields) return;
+    const checkedKeys = fields.filter((f) => f.checked).map((f) => f.key);
+    if (checkedKeys.length === 0) {
+      toast.error("Pick at least one field");
+      return;
+    }
+    try {
+      localStorage.setItem(PARTS_CSV_FIELDS_STORAGE_KEY, JSON.stringify(checkedKeys));
+    } catch {
+      // Preference just won't be remembered next time — download still works.
+    }
+    onDownload(checkedKeys);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+          <div>
+            <h2 className="font-display text-base font-semibold">Customise parts master report</h2>
+            <p className="text-xs text-muted-foreground">
+              Pick which columns to include and use the arrows to set their order.
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {!fields && !loadError && (
+            <p className="py-8 text-center text-sm text-muted-foreground">Loading fields…</p>
+          )}
+          {loadError && <p className="py-8 text-center text-sm text-destructive">{loadError}</p>}
+
+          {fields && (
+            <>
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {selectedCount} of {fields.length} column(s) selected
+                </p>
+                <div className="flex gap-3">
+                  <button type="button" className="text-xs text-accent hover:underline" onClick={selectAll}>
+                    Select all
+                  </button>
+                  <button type="button" className="text-xs text-accent hover:underline" onClick={clearAll}>
+                    Clear all
+                  </button>
+                </div>
+              </div>
+
+              <ul className="divide-y divide-border rounded-md border border-border">
+                {fields.map((f, i) => (
+                  <li key={f.key} className="flex items-center gap-2 px-3 py-2">
+                    <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={f.checked}
+                        onChange={() => toggle(f.key)}
+                      />
+                      {f.label}
+                    </label>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        disabled={i === 0}
+                        onClick={() => move(i, -1)}
+                        title="Move up"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        disabled={i === fields.length - 1}
+                        onClick={() => move(i, 1)}
+                        title="Move down"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" onClick={onClose} disabled={downloading}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={handleDownload} disabled={!fields || downloading}>
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            {downloading ? "Preparing…" : "Download"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Parts() {
   const { can } = useAuth();
   const isApprover = can?.("part.approve");
@@ -2601,6 +2779,7 @@ export default function Parts() {
   const [showNewPartRequest, setShowNewPartRequest] = useState(false);
   const [myRequestsReloadKey, setMyRequestsReloadKey] = useState(0);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [showCsvCustomize, setShowCsvCustomize] = useState(false);
 
   // "MISC stock" column: the header dropdown just picks which bucket the
   // column shows ("rnd" | "rejected"). IQC stock has its own toolbar button
@@ -2653,12 +2832,19 @@ export default function Parts() {
 
   // "Download parts" — admin only. Two separate CSVs (parts master +
   // part/vendor details), each saved as its own file, same as the
-  // activity log's "Export CSV" button — never zipped together.
-  const downloadPartsCsv = async () => {
+  // activity log's "Export CSV" button — never zipped together. The parts
+  // master's columns and their order come from whatever the "Customise
+  // report" dialog was used to pick (fieldKeys); the part/vendor-details
+  // CSV always has every column, since it isn't customisable.
+  const downloadPartsCsv = async (fieldKeys) => {
     setDownloadingCsv(true);
     const today = new Date().toISOString().slice(0, 10);
+    const partsMasterUrl =
+      Array.isArray(fieldKeys) && fieldKeys.length > 0
+        ? `/parts/export/parts-csv?fields=${encodeURIComponent(fieldKeys.join(","))}`
+        : "/parts/export/parts-csv";
     const files = [
-      { url: "/parts/export/parts-csv", name: `parts-master-${today}.csv` },
+      { url: partsMasterUrl, name: `parts-master-${today}.csv` },
       { url: "/parts/export/vendor-links-csv", name: `part-vendor-details-${today}.csv` },
     ];
     try {
@@ -2671,6 +2857,7 @@ export default function Parts() {
         a.click();
         URL.revokeObjectURL(blobUrl);
       }
+      setShowCsvCustomize(false);
     } catch (err) {
       toast.error(err.response?.data?.message || "Could not download parts");
     } finally {
@@ -2774,9 +2961,9 @@ export default function Parts() {
             <Button
               type="button"
               variant="outline"
-              onClick={downloadPartsCsv}
+              onClick={() => setShowCsvCustomize(true)}
               disabled={downloadingCsv}
-              title="Download the parts master and part/vendor details as CSV files"
+              title="Choose which fields to include, then download the parts master and part/vendor details as CSV files"
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {downloadingCsv ? "Preparing…" : "Download parts"}
@@ -3050,6 +3237,14 @@ export default function Parts() {
           initialSearch={search.trim()}
           onClose={() => setShowNewPartRequest(false)}
           onCreated={() => setMyRequestsReloadKey((k) => k + 1)}
+        />
+      )}
+
+      {showCsvCustomize && (
+        <CustomizePartsCsvDialog
+          onClose={() => setShowCsvCustomize(false)}
+          onDownload={downloadPartsCsv}
+          downloading={downloadingCsv}
         />
       )}
     </div>

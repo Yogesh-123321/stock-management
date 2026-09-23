@@ -803,8 +803,72 @@ const sendCsv = (res, filenamePrefix, csv) => {
   res.send(csv);
 };
 
-// GET /api/parts/export/parts-csv — every field on the Part Master, ADMIN ONLY.
-// GET /api/parts/export/parts-csv — every field on the Part Master, ADMIN ONLY.
+// Single source of truth for the "Download parts" (parts-master) export —
+// used both to build the CSV and to tell the frontend's field-picker what's
+// available, so the two can never drift out of sync. Order here is the
+// default order when the caller doesn't ask to customise it.
+const PARTS_CSV_FIELDS = [
+  { key: "ttUniquePartNumber", label: "TT unique part number", get: (p) => p.ttUniquePartNumber },
+  { key: "typeOfPart", label: "Type of part", get: (p) => p.typeOfPart || "" },
+  {
+    key: "manufacturerPartNumber",
+    label: "Manufacturer part number",
+    get: (p) => p.manufacturerPartNumber || "",
+  },
+  { key: "itemDescription", label: "Item description", get: (p) => p.itemDescription || "" },
+  { key: "companyCode", label: "Company code", get: (p) => p.companyCode || "" },
+  { key: "category", label: "Category", get: (p) => p.category || "" },
+  { key: "partTypeBatchNo", label: "Part type / batch no.", get: (p) => p.partTypeBatchNo || "" },
+  { key: "hsnCode", label: "HSN code", get: (p) => p.hsnCode || "" },
+  { key: "unit", label: "Unit", get: (p) => p.unit || "" },
+  { key: "quantityInStock", label: "Quantity in stock", get: (p) => p.quantityInStock ?? 0 },
+  { key: "rndStock", label: "R&D stock", get: (p) => p.rndStock ?? 0 },
+  {
+    key: "rndIssuedTo",
+    label: "R&D stock issued to",
+    get: (p) =>
+      (p.rndIssues || [])
+        .map((i) => `${i.personName} (${i.quantity})`)
+        .filter(Boolean)
+        .join(" / "),
+  },
+  {
+    key: "vendors",
+    label: "Vendor(s)",
+    get: (p) => (p.vendors || []).map((v) => v.companyName).filter(Boolean).join(" / "),
+  },
+  { key: "isAlternatePart", label: "Is alternate part", get: (p) => (p.isAlternatePart ? "Yes" : "No") },
+  { key: "alternateOf", label: "Alternate of", get: (p) => p.alternateOf?.ttUniquePartNumber || "" },
+  { key: "hasPhoto", label: "Has photo", get: (p) => (p.photoUrl ? "Yes" : "No") },
+  { key: "hasDatasheet", label: "Has datasheet", get: (p) => (p.datasheetUrl ? "Yes" : "No") },
+  { key: "remarks", label: "Remarks", get: (p) => p.remarks || "" },
+  { key: "lastEditedBy", label: "Last edited by", get: (p) => p.lastEditedBy || "" },
+  {
+    key: "lastEditedAt",
+    label: "Last edited at",
+    get: (p) => (p.lastEditedAt ? new Date(p.lastEditedAt).toLocaleString("en-IN") : ""),
+  },
+  {
+    key: "createdAt",
+    label: "Created at",
+    get: (p) => (p.createdAt ? new Date(p.createdAt).toLocaleString("en-IN") : ""),
+  },
+];
+
+// GET /api/parts/export/parts-csv-fields — the field picker's option list
+// (key + label, in default order), ADMIN ONLY. Kept as a plain read of
+// PARTS_CSV_FIELDS so the picker can never list a field the CSV export
+// itself doesn't know how to produce.
+export const getPartsCsvFields = asyncHandler(async (req, res) => {
+  res.json(PARTS_CSV_FIELDS.map(({ key, label }) => ({ key, label })));
+});
+
+// GET /api/parts/export/parts-csv — the Part Master, ADMIN ONLY.
+// Accepts an optional ?fields=key1,key2,... query param (from the
+// "Customise report" picker) naming which columns to include and in what
+// order. Unknown keys are ignored; if nothing recognisable is left, falls
+// back to every field in the default order, same as when ?fields is
+// omitted entirely.
 export const exportPartsCsv = asyncHandler(async (req, res) => {
   const parts = await Part.find({})
     .populate("vendors", "companyName")
@@ -812,56 +876,19 @@ export const exportPartsCsv = asyncHandler(async (req, res) => {
     .sort({ ttUniquePartNumber: 1 })
     .lean({ virtuals: true });
 
-  const header = [
-    "TT unique part number",
-    "Type of part",
-    "Manufacturer part number",
-    "Item description",
-    "Company code",
-    "Category",
-    "Part type / batch no.",
-    "HSN code",
-    "Unit",
-    "Quantity in stock",
-    "R&D stock",
-    "R&D stock issued to",
-    "Vendor(s)",
-    "Is alternate part",
-    "Alternate of",
-    "Has photo",
-    "Has datasheet",
-    "Remarks",
-    "Last edited by",
-    "Last edited at",
-    "Created at",
-  ];
+  const requestedKeys = (req.query.fields || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
 
-  const rows = parts.map((p) => [
-    p.ttUniquePartNumber,
-    p.typeOfPart || "",
-    p.manufacturerPartNumber || "",
-    p.itemDescription || "",
-    p.companyCode || "",
-    p.category || "",
-    p.partTypeBatchNo || "",
-    p.hsnCode || "",
-    p.unit || "",
-    p.quantityInStock ?? 0,
-    p.rndStock ?? 0,
-    (p.rndIssues || [])
-      .map((i) => `${i.personName} (${i.quantity})`)
-      .filter(Boolean)
-      .join(" / "),
-    (p.vendors || []).map((v) => v.companyName).filter(Boolean).join(" / "),
-    p.isAlternatePart ? "Yes" : "No",
-    p.alternateOf?.ttUniquePartNumber || "",
-    p.photoUrl ? "Yes" : "No",
-    p.datasheetUrl ? "Yes" : "No",
-    p.remarks || "",
-    p.lastEditedBy || "",
-    p.lastEditedAt ? new Date(p.lastEditedAt).toLocaleString("en-IN") : "",
-    p.createdAt ? new Date(p.createdAt).toLocaleString("en-IN") : "",
-  ]);
+  const fieldsByKey = new Map(PARTS_CSV_FIELDS.map((f) => [f.key, f]));
+  let selectedFields = requestedKeys
+    .map((k) => fieldsByKey.get(k))
+    .filter(Boolean);
+  if (selectedFields.length === 0) selectedFields = PARTS_CSV_FIELDS;
+
+  const header = selectedFields.map((f) => f.label);
+  const rows = parts.map((p) => selectedFields.map((f) => f.get(p)));
 
   sendCsv(res, "parts-master", csvFrom(header, rows));
 });

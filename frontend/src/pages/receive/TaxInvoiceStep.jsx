@@ -63,6 +63,39 @@ export default function TaxInvoiceStep({
   const [submitting, setSubmitting] = useState(false);
   const v = useFormValidation(TAX_INVOICE_SCHEMA);
 
+  // Duplicate-invoice-number check — whether typed by hand or filled in by
+  // the AI auto-read below, the moment invoiceNumber settles this asks the
+  // backend if this vendor already has an invoice on file under the same
+  // number. duplicateInvoice holds that match (or null); upload is blocked
+  // while it's set, and it's cleared the moment the number is edited.
+  const [duplicateInvoice, setDuplicateInvoice] = useState(null);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+
+  useEffect(() => {
+    const trimmed = invoiceNumber.trim();
+    if (!trimmed || !vendor?._id) {
+      setDuplicateInvoice(null);
+      setCheckingDuplicate(false);
+      return undefined;
+    }
+    setCheckingDuplicate(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/tax-invoices/check-duplicate", {
+          params: { vendor: vendor._id, invoiceNumber: trimmed },
+        });
+        setDuplicateInvoice(data?.duplicate ? data.invoice : null);
+      } catch {
+        // Best-effort only — a failed check should never block data entry;
+        // the server repeats this same check at upload time regardless.
+        setDuplicateInvoice(null);
+      } finally {
+        setCheckingDuplicate(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [invoiceNumber, vendor?._id]);
+
   // Auto-fetch details off the file the moment it's picked, and fill in
   // whatever's still blank; any field the person already typed that
   // disagrees is surfaced as a warning below (see TAX_INVOICE_DOC_MAPPING).
@@ -233,6 +266,10 @@ export default function TaxInvoiceStep({
     }
     if (!v.validateAll({ invoiceNumber, invoiceQuantity })) {
       toast.error("Fix the highlighted field before uploading");
+      return;
+    }
+    if (duplicateInvoice) {
+      toast.error("This invoice number has already been uploaded — change it before continuing");
       return;
     }
     setSubmitting(true);
@@ -426,8 +463,15 @@ export default function TaxInvoiceStep({
               onChange={(e) => setInvoiceNumber(e.target.value)}
               onBlur={() => v.handleBlur("invoiceNumber", invoiceNumber, { invoiceNumber, invoiceQuantity })}
               placeholder="INV-2026-0142"
+              className={duplicateInvoice ? "border-red-400 focus-visible:ring-red-400" : undefined}
             />
             <FieldError error={v.fieldError("invoiceNumber")} />
+            {checkingDuplicate && !duplicateInvoice && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Checking for a duplicate…
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Invoice date</Label>
@@ -459,6 +503,33 @@ export default function TaxInvoiceStep({
             <Label>Notes (optional)</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+
+          {duplicateInvoice && (
+            <div className="sm:col-span-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
+                <div className="space-y-1">
+                  <p className="font-medium">
+                    Invoice {duplicateInvoice.invoiceNumber} has already been uploaded for{" "}
+                    {vendor?.companyName || "this vendor"}
+                    {duplicateInvoice.purchaseOrder
+                      ? ` (against ${duplicateInvoice.purchaseOrder.documentType} ${
+                          duplicateInvoice.purchaseOrder.documentNumber || ""
+                        })`
+                      : ""}
+                    {duplicateInvoice.invoiceDate
+                      ? ` on ${new Date(duplicateInvoice.invoiceDate).toLocaleDateString("en-IN")}`
+                      : ""}
+                    .
+                  </p>
+                  <p className="text-xs">
+                    This can't be uploaded again under the same number — change the invoice number above (or confirm
+                    it against the document) before continuing.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {aiMismatches.length > 0 && (
             <div className="sm:col-span-2">
@@ -512,7 +583,7 @@ export default function TaxInvoiceStep({
             <SkipForward className="h-4 w-4 mr-2" />
             Not received yet — skip
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || !!duplicateInvoice} title={duplicateInvoice ? "Change the invoice number to continue" : undefined}>
             <UploadCloud className="h-4 w-4 mr-2" />
             {submitting ? "Uploading..." : "Upload & continue"}
           </Button>
