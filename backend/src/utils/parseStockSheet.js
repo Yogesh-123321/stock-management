@@ -31,6 +31,7 @@ const HEADER_CANDIDATES = {
   description: ["Item Description", "Description"],
   date: ["DATE", "Date"],
   rate: ["Rate per Unit (INR)", "Rate per Unit", "Rate"],
+  unit: ["Unit", "UOM", "UoM", "Unit of Measure"],
   ordered: ["Ordered \nQuantity", "Ordered Quantity", "Order Qty", "Order Quantity"],
   received: ["Received \nQuantity", "Received Quantity", "Receipt Qty"],
 };
@@ -188,6 +189,7 @@ const toNumber = (v) => {
  *     dateLabel: string|null,
  *     dateRaw: string|null,
  *     ratePerUnit: number|null,
+ *     unit: string,
  *     orderedQuantity: number|null,
  *     receivedQuantity: number|null,
  *     suggestedQuantity: number|null,
@@ -213,6 +215,7 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
     description: findCol(header, HEADER_CANDIDATES.description),
     date: findCol(header, HEADER_CANDIDATES.date),
     rate: findCol(header, HEADER_CANDIDATES.rate),
+    unit: findCol(header, HEADER_CANDIDATES.unit),
     ordered: findCol(header, HEADER_CANDIDATES.ordered),
     received: findCol(header, HEADER_CANDIDATES.received),
   };
@@ -251,6 +254,7 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
     const receivedQuantity = idx.received > -1 ? toNumber(line[idx.received]) : null;
     const orderedQuantity = idx.ordered > -1 ? toNumber(line[idx.ordered]) : null;
     const ratePerUnit = idx.rate > -1 ? toNumber(line[idx.rate]) : null;
+    const unit = idx.unit > -1 ? norm(line[idx.unit]) : "";
 
     if (dateKey) {
       const existing = dateMap.get(dateKey);
@@ -271,6 +275,7 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
       dateRaw: dateRaw != null ? String(dateRaw) : null,
       dateUnrecognized: !dateKey && dateCellHadContent,
       ratePerUnit,
+      unit,
       orderedQuantity,
       receivedQuantity,
       // What to default the "quantity received" box to when this row is

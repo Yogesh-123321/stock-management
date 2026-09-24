@@ -85,7 +85,7 @@ export const parseStockImport = asyncHandler(async (req, res) => {
   const codes = [...new Set(parsed.rows.map((r) => r.ttUniquePartNumber).filter(Boolean))];
   const existingParts = codes.length
     ? await Part.find({ ttUniquePartNumber: { $in: codes } }).select(
-        "ttUniquePartNumber itemDescription quantityInStock manufacturerPartNumber"
+        "ttUniquePartNumber itemDescription quantityInStock manufacturerPartNumber unit price"
       )
     : [];
   const byCode = new Map(existingParts.map((p) => [p.ttUniquePartNumber, p]));
@@ -110,11 +110,20 @@ export const parseStockImport = asyncHandler(async (req, res) => {
                        applied to every row in the batch
     purchaseOrder   - optional, same as the manual stock-entry endpoint
     enteredBy       - who is doing the entry
+    receivingSession - optional; the "Receive material" wizard session. Stamped
+                       on every booked line so it reappears under "Logged this
+                       session" after a Save & exit / Resume, exactly like a
+                       hand-entered line. The frontend also uses this endpoint
+                       to save a single row on its own (a one-row batch).
     remarks         - default remarks applied to every row (a row can override it)
     date            - the sheet date this batch was picked for (kept for the
                        audit trail / approval notification only)
     rows: [{
       rowIndex, itemDescription, quantityReceived, remarks,
+      unit, price,        - optional; unit of measure and rate per unit for this
+                            delivery. Stored on the stock entry for an existing
+                            part, or on the new-part request (newPart.unit /
+                            newPart.price) so the approved part starts with them.
       matchType: "existing_part_number" | "new_part_number" | "alternate_part",
       existingPartId,     - required for existing_part_number
       alternateOfPartId,  - required for alternate_part
@@ -125,7 +134,7 @@ export const parseStockImport = asyncHandler(async (req, res) => {
     }]
 */
 export const commitStockImport = asyncHandler(async (req, res) => {
-  const { vendor, purchaseOrder, enteredBy, remarks: batchRemarks, date, rows } = req.body;
+  const { vendor, purchaseOrder, receivingSession, enteredBy, remarks: batchRemarks, date, rows } = req.body;
 
   if (!vendor) {
     res.status(400);
@@ -158,15 +167,28 @@ export const commitStockImport = asyncHandler(async (req, res) => {
         throw new Error("Quantity received is required");
       }
 
+      // Optional unit + per-unit rate for this delivery.
+      const rowUnit = String(row.unit ?? "").trim();
+      let rowPrice = null;
+      if (row.price !== undefined && row.price !== null && row.price !== "") {
+        rowPrice = Number(row.price);
+        if (!Number.isFinite(rowPrice) || rowPrice < 0) {
+          throw new Error("Price per unit must be a number, 0 or more");
+        }
+      }
+
       if (row.matchType === "existing_part_number") {
         if (!row.existingPartId) throw new Error("No matching part selected");
         const entry = await bookExistingPart({
           vendor,
           purchaseOrder: poDoc ? poDoc._id : null,
+          receivingSession: receivingSession || null,
           quantityReceived,
           enteredBy,
           remarks: row.remarks || batchRemarks,
           existingPartId: row.existingPartId,
+          unit: rowUnit,
+          price: rowPrice,
         });
         createdEntries.push(entry);
         continue;
@@ -212,6 +234,8 @@ export const commitStockImport = asyncHandler(async (req, res) => {
           companyCode: newPart.companyCode,
           category: newPart.category,
           partTypeBatchNo: newPart.partTypeBatchNo,
+          unit: rowUnit,
+          price: rowPrice,
         },
         alternateOfPart: row.matchType === "alternate_part" ? row.alternateOfPartId : null,
         vendor,
@@ -255,10 +279,15 @@ export const commitStockImport = asyncHandler(async (req, res) => {
         .populate("vendor", "companyName")
     : [];
 
-  res.status(createdEntries.length || createdApprovals.length ? 201 : 400).json({
+  const anyCreated = createdEntries.length > 0 || createdApprovals.length > 0;
+  res.status(anyCreated ? 201 : 400).json({
     createdEntries,
     createdApprovals,
     failedRows,
+    // When nothing at all was created (e.g. a single row saved on its own
+    // that failed), surface the reason as a normal `message` too so the
+    // client doesn't have to dig into failedRows to show something useful.
+    ...(anyCreated ? {} : { message: failedRows[0]?.message || "Nothing could be imported" }),
   });
 });
 

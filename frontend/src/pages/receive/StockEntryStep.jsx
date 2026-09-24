@@ -865,6 +865,7 @@ export default function StockEntryStep({
           vendor={vendor}
           purchaseOrder={purchaseOrder}
           enteredBy={enteredBy}
+          sessionId={sessionId}
           onImported={handleImported}
           onClose={() => setPhase("lookup")}
         />

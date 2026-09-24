@@ -22,6 +22,8 @@ import {
   PackageCheck,
   ShieldAlert,
   GitBranchPlus,
+  Save,
+  Loader2,
   X,
 } from "lucide-react";
 
@@ -46,6 +48,20 @@ import {
   Vendor (and PO/PI, if any) come from the receiving wizard itself — the
   same vendor applies to every row in the sheet, matching how a single
   delivery is entered.
+
+  Per-row controls on the preview screen:
+    - "Save entry" saves just that one row right away (same commit endpoint,
+      one-row batch). The row then collapses into a green "saved" card that
+      shows the resulting stock entry, the entry is pushed to the "Logged
+      this session" list below via onImported, and the row is left out of the
+      final bulk "Import remaining rows" so it can never be booked twice.
+    - Each row also carries a Unit and a Price per unit (optional). They're
+      pre-filled from the sheet's rate column, else from the matched part,
+      and are stored on the stock entry (or on the new-part request, so the
+      approved part starts out with them) exactly like the manual entry form.
+    - Each row has its own part search box. Picking a part links that row to
+      an existing master part (handy when the sheet's code was missing or
+      wrong); clearing it falls back to whatever the sheet itself matched.
 */
 
 const emptyNewPart = () => ({
@@ -71,13 +87,44 @@ const ROW_FIELD_RULES = {
     maxLength: 30,
   },
   quantityReceived: { required: true, requiredMessage: "Enter the quantity received", regex: "positiveInteger", min: 1 },
+  // Both optional, same rules as the manual stock-entry form: the unit of
+  // measure (PCS, KG, MTR, ...) and the rate charged per unit on THIS delivery.
+  unit: { regex: "alphaNumSpace", maxLength: 20 },
+  price: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
 };
 
 function validateRowField(field, value) {
   return validateValue(value, ROW_FIELD_RULES[field], null);
 }
 
-export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onImported, onClose }) {
+// Every problem with a row, keyed by field — used both to gate the bulk
+// import / per-row save and to light up the red messages on the row itself.
+function collectRowErrors(r) {
+  const errors = {};
+  const qtyErr = validateRowField("quantityReceived", r.quantityReceived);
+  if (qtyErr) errors.quantityReceived = qtyErr;
+  const unitErr = validateRowField("unit", r.unit);
+  if (unitErr) errors.unit = unitErr;
+  const priceErr = validateRowField("price", r.price);
+  if (priceErr) errors.price = priceErr;
+
+  if (r.matchType === "existing_part_number") {
+    if (!r.matchedPart) errors.match = "Pick the part this row belongs to";
+    return errors;
+  }
+
+  if (r.isAlternate && !r.alternateOfPart) {
+    errors.alternateOf = "Search and pick the part this is an alternate of";
+  }
+  if (!r.newPart.category) errors.category = "Select a category";
+  ["itemDescription", "manufacturerPartNumber", "companyCode", "partTypeBatchNo"].forEach((field) => {
+    const err = validateRowField(field, r.newPart[field]);
+    if (err) errors[field] = err;
+  });
+  return errors;
+}
+
+export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, sessionId = null, onImported, onClose }) {
   const [phase, setPhase] = useState("upload"); // upload -> pick-date -> preview -> done
   const [file, setFile] = useState(null);
   const [fileInputKey, setFileInputKey] = useState(0); // bump to force-remount the <input type=file>
@@ -93,6 +140,11 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
   const [rows, setRows] = useState([]); // editable preview rows for the selected date
   const [committing, setCommitting] = useState(false);
   const [result, setResult] = useState(null); // { createdEntries, createdApprovals, failedRows }
+  // Rows saved one at a time from the preview, keyed by sheet rowIndex. Kept
+  // at panel level (not just on the row objects) so going "Back to dates" and
+  // re-opening the same date doesn't hand back rows that are already booked.
+  const [savedRows, setSavedRows] = useState({});
+  const [savingRowIndex, setSavingRowIndex] = useState(null);
 
   // Wipes every trace of whatever was previously uploaded/parsed. Used both
   // when the operator explicitly asks to pick a different file, and right
@@ -108,6 +160,8 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
     setSelectedDate(null);
     setRows([]);
     setResult(null);
+    setSavedRows({});
+    setSavingRowIndex(null);
     setUploadError("");
     setPhase("upload");
   };
@@ -155,6 +209,12 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
         itemDescription: r.itemDescription,
         ttUniquePartNumber: r.ttUniquePartNumber,
         matchedPart: r.matchedPart,
+        // What the sheet itself matched — restored if the operator clears a
+        // part they linked by hand through the row's search box.
+        sheetMatchedPart: r.matchedPart,
+        searchPick: null,
+        saved: savedRows[r.rowIndex] || null,
+        saveError: "",
         dateRaw: r.dateRaw,
         dateUnrecognized: r.dateUnrecognized,
         included: true,
@@ -162,6 +222,17 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
         isAlternate: false,
         alternateOfPart: null,
         quantityReceived: r.suggestedQuantity != null ? String(r.suggestedQuantity) : "",
+        // Unit + rate for this delivery. The sheet's own "Rate per Unit"
+        // (and "Unit"/"UOM" column, if it has one) wins; otherwise fall back
+        // to what's registered on the matched part. Always editable.
+        sheetRate: r.ratePerUnit ?? null,
+        unit: r.unit || r.matchedPart?.unit || "",
+        price:
+          r.ratePerUnit != null
+            ? String(r.ratePerUnit)
+            : r.matchedPart?.price != null
+              ? String(r.matchedPart.price)
+              : "",
         errors: {},
         newPart: r.matchedPart
           ? emptyNewPart()
@@ -190,22 +261,116 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
     );
   };
 
-  const includedRows = useMemo(() => rows.filter((r) => r.included), [rows]);
-  const existingCount = includedRows.filter((r) => r.matchType === "existing_part_number").length;
-  const newCount = includedRows.filter((r) => r.matchType === "new_part_number").length;
-
-  const rowIsValid = (r) => {
-    if (!r.included) return true; // skipped rows don't block submission
-    if (validateRowField("quantityReceived", r.quantityReceived)) return false;
-    if (r.matchType === "existing_part_number") return !!r.matchedPart;
-    if (r.isAlternate && !r.alternateOfPart) return false;
-    if (!r.newPart.category) return false;
-    return ["itemDescription", "manufacturerPartNumber", "companyCode", "partTypeBatchNo"].every(
-      (field) => !validateRowField(field, r.newPart[field])
+  // Links a row to a part chosen from its own search box (or, when the pick is
+  // cleared, goes back to whatever the sheet matched on its own).
+  const pickRowPart = (rowIndex, part) => {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.rowIndex !== rowIndex) return r;
+        if (part) {
+          return {
+            ...r,
+            searchPick: part,
+            matchedPart: part,
+            matchType: "existing_part_number",
+            isAlternate: false,
+            alternateOfPart: null,
+            // Only fill blanks from the picked part — never overwrite what
+            // the operator (or the sheet) already put in.
+            unit: r.unit || part.unit || "",
+            price: r.price !== "" ? r.price : part.price != null ? String(part.price) : "",
+            saveError: "",
+            errors: { ...r.errors, match: undefined },
+          };
+        }
+        const back = r.sheetMatchedPart || null;
+        return {
+          ...r,
+          searchPick: null,
+          matchedPart: back,
+          matchType: back ? "existing_part_number" : "new_part_number",
+        };
+      })
     );
   };
 
-  const canCommit = includedRows.length > 0 && rows.every(rowIsValid);
+  // Rows still waiting to be imported in bulk — anything already saved
+  // individually is done and must never be sent again.
+  const includedRows = useMemo(() => rows.filter((r) => r.included && !r.saved), [rows]);
+  const savedCount = useMemo(() => rows.filter((r) => r.saved).length, [rows]);
+  const existingCount = includedRows.filter((r) => r.matchType === "existing_part_number").length;
+  const newCount = includedRows.filter((r) => r.matchType === "new_part_number").length;
+  const skippedCount = rows.filter((r) => !r.included && !r.saved).length;
+
+  const rowIsValid = (r) => {
+    if (!r.included || r.saved) return true; // skipped / already-saved rows don't block submission
+    return Object.keys(collectRowErrors(r)).length === 0;
+  };
+
+  const canCommit = includedRows.length > 0 && rows.every(rowIsValid) && savingRowIndex == null;
+
+  const buildRowPayload = (r) => ({
+    rowIndex: r.rowIndex,
+    itemDescription: r.itemDescription,
+    quantityReceived: Number(r.quantityReceived),
+    unit: String(r.unit || "").trim(),
+    price: r.price === "" || r.price == null ? null : Number(r.price),
+    matchType: r.isAlternate && r.matchType === "new_part_number" ? "alternate_part" : r.matchType,
+    existingPartId: r.matchType === "existing_part_number" ? r.matchedPart?._id : undefined,
+    alternateOfPartId: r.isAlternate ? r.alternateOfPart?._id : undefined,
+    newPart: r.matchType === "new_part_number" ? r.newPart : undefined,
+  });
+
+  const buildPayload = (list) => ({
+    vendor: vendor._id,
+    purchaseOrder: purchaseOrder?._id ?? null,
+    // Stamped on every booked line so it reappears under "Logged this
+    // session" after a Save & exit / Resume, same as a hand-entered line.
+    receivingSession: sessionId || null,
+    enteredBy,
+    date: selectedDate,
+    rows: list.map(buildRowPayload),
+  });
+
+  // Save ONE row on its own — same endpoint as the bulk import, one-row batch.
+  const handleSaveRow = async (row) => {
+    const errors = collectRowErrors(row);
+    if (Object.keys(errors).length > 0) {
+      updateRow(row.rowIndex, { errors, saveError: "" });
+      toast.error(Object.values(errors)[0] || "Fix the highlighted field(s) on this row first");
+      return;
+    }
+    setSavingRowIndex(row.rowIndex);
+    updateRow(row.rowIndex, { saveError: "" });
+    try {
+      const { data } = await api.post("/stock-entries/import/commit", buildPayload([row]));
+      const failed = data.failedRows?.[0];
+      if (failed) {
+        updateRow(row.rowIndex, { saveError: failed.message });
+        toast.error(failed.message);
+        return;
+      }
+      const saved = {
+        entry: data.createdEntries?.[0] || null,
+        approval: data.createdApprovals?.[0] || null,
+      };
+      setSavedRows((prev) => ({ ...prev, [row.rowIndex]: saved }));
+      updateRow(row.rowIndex, { saved, saveError: "", errors: {} });
+      if (saved.entry) {
+        toast.success(`Saved ${saved.entry.part?.ttUniquePartNumber || "entry"} — added to this session's stock entries`);
+      } else {
+        toast.success("Saved — new part number sent for admin approval");
+      }
+      onImported?.(data);
+    } catch (err) {
+      const message =
+        err.response?.data?.failedRows?.[0]?.message || err.response?.data?.message || "Could not save this row";
+      updateRow(row.rowIndex, { saveError: message });
+      toast.error(message);
+    } finally {
+      setSavingRowIndex(null);
+    }
+  };
 
   const handleCommit = async () => {
     if (!canCommit) {
@@ -214,22 +379,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
     }
     setCommitting(true);
     try {
-      const payload = {
-        vendor: vendor._id,
-        purchaseOrder: purchaseOrder?._id ?? null,
-        enteredBy,
-        date: selectedDate,
-        rows: includedRows.map((r) => ({
-          rowIndex: r.rowIndex,
-          itemDescription: r.itemDescription,
-          quantityReceived: Number(r.quantityReceived),
-          matchType: r.isAlternate && r.matchType === "new_part_number" ? "alternate_part" : r.matchType,
-          existingPartId: r.matchType === "existing_part_number" ? r.matchedPart?._id : undefined,
-          alternateOfPartId: r.isAlternate ? r.alternateOfPart?._id : undefined,
-          newPart: r.matchType === "new_part_number" ? r.newPart : undefined,
-        })),
-      };
-      const { data } = await api.post("/stock-entries/import/commit", payload);
+      const { data } = await api.post("/stock-entries/import/commit", buildPayload(includedRows));
       setResult(data);
       setPhase("done");
       if (data.createdEntries?.length) {
@@ -366,14 +516,28 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
                 <ShieldAlert className="h-3 w-3" />
                 {newCount} will need admin approval
               </Badge>
-              {rows.length - includedRows.length > 0 && (
-                <Badge variant="secondary">{rows.length - includedRows.length} skipped</Badge>
+              {savedCount > 0 && (
+                <Badge variant="secondary" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {savedCount} saved
+                </Badge>
               )}
+              {skippedCount > 0 && <Badge variant="secondary">{skippedCount} skipped</Badge>}
             </div>
 
             <div className="space-y-2">
               {rows.map((r) => (
-                <RowEditor key={r.rowIndex} row={r} updateRow={updateRow} updateNewPart={updateNewPart} blurRowField={blurRowField} />
+                <RowEditor
+                  key={r.rowIndex}
+                  row={r}
+                  updateRow={updateRow}
+                  updateNewPart={updateNewPart}
+                  blurRowField={blurRowField}
+                  pickRowPart={pickRowPart}
+                  onSave={handleSaveRow}
+                  saving={savingRowIndex === r.rowIndex}
+                  busy={committing || savingRowIndex != null}
+                />
               ))}
             </div>
           </CardContent>
@@ -382,9 +546,19 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
               <ArrowLeft className="h-4 w-4 mr-1.5" />
               Back to dates
             </Button>
-            <Button type="button" onClick={handleCommit} disabled={committing || !canCommit}>
-              {committing ? "Importing…" : `Import ${includedRows.length} row(s)`}
-            </Button>
+            {includedRows.length === 0 && savedCount > 0 ? (
+              <Button type="button" onClick={onClose}>
+                Done — {savedCount} row(s) saved
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleCommit} disabled={committing || !canCommit}>
+                {committing
+                  ? "Importing…"
+                  : savedCount > 0
+                    ? `Import ${includedRows.length} remaining row(s)`
+                    : `Import ${includedRows.length} row(s)`}
+              </Button>
+            )}
           </CardFooter>
         </>
       )}
@@ -435,7 +609,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, onI
   );
 }
 
-function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
+function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, onSave, saving, busy }) {
   const isNew = row.matchType === "new_part_number";
   const normalize = (s) => String(s || "").trim().toLowerCase();
   // Only set for a row that started out unmatched and was then resolved to
@@ -446,6 +620,10 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
     row.matchedPart &&
     row.newPart?.itemDescription &&
     normalize(row.newPart.itemDescription) !== normalize(row.matchedPart.itemDescription);
+
+  // Already saved on its own — collapse to a read-only card that shows what
+  // was actually recorded, so the stock entry is visible right on the row.
+  if (row.saved) return <SavedRow row={row} />;
 
   return (
     <div
@@ -517,7 +695,7 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
           {row.matchedPart ? (
             <Badge variant="success" className="gap-1">
               <PackageCheck className="h-3 w-3" />
-              Match
+              {row.searchPick ? "Linked" : "Match"}
             </Badge>
           ) : (
             <Badge variant="warning" className="gap-1">
@@ -526,7 +704,78 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
             </Badge>
           )}
         </div>
+
+        <div className="shrink-0">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8"
+            onClick={() => onSave(row)}
+            disabled={!row.included || busy}
+            title={
+              isNew
+                ? "Save just this row — the new part number goes for admin approval"
+                : "Save just this row as a stock entry now"
+            }
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+            {saving ? "Saving…" : isNew ? "Save for approval" : "Save entry"}
+          </Button>
+        </div>
       </div>
+
+      {row.included && (
+        <div className="flex flex-wrap items-center gap-2 pl-6">
+          <Label className="text-[11px] shrink-0">Search part</Label>
+          <div className="min-w-[220px] flex-1 max-w-md">
+            <AlternatePartPicker
+              value={row.searchPick}
+              onChange={(part) => pickRowPart(row.rowIndex, part)}
+              placeholder="Search master by part no. or description to link this row…"
+            />
+          </div>
+        </div>
+      )}
+      {row.errors?.match && <FieldError error={row.errors.match} />}
+      {row.included && (
+        <div className="flex flex-wrap items-start gap-3 pl-6">
+          <div className="space-y-1">
+            <Label className="text-[11px]">Unit</Label>
+            <Input
+              value={row.unit}
+              onChange={(e) => updateRow(row.rowIndex, { unit: e.target.value })}
+              onBlur={(e) => blurRowField(row.rowIndex, "unit", e.target.value)}
+              className="h-8 w-24 text-xs"
+              placeholder={row.matchedPart?.unit || "PCS, KG, MTR"}
+            />
+            <FieldError error={row.errors?.unit} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Price per unit (optional)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="any"
+              value={row.price}
+              onChange={(e) => updateRow(row.rowIndex, { price: e.target.value })}
+              onBlur={(e) => blurRowField(row.rowIndex, "price", e.target.value)}
+              className="h-8 w-32 text-right text-xs"
+              placeholder="e.g. 12.50"
+            />
+            <FieldError error={row.errors?.price} />
+          </div>
+          {row.sheetRate != null && row.price === String(row.sheetRate) && (
+            <p className="self-center pt-4 text-[11px] text-muted-foreground">Rate taken from the sheet — edit if needed.</p>
+          )}
+        </div>
+      )}
+      {row.saveError && (
+        <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-800">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-red-600" />
+          <span className="break-words">{row.saveError}</span>
+        </div>
+      )}
 
       {showDescriptionMismatch && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start gap-2">
@@ -554,7 +803,7 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => updateRow(row.rowIndex, { matchType: "new_part_number", matchedPart: null })}
+              onClick={() => updateRow(row.rowIndex, { matchType: "new_part_number", matchedPart: null, searchPick: null })}
             >
               Actually, this is a different part
             </Button>
@@ -583,6 +832,7 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
                 onChange={(v) => updateNewPart(row.rowIndex, "category", v)}
                 triggerClassName="h-8 text-xs"
               />
+              <FieldError error={row.errors?.category} />
             </div>
             <div className="space-y-1 min-w-0">
               <Label className="text-[11px]">Part type / batch no.</Label>
@@ -632,6 +882,7 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
                 value={row.alternateOfPart}
                 onChange={(part) => updateRow(row.rowIndex, { alternateOfPart: part })}
               />
+              <FieldError error={row.errors?.alternateOf} />
             </div>
           )}
 
@@ -643,6 +894,50 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField }) {
             }
           />
         </div>
+      )}
+    </div>
+  );
+}
+
+// Read-only card shown in place of a row once it has been saved on its own.
+function SavedRow({ row }) {
+  const { entry, approval } = row.saved;
+  const partNo = entry?.part?.ttUniquePartNumber;
+  const description = entry?.part?.itemDescription || approval?.newPart?.itemDescription || row.itemDescription;
+  const qty = entry ? entry.quantityReceived : approval?.proposedQuantity ?? row.quantityReceived;
+
+  return (
+    <div className="rounded-md border border-emerald-300 bg-emerald-50/60 p-2.5 space-y-1">
+      <div className="flex flex-wrap items-start gap-2.5">
+        <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600" />
+        <span className="min-w-[180px] flex-1 break-words text-sm">{description}</span>
+        {partNo && (
+          <span className="shrink-0 font-mono text-xs bg-white rounded px-1.5 py-0.5 break-all">{partNo}</span>
+        )}
+        <span className="shrink-0 text-sm font-semibold text-primary">+{qty}</span>
+        <Badge variant="success" className="shrink-0">
+          Saved
+        </Badge>
+      </div>
+      {(entry ? entry.unit || entry.price != null : approval?.newPart?.unit || approval?.newPart?.price != null) && (
+        <p className="pl-6 text-[11px] text-muted-foreground">
+          {[
+            (entry ? entry.unit : approval?.newPart?.unit) && `Unit: ${entry ? entry.unit : approval.newPart.unit}`,
+            (entry ? entry.price : approval?.newPart?.price) != null &&
+              `Price per unit: ${entry ? entry.price : approval.newPart.price}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
+      {entry ? (
+        <p className="pl-6 text-[11px] text-amber-700">
+          Stock entry logged · {entry.stockApplied ? `In stock now: ${entry.part?.quantityInStock}` : "Pending — goes to IQC stock once the tax invoice is uploaded"}
+        </p>
+      ) : (
+        <p className="pl-6 text-[11px] text-amber-700">
+          New part number sent for admin approval — book it from “Approved — ready to book” once it's approved.
+        </p>
       )}
     </div>
   );
