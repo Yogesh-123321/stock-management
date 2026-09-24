@@ -11,6 +11,7 @@ import PartNumberPreview from "@/components/PartNumberPreview";
 import CategorySelect from "@/components/CategorySelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
 import FieldError from "@/components/FieldError";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 import { validateValue } from "@/lib/validators";
 import {
   FileSpreadsheet,
@@ -63,6 +64,16 @@ import {
       an existing master part (handy when the sheet's code was missing or
       wrong); clearing it falls back to whatever the sheet itself matched.
 */
+
+// The sheet columns the importer tries to find on its own. If a vendor labels
+// one of them differently, the operator can point it at the right column on the
+// date-picking screen (sent back to the server as `columnMap`).
+const COLUMN_FIELDS = [
+  { key: "received", label: "Quantity received (default quantity)" },
+  { key: "ordered", label: "Quantity ordered (used if received is empty)" },
+  { key: "rate", label: "Price per unit" },
+  { key: "unit", label: "Unit" },
+];
 
 const emptyNewPart = () => ({
   typeOfPart: "",
@@ -143,6 +154,8 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
   // Rows saved one at a time from the preview, keyed by sheet rowIndex. Kept
   // at panel level (not just on the row objects) so going "Back to dates" and
   // re-opening the same date doesn't hand back rows that are already booked.
+  const [columnMap, setColumnMap] = useState({}); // manual column overrides, see COLUMN_FIELDS
+  const [rereading, setRereading] = useState(false);
   const [savedRows, setSavedRows] = useState({});
   const [savingRowIndex, setSavingRowIndex] = useState(null);
 
@@ -162,8 +175,29 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
     setResult(null);
     setSavedRows({});
     setSavingRowIndex(null);
+    setColumnMap({});
     setUploadError("");
     setPhase("upload");
+  };
+
+  // Re-reads the same file with the operator's column choices applied.
+  const rereadWithColumns = async (nextMap) => {
+    if (!file) return;
+    setRereading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("columnMap", JSON.stringify(nextMap));
+      const { data } = await api.post("/stock-entries/import/parse", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setParsed(data);
+      setColumnMap(nextMap);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not re-read the sheet with that column");
+    } finally {
+      setRereading(false);
+    }
   };
 
   const handleParse = async (e) => {
@@ -174,6 +208,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
     }
     setParsing(true);
     setParsed(null); // never show a stale parse while a new one is in flight
+    setColumnMap({});
     setUploadError("");
     try {
       const fd = new FormData();
@@ -199,6 +234,15 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
       setParsing(false);
     }
   };
+
+  // Options for the column pickers on the date screen (searchable).
+  const columnOptions = useMemo(
+    () => [
+      { value: "-1", label: "— not on this sheet —" },
+      ...(parsed?.headers || []).map((h) => ({ value: String(h.index), label: h.label })),
+    ],
+    [parsed]
+  );
 
   const pickDate = (dateValue) => {
     setSelectedDate(dateValue);
@@ -496,6 +540,40 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
               unfamiliar format). They're grouped under "Unrecognized date" below — open that group to see the
               original text from the sheet for each row.
             </p>
+          )}
+          {parsed.headers?.length > 0 && (
+            <div className="rounded-md border border-border p-3 space-y-2">
+              <p className="text-xs font-medium">Columns being read from the sheet</p>
+              {parsed.columns?.received === -1 && parsed.columns?.ordered === -1 && (
+                <p className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  No quantity column was recognised — pick it below, otherwise quantities will start blank.
+                </p>
+              )}
+              {parsed.columns?.rate === -1 && (
+                <p className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  No price / rate column was recognised — pick it below, otherwise prices will start blank.
+                </p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {COLUMN_FIELDS.map((f) => (
+                  <div key={f.key} className="space-y-1 min-w-0">
+                    <Label className="text-[11px]">{f.label}</Label>
+                    <SearchableSelect
+                      options={columnOptions}
+                      value={String(parsed.columns?.[f.key] ?? -1)}
+                      disabled={rereading}
+                      placeholder="— not on this sheet —"
+                      searchPlaceholder="Search columns…"
+                      emptyText="No column matches."
+                      onChange={(v) => rereadWithColumns({ ...columnMap, [f.key]: Number(v) })}
+                    />
+                  </div>
+                ))}
+              </div>
+              {rereading && <p className="text-xs text-muted-foreground">Re-reading the sheet…</p>}
+            </div>
           )}
           <Button type="button" variant="ghost" size="sm" onClick={resetImport}>
             <ArrowLeft className="h-4 w-4 mr-1.5" />

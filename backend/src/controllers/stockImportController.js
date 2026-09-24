@@ -60,7 +60,17 @@ export const parseStockImport = asyncHandler(async (req, res) => {
     // server's time zone at all — verified identical output across UTC,
     // IST and US Eastern.
     const wb = xlsx.read(req.file.buffer, { type: "buffer" });
-    parsed = parseStockWorkbook(wb, { sheetName: req.body.sheetName || undefined });
+    // Optional manual column overrides (JSON string, since this is a
+    // multipart form): { received, ordered, rate, unit } -> column index.
+    let columnMap;
+    if (req.body.columnMap) {
+      try {
+        columnMap = JSON.parse(req.body.columnMap);
+      } catch {
+        columnMap = undefined;
+      }
+    }
+    parsed = parseStockWorkbook(wb, { sheetName: req.body.sheetName || undefined, columnMap });
   } catch (err) {
     res.status(400);
     throw new Error(`Could not read that spreadsheet: ${err.message}`);
@@ -98,6 +108,8 @@ export const parseStockImport = asyncHandler(async (req, res) => {
   res.json({
     sheetName: parsed.sheetName,
     availableSheets: parsed.availableSheets,
+    headers: parsed.headers,
+    columns: parsed.columns,
     dates: parsed.dates,
     rows,
   });

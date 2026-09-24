@@ -30,10 +30,35 @@ const HEADER_CANDIDATES = {
   code: ["TTZ Item Code", "Part Number", "TT Unique Part Number", "Item Code"],
   description: ["Item Description", "Description"],
   date: ["DATE", "Date"],
-  rate: ["Rate per Unit (INR)", "Rate per Unit", "Rate"],
-  unit: ["Unit", "UOM", "UoM", "Unit of Measure"],
-  ordered: ["Ordered \nQuantity", "Ordered Quantity", "Order Qty", "Order Quantity"],
-  received: ["Received \nQuantity", "Received Quantity", "Receipt Qty"],
+  rate: [
+    "Rate per Unit (INR)", "Rate per Unit", "Rate", "Unit Price", "Price", "Unit Rate", "Rate/Unit",
+    "Price per Unit", "Rate (INR)", "Price (INR)", "Unit Price (INR)", "Basic Rate", "Rate Per Piece",
+  ],
+  unit: ["Unit", "UOM", "UoM", "Unit of Measure", "Units"],
+  ordered: [
+    "Ordered \nQuantity", "Ordered Quantity", "Order Qty", "Order Quantity", "Ordered Qty", "PO Qty",
+    "Qty Ordered", "Quantity Ordered",
+  ],
+  received: [
+    "Received \nQuantity", "Received Quantity", "Receipt Qty", "Received Qty", "Qty Received",
+    "Quantity Received", "Rcvd Qty", "Qty Rcvd", "Recd Qty", "Inward Qty", "Received",
+  ],
+  // A plain "Qty" / "Quantity" column, used for the received quantity only
+  // when the sheet has no column that says "received" anywhere in it.
+  qty: ["Quantity", "Qty", "Qty.", "Nos", "Quantity (Nos)"],
+};
+
+// Looser second-chance matching for the columns that vendors label in many
+// different ways. Only tried when none of the exact names above matched, and
+// always left-to-right, so the main table's column wins over the weekly
+// tracking columns further along the row. `k` is a lower-cased header with
+// everything but letters/digits stripped out.
+const FUZZY = {
+  received: (k) =>
+    /^(received|rcvd|recd)$/.test(k) ||
+    (/(receiv|rcvd|recd|inward)/.test(k) && /(qty|quant|nos|pcs)/.test(k)),
+  ordered: (k) => /^(ordered|po)$/.test(k) || (/(order|^po)/.test(k) && /(qty|quant|nos|pcs)/.test(k)),
+  rate: (k) => /(rate|price)/.test(k) && !/(total|amount|value|gst|tax|hsn|discount)/.test(k),
 };
 
 const norm = (v) =>
@@ -42,14 +67,18 @@ const norm = (v) =>
     .replace(/\s+/g, " ")
     .trim();
 
+// Case-, spacing- and punctuation-insensitive form of a header, so "Received
+// Qty.", "received qty" and "RECEIVED\nQTY" all compare equal.
+const keyOf = (v) => norm(v).toLowerCase().replace(/[^a-z0-9]/g, "");
+
 // Scans the first 20 rows for the one that looks like the real header (has
 // both an "Item Description" and a "DATE" column) — the sheet has several
 // blank / title rows above it that vary in count from workbook to workbook.
 const findHeaderRow = (grid) => {
-  const wantedDescription = HEADER_CANDIDATES.description.map(norm);
-  const wantedDate = HEADER_CANDIDATES.date.map(norm);
+  const wantedDescription = HEADER_CANDIDATES.description.map(keyOf);
+  const wantedDate = HEADER_CANDIDATES.date.map(keyOf);
   for (let r = 0; r < Math.min(grid.length, 20); r++) {
-    const cells = (grid[r] || []).map(norm);
+    const cells = (grid[r] || []).map(keyOf);
     const hasDescription = cells.some((c) => wantedDescription.includes(c));
     const hasDate = cells.some((c) => wantedDate.includes(c));
     if (hasDescription && hasDate) return r;
@@ -57,9 +86,12 @@ const findHeaderRow = (grid) => {
   return -1;
 };
 
-const findCol = (headerCells, candidates) => {
-  const wanted = candidates.map(norm);
-  return headerCells.findIndex((c) => wanted.includes(norm(c)));
+const findCol = (headerCells, candidates, fuzzy) => {
+  const wanted = candidates.map(keyOf);
+  const keys = headerCells.map(keyOf);
+  let i = keys.findIndex((k) => k && wanted.includes(k));
+  if (i === -1 && fuzzy) i = keys.findIndex((k) => k && fuzzy(k));
+  return i;
 };
 
 const isoFromParts = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -164,9 +196,14 @@ const labelFromIso = (iso) => {
   return `${String(d).padStart(2, "0")} ${MONTH_ABBR[m - 1]} ${y}`;
 };
 
+// Accepts real numbers as well as text a person typed into the cell — "1,250",
+// "₹ 12.50", "12.50/-", "10 pcs" — by pulling out the first number in it.
 const toNumber = (v) => {
   if (v == null || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[, ]/g, ""));
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const m = String(v).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = parseFloat(m[0]);
   return Number.isFinite(n) ? n : null;
 };
 
@@ -176,7 +213,9 @@ const toNumber = (v) => {
  *   date conversion is server-time-zone-sensitive). Date-formatted cells
  *   arrive here as plain numeric serials and are converted with our own
  *   time-zone-independent isoFromExcelSerial.
- * @param {{ sheetName?: string }} opts
+ * @param {{ sheetName?: string, columnMap?: { received?: number, ordered?: number, rate?: number, unit?: number } }} opts
+ *   columnMap lets the caller override the auto-detected columns: each value
+ *   is a 0-based column index on the header row, or -1 for "not on this sheet".
  * @returns {{
  *   sheetName: string,
  *   availableSheets: string[],
@@ -197,7 +236,7 @@ const toNumber = (v) => {
  *   dates: Array<{ value: string, label: string, rowCount: number }>,
  * }}
  */
-export function parseStockWorkbook(wb, { sheetName } = {}) {
+export function parseStockWorkbook(wb, { sheetName, columnMap } = {}) {
   const availableSheets = wb.SheetNames;
   const name = sheetName && wb.Sheets[sheetName] ? sheetName : availableSheets[0];
   const ws = wb.Sheets[name];
@@ -214,11 +253,18 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
     code: findCol(header, HEADER_CANDIDATES.code),
     description: findCol(header, HEADER_CANDIDATES.description),
     date: findCol(header, HEADER_CANDIDATES.date),
-    rate: findCol(header, HEADER_CANDIDATES.rate),
+    rate: findCol(header, HEADER_CANDIDATES.rate, FUZZY.rate),
     unit: findCol(header, HEADER_CANDIDATES.unit),
-    ordered: findCol(header, HEADER_CANDIDATES.ordered),
-    received: findCol(header, HEADER_CANDIDATES.received),
+    ordered: findCol(header, HEADER_CANDIDATES.ordered, FUZZY.ordered),
+    received: findCol(header, HEADER_CANDIDATES.received, FUZZY.received),
   };
+  if (idx.received === -1) idx.received = findCol(header, HEADER_CANDIDATES.qty);
+
+  // Manual override from the UI ("read quantity from column H instead").
+  for (const field of ["received", "ordered", "rate", "unit"]) {
+    const v = columnMap ? columnMap[field] : undefined;
+    if (Number.isInteger(v)) idx[field] = v >= 0 && v < 1000 ? v : -1;
+  }
   if (idx.description === -1 || idx.date === -1) {
     throw new Error('Could not locate the "Item Description" / "DATE" columns on this sheet.');
   }
@@ -294,5 +340,18 @@ export function parseStockWorkbook(wb, { sheetName } = {}) {
     });
   }
 
-  return { sheetName: name, availableSheets, headerRowIndex: headerRowIdx, rows, dates };
+  // Non-empty header cells, so the UI can offer them in a "read this field
+  // from column ..." picker, plus which column each field ended up using.
+  const headers = (grid[headerRowIdx] || [])
+    .map((cell, i) => ({ index: i, text: norm(cell) }))
+    .filter((h) => h.text)
+    .map((h) => ({ index: h.index, label: `${xlsx.utils.encode_col(h.index)} · ${h.text}` }));
+  const columns = {
+    received: idx.received,
+    ordered: idx.ordered,
+    rate: idx.rate,
+    unit: idx.unit,
+  };
+
+  return { sheetName: name, availableSheets, headerRowIndex: headerRowIdx, headers, columns, rows, dates };
 }
