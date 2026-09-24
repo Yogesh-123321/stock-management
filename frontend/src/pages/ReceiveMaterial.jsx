@@ -164,7 +164,7 @@ export default function ReceiveMaterial() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <h1 className="font-display text-2xl font-semibold mb-1">Receive material</h1>
       <p className="text-muted-foreground text-sm mb-6">
         Material has arrived at the office — follow the steps below to enter it into stock. Paperwork rarely arrives

@@ -35,6 +35,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  ChevronDown,
   X,
 } from "lucide-react";
 
@@ -411,6 +412,8 @@ export default function StockEntryStep({
   // stock until the Parts (item parts) section has approved it.
   const [approvals, setApprovals] = useState([]); // pending + approved requests
   const [approvalsLoading, setApprovalsLoading] = useState(false);
+  // The "Approved — ready to book" box can get long, so it can be folded away.
+  const [approvedOpen, setApprovedOpen] = useState(true);
 
   const loadApprovals = useCallback(async () => {
     setApprovalsLoading(true);
@@ -1043,18 +1046,43 @@ export default function StockEntryStep({
             {(readyApprovals.length > 0 || pendingApprovals.length > 0) && (
               <div className="mt-4 space-y-2">
                 {readyApprovals.length > 0 && (
-                  <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3">
-                    <p className="text-xs font-medium text-emerald-900 flex items-center gap-1.5">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Approved — ready to book ({readyApprovals.length})
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {readyApprovals.map((r) => (
-                        <Button key={r._id} type="button" size="sm" variant="outline" onClick={() => pickApproved(r)}>
-                          {r.newPart?.itemDescription}
-                        </Button>
-                      ))}
-                    </div>
+                  <div className="rounded-md border border-emerald-300 bg-emerald-50">
+                    <button
+                      type="button"
+                      onClick={() => setApprovedOpen((o) => !o)}
+                      aria-expanded={approvedOpen}
+                      className="flex w-full items-center justify-between gap-2 p-3 text-left"
+                    >
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-900">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Approved — ready to book ({readyApprovals.length})
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-emerald-800">
+                        {approvedOpen ? "Hide" : "Show"}
+                        <ChevronDown
+                          className={"h-4 w-4 transition-transform" + (approvedOpen ? " rotate-180" : "")}
+                        />
+                      </span>
+                    </button>
+                    {approvedOpen && (
+                      // Two columns on wider screens; each part is allowed to wrap onto
+                      // several lines instead of running past the edge of the box.
+                      <div className="grid max-h-80 grid-cols-1 gap-1.5 overflow-y-auto border-t border-emerald-200 p-3 sm:grid-cols-2">
+                        {readyApprovals.map((r) => (
+                          <Button
+                            key={r._id}
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => pickApproved(r)}
+                            title={r.newPart?.itemDescription}
+                            className="h-auto min-h-9 w-full min-w-0 justify-start whitespace-normal break-words py-1.5 text-left"
+                          >
+                            {r.newPart?.itemDescription}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {pendingApprovals.length > 0 && (
@@ -1063,7 +1091,7 @@ export default function StockEntryStep({
                       <ShieldAlert className="h-3.5 w-3.5" />
                       {pendingApprovals.length} part number(s) waiting for approval in the Parts section
                     </p>
-                    <p className="mt-1">
+                    <p className="mt-1 break-words">
                       {pendingApprovals.map((r) => r.newPart?.itemDescription).join(", ")} — quantity cannot be
                       entered until these are approved.
                     </p>
