@@ -1014,6 +1014,67 @@ export const editKitIssue = asyncHandler(async (req, res) => {
 });
 
 /*
+  GET /api/kits/issues/:id/previous-quantities
+  For the "Edit kit issue" screen: per-part quantities already issued
+  across EVERY earlier version of this kit's edit chain, not just the one
+  entry being edited from. Kit 1 -> Kit 1A -> Kit 1B: editing Kit 1A
+  towards a new Kit 1B should show Kit 1's qty PLUS Kit 1A's qty, not
+  Kit 1A alone.
+
+  `id` may be either an ISSUED entry (about to be edited into a new
+  version — the normal case) or a DRAFT (a saved-but-not-yet-issued edit
+  being revisited from the Saved kits tab). A draft hasn't deducted
+  anything itself, so its baseline is whatever the entry it was created
+  FROM (editedFrom) already accounts for — identical to what re-opening
+  that entry directly would show.
+
+  Walks the chain via rootIssue + editIndex (see KitIssue.js) rather than
+  editedFrom alone, so it totals the whole history in one query instead of
+  hopping one parent at a time.
+*/
+export const getKitIssueChainTotals = asyncHandler(async (req, res) => {
+  const entry = await KitIssue.findById(req.params.id).select("status editedFrom rootIssue editIndex");
+  if (!entry) {
+    res.status(404);
+    throw new Error("Kit issue not found");
+  }
+
+  const baseId = entry.status === "draft" ? entry.editedFrom : entry._id;
+  if (!baseId) {
+    // Draft made from scratch (never edited from an issued entry, or its
+    // source has since been removed) — nothing precedes it.
+    res.json({});
+    return;
+  }
+
+  const baseDoc =
+    String(baseId) === String(entry._id) ? entry : await KitIssue.findById(baseId).select("rootIssue editIndex");
+  if (!baseDoc) {
+    res.json({});
+    return;
+  }
+
+  const rootId = baseDoc.rootIssue || baseDoc._id;
+  const chain = await KitIssue.find({
+    $or: [{ _id: rootId }, { rootIssue: rootId }],
+    status: "issued",
+    editIndex: { $lte: baseDoc.editIndex || 0 },
+  })
+    .select("lines.ttUniquePartNumber lines.qtyIssued")
+    .lean();
+
+  const totals = {};
+  for (const doc of chain) {
+    for (const line of doc.lines || []) {
+      if (!line.ttUniquePartNumber) continue;
+      totals[line.ttUniquePartNumber] = (totals[line.ttUniquePartNumber] || 0) + (line.qtyIssued || 0);
+    }
+  }
+
+  res.json(totals);
+});
+
+/*
   DELETE /api/kits/issues/:issueId/lines/:lineId
   Reverts one line of one kit issue — restores the deducted quantity to the
   part and removes the line. Used from the Part history ledger's "undo"

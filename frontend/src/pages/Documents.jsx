@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -943,7 +944,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
   );
 }
 
-function TaxInvoiceTab() {
+function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -976,6 +977,31 @@ function TaxInvoiceTab() {
     const t = setTimeout(load, 250);
     return () => clearTimeout(t);
   }, [load]);
+
+  // Deep-link from Part history "Stock movements": jump straight into the
+  // tax invoice a delivery was booked against, instead of making the user
+  // hunt for it in the list below. Fetched by id directly (rather than
+  // found in `rows`) so it still opens even if the row is filtered out by
+  // the current search text or hasn't loaded yet.
+  useEffect(() => {
+    if (!openInvoiceId) return;
+    let cancelled = false;
+    api
+      .get(`/tax-invoices/${openInvoiceId}`)
+      .then(({ data }) => {
+        if (!cancelled && data) setStockFor(data);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Could not open that tax invoice");
+      })
+      .finally(() => {
+        if (!cancelled) onOpenedInvoice?.();
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openInvoiceId]);
 
   // Only OPEN POs / PIs can receive a tax invoice — that's the dropdown source.
   useEffect(() => {
@@ -1185,9 +1211,29 @@ function TaxInvoiceTab() {
 }
 
 export default function Documents() {
-  const [tab, setTab] = useState("po");
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Supports a deep link from Part history's "Stock movements" ledger:
+  // /documents?tab=tax&invoiceId=<id> lands here already on the Tax
+  // invoices tab, with that specific invoice opened below.
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "po");
   const [poSource, setPoSource] = useState("received"); // received (from vendors) | generated (PO Generator)
   const [piSource, setPiSource] = useState("received"); // received (from vendors) | generated (issued by TISPL)
+  const openInvoiceId = searchParams.get("invoiceId") || null;
+
+  // Once the deep-linked invoice has been opened (or failed to), drop
+  // invoiceId from the URL so a manual refresh/back doesn't reopen it, and
+  // so switching tabs afterwards doesn't try to open it again.
+  const clearOpenInvoiceParam = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("invoiceId");
+        next.delete("tab");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
 
   return (
     <div className="space-y-6">
@@ -1272,7 +1318,9 @@ export default function Documents() {
             </div>
           )}
 
-          {tab === "tax" && <TaxInvoiceTab />}
+          {tab === "tax" && (
+            <TaxInvoiceTab openInvoiceId={openInvoiceId} onOpenedInvoice={clearOpenInvoiceParam} />
+          )}
         </CardContent>
       </Card>
     </div>

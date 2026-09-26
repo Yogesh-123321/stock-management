@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -50,6 +51,8 @@ import {
   Download,
   Paperclip,
   ClipboardList,
+  ExternalLink,
+  Boxes,
 } from "lucide-react";
 
 /**
@@ -1540,6 +1543,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
  * (document/audit trail rather than stock-entries / kit-issues).
  * ------------------------------------------------------------------ */
 function PartHistoryDialog({ part, onClose, onPartChanged }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("stock"); // "stock" | "documents"
 
   const [loading, setLoading] = useState(true);
@@ -1551,6 +1555,10 @@ const [analysisLoading, setAnalysisLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
   const [docEntries, setDocEntries] = useState([]);
   const docsLoadedRef = useRef(false);
+  const [kitsLoading, setKitsLoading] = useState(false);
+  const [kitsError, setKitsError] = useState("");
+  const [kitUsage, setKitUsage] = useState([]);
+  const kitsLoadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1612,6 +1620,25 @@ useEffect(() => {
       .finally(() => setDocsLoading(false));
   }, [tab, part._id]);
 
+  // "Used in kits" tab loads lazily too — the BOM lookup across every kit
+  // template only runs once the user actually asks to see it.
+  useEffect(() => {
+    if (tab !== "kits" || kitsLoadedRef.current) return;
+    kitsLoadedRef.current = true;
+    setKitsLoading(true);
+    setKitsError("");
+    api
+      .get(`/parts/${part._id}/kits`)
+      .then(({ data }) => {
+        setKitUsage(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        setKitUsage([]);
+        setKitsError(err.response?.data?.message || "Could not load kit usage");
+      })
+      .finally(() => setKitsLoading(false));
+  }, [tab, part._id]);
+
   const entries = data?.entries || [];
 
   // Receipt lines ("in") live in the stock-entries collection; kit issue
@@ -1668,6 +1695,7 @@ useEffect(() => {
   const TABS = [
     { key: "stock", label: "Stock movements", icon: History },
     { key: "documents", label: "Documents", icon: Paperclip },
+    { key: "kits", label: "Used in kits", icon: Boxes },
   ];
 
   return (
@@ -1999,22 +2027,42 @@ useEffect(() => {
                                 )}
                               </td>
                               <td className="min-w-0 px-2 py-1.5 align-top text-xs text-muted-foreground">
-                                <span
-                                  className="block truncate"
-                                  title={
-                                    e.reference
+                                {e.taxInvoiceId ? (
+                                  <button
+                                    type="button"
+                                    className="flex max-w-full items-center gap-1 truncate text-primary hover:underline"
+                                    title="Open the tax invoice this delivery was booked against"
+                                    onClick={() =>
+                                      navigate(`/documents?tab=tax&invoiceId=${e.taxInvoiceId}`)
+                                    }
+                                  >
+                                    <ExternalLink className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">
+                                      {e.reference
+                                        ? `${e.reference.type}${
+                                            e.reference.number ? ` #${e.reference.number}` : ""
+                                          }`
+                                        : "Tax invoice"}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span
+                                    className="block truncate"
+                                    title={
+                                      e.reference
+                                        ? `${e.reference.type}${
+                                            e.reference.number ? ` #${e.reference.number}` : ""
+                                          }`
+                                        : ""
+                                    }
+                                  >
+                                    {e.reference
                                       ? `${e.reference.type}${
                                           e.reference.number ? ` #${e.reference.number}` : ""
                                         }`
-                                      : ""
-                                  }
-                                >
-                                  {e.reference
-                                    ? `${e.reference.type}${
-                                        e.reference.number ? ` #${e.reference.number}` : ""
-                                      }`
-                                    : "—"}
-                                </span>
+                                      : "—"}
+                                  </span>
+                                )}
                               </td>
                               <td
                                 className={`px-2 py-1.5 align-top text-right font-mono-tech ${
@@ -2153,6 +2201,79 @@ useEffect(() => {
                           </td>
                           <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
                             {e.changedBy || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === "kits" && (
+            <>
+              {kitsLoading && (
+                <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+              )}
+
+              {!kitsLoading && kitsError && (
+                <p className="py-8 text-center text-sm text-destructive">{kitsError}</p>
+              )}
+
+              {!kitsLoading && !kitsError && kitUsage.length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  This part isn't used in any kit template yet.
+                </p>
+              )}
+
+              {!kitsLoading && !kitsError && kitUsage.length > 0 && (
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary/70">
+                      <tr className="border-b border-border">
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Kit
+                        </th>
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Revision
+                        </th>
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Ref. designator(s)
+                        </th>
+                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Qty / kit
+                        </th>
+                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
+                      {kitUsage.map((k) => (
+                        <tr key={k.kitTemplateId} className="border-b border-border">
+                          <td className="px-2.5 py-1.5 align-top">
+                            <div className="font-medium">{k.kitName}</div>
+                            {k.kitCode && (
+                              <div className="text-xs text-muted-foreground">{k.kitCode}</div>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
+                            {k.revision || "—"}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
+                            {k.referenceDesignators || "—"}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top text-right font-mono-tech">
+                            {k.qtyPerKit}
+                          </td>
+                          <td className="px-2.5 py-1.5 align-top">
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant={k.isActive ? "success" : "secondary"}>
+                                {k.isActive ? "Active" : "Inactive"}
+                              </Badge>
+                              {k.dnp && <Badge variant="warning">DNP</Badge>}
+                            </div>
                           </td>
                         </tr>
                       ))}

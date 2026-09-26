@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
+import KitTemplate from "../models/KitTemplate.js";
 import User from "../models/User.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
 import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
@@ -305,6 +306,11 @@ export const getPartHistory = asyncHandler(async (req, res) => {
           id: entry.purchaseOrder._id,
         }
       : null,
+    // The tax invoice that actually moved this line into IQC/stock (see
+    // StockEntry.appliedVia) — separate from `reference`, which points at
+    // the PO/PI instead. Lets the ledger link straight to the invoice tab
+    // for the specific tax invoice this delivery was booked against.
+    taxInvoiceId: entry.appliedVia || null,
     matchType: entry.matchType,
     enteredBy: entry.enteredBy || null,
     remarks: entry.remarks || null,
@@ -923,6 +929,56 @@ export const getPartDocumentHistory = asyncHandler(async (req, res) => {
     }));
 
   res.json(entries);
+});
+
+/*
+  GET /api/parts/:id/kits
+  Every kit template this part is used in — i.e. the BOM "recipe", not
+  issue history (see attachKitDemand above for what's actually gone out
+  the door). Matched the same way KitTemplate itself matches, purely by
+  ttUniquePartNumber, since a template never keeps a live reference to a
+  Part document. Both active and inactive templates are returned (each
+  flagged with isActive) so a part doesn't just silently disappear from
+  this list the moment a template is retired.
+*/
+export const getPartKitUsage = asyncHandler(async (req, res) => {
+  const part = await Part.findById(req.params.id).select("ttUniquePartNumber");
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+
+  if (!part.ttUniquePartNumber) {
+    res.json([]);
+    return;
+  }
+
+  const templates = await KitTemplate.find({
+    "items.ttUniquePartNumber": part.ttUniquePartNumber,
+  })
+    .sort({ kitName: 1 })
+    .lean();
+
+  const usage = templates.map((t) => {
+    // A part number could in principle appear on more than one line of
+    // the same BOM (e.g. split across reference designators) — sum those
+    // together so "qty per kit" reflects the template's true total draw.
+    const lines = (t.items || []).filter((i) => i.ttUniquePartNumber === part.ttUniquePartNumber);
+    const qtyPerKit = lines.reduce((sum, l) => sum + (l.qtyPerKit || 0), 0);
+    const dnp = lines.length > 0 && lines.every((l) => l.dnp);
+    return {
+      kitTemplateId: t._id,
+      kitName: t.kitName,
+      kitCode: t.kitCode || null,
+      revision: t.revision || null,
+      isActive: !!t.isActive,
+      qtyPerKit,
+      dnp,
+      referenceDesignators: lines.map((l) => l.referenceDesignator).filter(Boolean).join(", "),
+    };
+  });
+
+  res.json(usage);
 });
 // GET /api/parts/export/vendor-links-csv — one row per part<->vendor link
 // (the "related details" alongside the parts master itself), ADMIN ONLY.

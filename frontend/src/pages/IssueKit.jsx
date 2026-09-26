@@ -149,6 +149,27 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   const [extraLines, setExtraLines] = useState([]);
   const [addingPart, setAddingPart] = useState(false);
 
+  // Per-part totals already issued across EVERY earlier version of this
+  // kit's edit chain (Kit 1 + Kit 1A + ... ), not just the entry this
+  // dialog was opened from — see getKitIssueChainTotals. Falls back to
+  // the immediate entry's own qty (the old behaviour) until this loads,
+  // and stays on that fallback if the fetch fails.
+  const [previousTotals, setPreviousTotals] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get(`/kits/issues/${issue._id}/previous-quantities`)
+      .then(({ data }) => {
+        if (!cancelled) setPreviousTotals(data || {});
+      })
+      .catch(() => {
+        if (!cancelled) setPreviousTotals({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [issue._id]);
+
   const qtyNum = Number(quantity) || 0;
 
   const preview = useMemo(
@@ -158,6 +179,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         const required = (l.qtyPerKit || 0) * qtyNum;
         const ok = available >= required;
         const defaultToIssue = Math.min(available, required);
+        const cumulativePrevious = previousTotals?.[l.ttUniquePartNumber];
         return {
           ttUniquePartNumber: l.ttUniquePartNumber,
           itemDescription: l.part?.itemDescription || l.itemDescription,
@@ -166,10 +188,12 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
           available,
           ok,
           defaultToIssue,
-          previouslyIssued: l.qtyIssued,
+          // Cumulative across the whole chain once loaded; the immediate
+          // entry's own qty as a fallback while that's in flight.
+          previouslyIssued: cumulativePrevious !== undefined ? cumulativePrevious : l.qtyIssued,
         };
       }),
-    [issue.lines, qtyNum]
+    [issue.lines, qtyNum, previousTotals]
   );
 
   const hasShortfall = preview.some((p) => !p.ok);
@@ -252,7 +276,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
@@ -315,8 +339,18 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
               )}
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-sm">
+            <div className="rounded-lg border border-border">
+              <table className="w-full table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[13%]" />
+                  <col className="w-[23%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
                 <thead className="bg-secondary/70">
                   <tr className="border-b border-border">
                     {[
@@ -324,14 +358,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                       "Description",
                       "Qty/kit",
                       "Required",
-                      isDraft ? "Last saved" : "Previously issued",
+                      isDraft ? "Last saved" : "Prev. issued",
                       "Available",
                       "Qty issuing",
                       "Status",
                     ].map((h) => (
                       <th
                         key={h}
-                        className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
+                        className="px-1.5 py-1.5 text-left text-[11px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
                       >
                         {h}
                       </th>
@@ -341,26 +375,26 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                 <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                   {preview.map((p) => (
                     <tr key={p.ttUniquePartNumber} className="border-b border-border">
-                      <td className="px-2.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
-                      <td className="px-2.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
-                      <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{p.qtyPerKit}</td>
-                      <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{p.required}</td>
-                      <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground">
+                      <td className="break-all px-1.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
+                      <td className="break-words px-1.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
+                      <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.qtyPerKit}</td>
+                      <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.required}</td>
+                      <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground">
                         {p.previouslyIssued}
                       </td>
-                      <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{p.available}</td>
-                      <td className="px-2.5 py-1.5">
+                      <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.available}</td>
+                      <td className="px-1.5 py-1.5">
                         <Input
                           type="number"
                           min="0"
                           max={p.available}
                           step="1"
-                          className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
+                          className="h-7 w-full font-mono-tech text-xs text-right"
                           value={issueQtyOverrides[p.ttUniquePartNumber] ?? String(p.defaultToIssue)}
                           onChange={(e) => setQtyToIssueFor(p.ttUniquePartNumber, e.target.value)}
                         />
                       </td>
-                      <td className="px-2.5 py-1.5">
+                      <td className="px-1.5 py-1.5">
                         {p.ok ? (
                           <Badge variant="success" className="gap-1">
                             <CheckCircle2 className="h-3 w-3" />

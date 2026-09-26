@@ -12,6 +12,7 @@ import {
   getKitIssueById,
   issueKit,
   editKitIssue,
+  getKitIssueChainTotals,
   deleteKitIssueLine,
   saveKitDraft,
   updateKitDraft,
@@ -30,6 +31,10 @@ router.get("/issues", getKitIssues);
 // Excel download of ONE issued kit (who it went to, who issued it, every
 // material) — a per-kit slip, never a dump of all kits.
 router.get("/issues/:id/export", protect, exportKitIssueById);
+// Cumulative per-part totals across every earlier version of this kit's
+// edit chain — see getKitIssueChainTotals. Declared before "/issues/:id"
+// for the same reason as "/export" above.
+router.get("/issues/:id/previous-quantities", getKitIssueChainTotals);
 router.get("/issues/:id", getKitIssueById);
 // Never touches the original entry — always creates a new KitIssue in
 // that entry's edit series (see editKitIssue). Same permission as issuing
