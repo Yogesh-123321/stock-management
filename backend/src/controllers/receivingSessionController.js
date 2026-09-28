@@ -58,6 +58,15 @@ export const updateReceivingSession = asyncHandler(async (req, res) => {
     throw new Error("Receiving session not found");
   }
 
+  // A delivery can only be completed by uploading its tax invoice — that is
+  // done server-side in uploadTaxInvoice, which is the only thing that marks a
+  // session completed / taxInvoiceDone. Refuse it here so a session can never
+  // be closed (or stock pushed towards IQC) without an invoice on file.
+  if (req.body.status === "completed" || req.body.taxInvoiceDone === true) {
+    res.status(400);
+    throw new Error("A delivery can only be completed by uploading its tax invoice");
+  }
+
   const fields = [
     "purchaseOrderDoc",
     "proformaInvoiceDoc",
@@ -65,7 +74,6 @@ export const updateReceivingSession = asyncHandler(async (req, res) => {
     "poSkipped",
     "piSkipped",
     "stockEntryDone",
-    "taxInvoiceDone",
     "notes",
     "status",
   ];

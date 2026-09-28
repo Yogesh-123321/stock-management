@@ -14,8 +14,7 @@ import DocumentMismatchWarning from "@/components/DocumentMismatchWarning";
 import FieldError from "@/components/FieldError";
 import { useFormValidation } from "@/lib/useFormValidation";
 import {
-  UploadCloud,
-  SkipForward,
+  ArrowLeft,
   AlertTriangle,
   CheckCircle2,
   Loader2,
@@ -52,8 +51,9 @@ export default function TaxInvoiceStep({
   // (quantity fixed, or a line removed entirely) right up until the tax
   // invoice is uploaded.
   sessionId = null,
+  // Back to Step 4 (stock entry) to add / fix / remove lines.
+  onBack,
   onUploaded,
-  onSkip,
 }) {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
@@ -258,10 +258,19 @@ export default function TaxInvoiceStep({
   const expectedQty = docQtys.length > 0 ? docQtys[0].qty : null;
   const pendingQty = expectedQty == null ? null : expectedQty - receivedTotal;
 
+  // Quantity check against the PO/PI — this used to run when finishing the
+  // stock entry step; it now runs here, as part of "Finish stock entry".
+  const poPiMismatch = poQty != null && piQty != null && poQty !== piQty;
+  const stockMismatch = docQtys.length > 0 && docQtys.some((d) => d.qty !== receivedTotal);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (sessionEntries.length === 0) {
+      toast.error("No stock lines to finish — go back and log at least one stock entry");
+      return;
+    }
     if (!file) {
-      toast.error("Attach the tax invoice file, or skip if it hasn't arrived yet");
+      toast.error("Attach the tax invoice file — stock only goes to IQC once the invoice is uploaded");
       return;
     }
     if (!v.validateAll({ invoiceNumber, invoiceQuantity })) {
@@ -272,10 +281,40 @@ export default function TaxInvoiceStep({
       toast.error("This invoice number has already been uploaded — change it before continuing");
       return;
     }
+    if (stockMismatch || poPiMismatch) {
+      const ok = window.confirm(
+        `Quantity check:\n${docQtys.map((d) => `${d.label}: ${d.qty}`).join("\n")}\n` +
+          `Received earlier: ${priorTotal}\nEntered now: ${enteredTotal}\nTotal received: ${receivedTotal}\n` +
+          (pendingQty != null && pendingQty > 0 ? `Still pending: ${pendingQty}\n` : "") +
+          "\nFinish anyway? The PO/PI will be left OPEN until the full quantity is received."
+      );
+      if (!ok) return;
+    }
+
     setSubmitting(true);
     try {
+      if (stockMismatch || poPiMismatch) {
+        // Let admins know this PO/PI is being left open with a quantity
+        // mismatch, rather than leaving it to be noticed later.
+        api
+          .post("/stock-entries/report-mismatch", {
+            purchaseOrder: purchaseOrder?._id || null,
+            poQty,
+            piQty,
+            previouslyReceived: priorTotal,
+            enteredNow: enteredTotal,
+            totalReceived: receivedTotal,
+          })
+          .catch(() => {
+            // Best-effort — must never block finishing the receiving flow.
+          });
+      }
+
       const fd = new FormData();
       fd.append("vendor", vendor._id);
+      // Scopes the move-to-IQC to THIS delivery's lines only, and lets the
+      // server close the session once the invoice is saved.
+      if (sessionId) fd.append("receivingSession", sessionId);
       if (purchaseOrder?._id) fd.append("purchaseOrder", purchaseOrder._id);
       fd.append("invoiceNumber", invoiceNumber);
       if (invoiceDate) fd.append("invoiceDate", invoiceDate);
@@ -338,11 +377,12 @@ export default function TaxInvoiceStep({
       <CardHeader>
         <CardTitle>Step 5 · Tax invoice</CardTitle>
         <CardDescription>
-          Once stock entry is done, upload the tax invoice for this delivery from <strong>{vendor.companyName}</strong>.
-          Uploading moves the lines entered into <strong>IQC stock</strong> — they are inspected separately from the
-          Parts master (MISC stock → IQC stock) and reach main stock once accepted. If the invoice hasn't arrived
-          yet, skip for now — receiving is still marked complete. When the invoice, PO/PI and the stock entered all agree on quantity, the PO and PI
-          are closed automatically.
+          Upload the tax invoice for this delivery from <strong>{vendor.companyName}</strong> and finish the stock
+          entry. The tax invoice is required — the lines entered move into <strong>IQC stock</strong> only once it is
+          uploaded; they are then inspected separately from the Parts master (MISC stock → IQC stock) and reach main
+          stock once accepted. If the invoice hasn't arrived yet, use <strong>Save &amp; exit</strong> below and come
+          back to this delivery when it does. When the invoice, PO/PI and the stock entered all agree on quantity, the
+          PO and PI are closed automatically.
         </CardDescription>
       </CardHeader>
 
@@ -579,13 +619,23 @@ export default function TaxInvoiceStep({
           )}
         </CardContent>
         <CardFooter className="justify-between">
-          <Button type="button" variant="secondary" onClick={onSkip} disabled={submitting}>
-            <SkipForward className="h-4 w-4 mr-2" />
-            Not received yet — skip
+          <Button type="button" variant="outline" onClick={onBack} disabled={submitting}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to stock entry
           </Button>
-          <Button type="submit" disabled={submitting || !!duplicateInvoice} title={duplicateInvoice ? "Change the invoice number to continue" : undefined}>
-            <UploadCloud className="h-4 w-4 mr-2" />
-            {submitting ? "Uploading..." : "Upload & continue"}
+          <Button
+            type="submit"
+            disabled={submitting || !file || !!duplicateInvoice}
+            title={
+              duplicateInvoice
+                ? "Change the invoice number to continue"
+                : !file
+                ? "Attach the tax invoice file to finish"
+                : undefined
+            }
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            {submitting ? "Uploading..." : "Finish stock entry"}
           </Button>
         </CardFooter>
       </form>

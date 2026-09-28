@@ -5,6 +5,7 @@ import TaxInvoice from "../models/TaxInvoice.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import Vendor from "../models/Vendor.js";
 import StockEntry from "../models/StockEntry.js";
+import ReceivingSession from "../models/ReceivingSession.js";
 import Part from "../models/Part.js";
 import { generateBatchCode } from "../utils/batchCode.js";
 import { extractInvoiceLineItems, AiExtractionError } from "../utils/aiDocumentExtract.js";
@@ -503,7 +504,7 @@ export const reconcileDelivery = async (primaryDoc, invoiceQuantity) => {
   guessed from "today", since that would be exactly the stock-entry date
   this is meant to be independent of).
 */
-const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate) => {
+const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate, receivingSession = null) => {
   const docIds = [];
   if (poDoc) {
     docIds.push(poDoc._id);
@@ -513,10 +514,16 @@ const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate) =
     if (sibling) docIds.push(sibling._id);
   }
 
-  const filter =
-    docIds.length > 0
-      ? { purchaseOrder: { $in: docIds }, iqcStatus: "awaiting_invoice" }
-      : { vendor: vendorId, purchaseOrder: null, iqcStatus: "awaiting_invoice" };
+  // When the invoice is uploaded from the "Receive material" wizard, only the
+  // lines logged in THAT delivery move to IQC. Without this, an invoice for one
+  // delivery would also sweep in another delivery's lines (same vendor with no
+  // PO/PI, or the same PO/PI received across sessions) whose own tax invoice
+  // has not been uploaded — stock must reach IQC only against its own invoice.
+  const filter = receivingSession
+    ? { receivingSession, iqcStatus: "awaiting_invoice" }
+    : docIds.length > 0
+    ? { purchaseOrder: { $in: docIds }, iqcStatus: "awaiting_invoice" }
+    : { vendor: vendorId, purchaseOrder: null, iqcStatus: "awaiting_invoice" };
 
   const pending = await StockEntry.find(filter).populate("part");
   const batchCode = generateBatchCode(invoiceDate);
@@ -536,7 +543,7 @@ const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate) =
 
 // POST /api/tax-invoices (upload the tax invoice for a delivery, after stock entry)
 export const uploadTaxInvoice = asyncHandler(async (req, res) => {
-  const { vendor, purchaseOrder, invoiceNumber, invoiceDate, notes, invoiceQuantity } = req.body;
+  const { vendor, purchaseOrder, invoiceNumber, invoiceDate, notes, invoiceQuantity, receivingSession } = req.body;
 
   if (!vendor) {
     res.status(400);
@@ -601,8 +608,24 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
     poDoc,
     vendor,
     invoice._id,
-    invoice.invoiceDate
+    invoice.invoiceDate,
+    receivingSession || null
   );
+
+  // The tax invoice is what completes a delivery in the "Receive material"
+  // wizard. The session is closed here, server-side, only once the invoice has
+  // really been saved — it can no longer be marked complete without one (see
+  // updateReceivingSession).
+  if (receivingSession) {
+    await ReceivingSession.findByIdAndUpdate(receivingSession, {
+      currentStep: 5,
+      stockEntryDone: true,
+      taxInvoiceDone: true,
+      status: "completed",
+      completedAt: new Date(),
+      lastSavedAt: new Date(),
+    });
+  }
   const iqcPending = {
     count: movedEntries.length,
     totalQuantity: movedEntries.reduce((sum, e) => sum + (Number(e.quantityReceived) || 0), 0),

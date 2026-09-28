@@ -157,10 +157,22 @@ export default function ReceiveMaterial() {
     loadSessions();
   };
 
-  const finishSession = async () => {
-    await persist({ currentStep: 5, taxInvoiceDone: true, status: "completed" });
+  // Called only after the tax invoice has been uploaded. The server itself
+  // marks the session completed as part of that upload (a session can't be
+  // completed from here), so there is nothing to persist — just show the
+  // "complete" screen.
+  const finishSession = () => {
+    setStockEntryDone(true);
     setDone(true);
     loadSessions();
+  };
+
+  // Back from the tax invoice step to stock entry — lines can be added, fixed
+  // or removed again. Nothing has moved to IQC yet (that only happens on the
+  // invoice upload), so this is always safe.
+  const backToStockEntry = () => {
+    setStockEntryDone(false);
+    goToStep(4, { stockEntryDone: false });
   };
 
   return (
@@ -295,10 +307,9 @@ export default function ReceiveMaterial() {
               deliveryDocs={[purchaseOrderDoc, proformaInvoiceDoc]}
               expectedQuantities={expectedQuantities}
               sessionId={sessionId}
-              onFinish={({ enteredQuantity = 0 } = {}) => {
-                setStockEntryDone(true);
+              onContinue={({ enteredQuantity = 0 } = {}) => {
                 setStockQuantity(enteredQuantity);
-                goToStep(5, { stockEntryDone: true, stockQuantity: enteredQuantity });
+                goToStep(5, { stockQuantity: enteredQuantity });
               }}
             />
           )}
@@ -311,11 +322,12 @@ export default function ReceiveMaterial() {
               expectedQuantities={expectedQuantities}
               enteredQuantity={stockQuantity}
               sessionId={sessionId}
-              // Tax invoice is the last step. Uploading it moves the lines into
-              // IQC stock; inspection is done separately (by any user) from the
-              // Parts master, so the delivery is finished here.
+              onBack={backToStockEntry}
+              // Tax invoice is the last step, and it can't be skipped. Uploading
+              // it moves the lines into IQC stock; inspection is done separately
+              // (by any user) from the Parts master, so the delivery is finished
+              // here.
               onUploaded={finishSession}
-              onSkip={finishSession}
             />
           )}
 

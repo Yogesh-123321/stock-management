@@ -369,7 +369,10 @@ export default function StockEntryStep({
   // "Resume" — this is the reliable link, since most deliveries never get a
   // PO/PI attached to key off of instead. See the restore effect below.
   sessionId = null,
-  onFinish,
+  // Moves on to the tax invoice step. Finishing the stock entry (quantity
+  // check + closing the delivery) now happens on that step, together with the
+  // invoice upload — stock only goes to IQC once the invoice is uploaded.
+  onContinue,
 }) {
   // "lookup" -> "matched" | "approved-request" -> "choose-alternate" -> "new-part" -> "lookup"
   const [phase, setPhase] = useState("lookup");
@@ -793,36 +796,14 @@ export default function StockEntryStep({
     }
   };
 
-  const handleFinish = () => {
+  // Just moves on to the tax invoice step — the quantity check and the final
+  // "Finish stock entry" now live there (see TaxInvoiceStep).
+  const handleContinue = () => {
     if (sessionEntries.length === 0) {
-      toast.error("Log at least one stock entry before finishing");
+      toast.error("Log at least one stock entry before continuing");
       return;
     }
-    if (stockMismatch || docMismatch) {
-      const ok = window.confirm(
-        `Quantity check:\n${docQtys.map((d) => `${d.label}: ${d.qty}`).join("\n")}\n` +
-          `Received earlier: ${priorTotal}\nEntered now: ${enteredTotal}\nTotal received: ${cumulativeTotal}\n` +
-          (remainingQty != null && remainingQty > 0 ? `Still pending: ${remainingQty}\n` : "") +
-          "\nContinue anyway? The PO/PI will be left OPEN until the full quantity is received."
-      );
-      if (!ok) return;
-      // Let admins know this PO/PI is being left open with a quantity
-      // mismatch, rather than leaving it to be noticed later.
-      api
-        .post("/stock-entries/report-mismatch", {
-          purchaseOrder: purchaseOrder?._id || null,
-          poQty,
-          piQty,
-          previouslyReceived: priorTotal,
-          enteredNow: enteredTotal,
-          totalReceived: cumulativeTotal,
-          reportedBy: enteredBy,
-        })
-        .catch(() => {
-          // Best-effort — this should never block finishing the receiving flow.
-        });
-    }
-    onFinish({
+    onContinue({
       enteredQuantity: cumulativeTotal,
       sessionQuantity: enteredTotal,
       previouslyReceived: priorTotal,
@@ -887,8 +868,8 @@ export default function StockEntryStep({
           </div>
         )}
         <div className="flex justify-end">
-          <Button variant={sessionEntries.length > 0 ? "default" : "outline"} onClick={handleFinish}>
-            Finish stock entry
+          <Button variant={sessionEntries.length > 0 ? "default" : "outline"} onClick={handleContinue}>
+            Continue to tax invoice
           </Button>
         </div>
       </div>
@@ -1646,8 +1627,8 @@ export default function StockEntryStep({
       )}
 
       <div className="flex justify-end">
-        <Button variant={sessionEntries.length > 0 ? "default" : "outline"} onClick={handleFinish}>
-          Finish stock entry
+        <Button variant={sessionEntries.length > 0 ? "default" : "outline"} onClick={handleContinue}>
+          Continue to tax invoice
         </Button>
       </div>
     </div>
