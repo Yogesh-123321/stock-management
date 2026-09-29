@@ -11,8 +11,7 @@ const fmtDate = (value) =>
 
 const fmtIndian = (value) => {
   const number = Number(value) || 0;
-  const hasDecimals = !Number.isInteger(number);
-  const [integer, decimal] = Math.abs(number).toFixed(hasDecimals ? 2 : 0).split(".");
+  const [integer, decimal] = Math.abs(number).toFixed(2).split(".");
   const lastThree = integer.slice(-3);
   const leading = integer.slice(0, -3);
   const grouped = leading

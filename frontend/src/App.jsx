@@ -14,6 +14,7 @@ import PoGenerator from "@/pages/PoGenerator";
 import Login from "@/pages/Login";
 import Users from "@/pages/Users";
 import Approvals from "@/pages/Approvals";
+import Payments from "@/pages/Payments";
 import { AuthProvider, RequireAuth, RequirePermission } from "@/lib/auth";
 import ActivityLog from "@/pages/ActivityLog";
 const guard = (permission, element) => (
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/pi-generator" element={guard("pi.create", <PiGenerator />)} />
           <Route path="/po-generator" element={guard("po.create", <PoGenerator />)} />
           <Route path="/approvals" element={<Approvals />} />
+          <Route path="/payments" element={<Payments />} />
           <Route path="/users" element={guard("users.manage", <Users />)} />
         <Route path="/activity-log" element={guard("logs.view", <ActivityLog />)} />
         </Route>

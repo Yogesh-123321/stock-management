@@ -19,6 +19,7 @@ import {
   KeyRound,
   PackageOpen,
   Layers,
+  Wallet,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
@@ -28,7 +29,7 @@ import { ScrollText } from "lucide-react";
 // alphabetically correct spot rather than at the end.
 const navItems = [
   { to: "/activity-log", label: "Activity log", icon: ScrollText, permission: "logs.view" },
-  { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: true },
+  { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: "approvals" },
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: null },
   {
@@ -43,6 +44,13 @@ const navItems = [
   },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
+  {
+    to: "/payments",
+    label: "Payments",
+    icon: Wallet,
+    anyOf: ["payment.submit", "payment.approve", "payment.pay"],
+    badge: "payments",
+  },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
   { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
@@ -53,13 +61,13 @@ const navItems = [
   { to: "/vendors", label: "Vendors", icon: UsersIcon, permission: "vendor.create" },
 ];
 
-function useApprovalBadge() {
+function useApprovalBadge(url = "/approvals/pending-count") {
   const [count, setCount] = useState(0);
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const { data } = await api.get("/approvals/pending-count");
+        const { data } = await api.get(url);
         if (alive) setCount(data.count || 0);
       } catch {
         /* ignore */
@@ -71,7 +79,7 @@ function useApprovalBadge() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [url]);
   return count;
 }
 
@@ -87,6 +95,9 @@ export default function Layout() {
   const { user, can, canAny, signOut } = useAuth();
   const navigate = useNavigate();
   const pendingApprovals = useApprovalBadge();
+  // Bills waiting on me: to approve (admin) or to pay (cashier).
+  const pendingPayments = useApprovalBadge("/payment-bills/pending-count");
+  const badgeCounts = { approvals: pendingApprovals, payments: pendingPayments };
 
   const visible = navItems
     .filter((i) => (i.anyOf ? canAny(...i.anyOf) : !i.permission || can(i.permission)))
@@ -140,9 +151,9 @@ export default function Layout() {
             )}
             <Icon className={cn("shrink-0", mobile ? "h-3.5 w-3.5" : "h-4 w-4")} strokeWidth={2} />
             {label}
-            {badge && pendingApprovals > 0 && (
+            {badge && badgeCounts[badge] > 0 && (
               <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
-                {pendingApprovals}
+                {badgeCounts[badge]}
               </span>
             )}
           </>

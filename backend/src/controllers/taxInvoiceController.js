@@ -259,7 +259,10 @@ export const getTaxInvoiceLineMatch = asyncHandler(async (req, res) => {
 
   const forceRefresh = String(req.query.refresh || "") === "true";
 
-  if (!invoice.extractedLines || forceRefresh) {
+  // An empty cached list is treated as "not read yet" — a genuine read never
+  // stores zero lines (see extractInvoiceLineItems), so an empty array here is
+  // left over from a bad earlier read and should be redone, not reused.
+  if (!invoice.extractedLines?.length || forceRefresh) {
     let fileResponse;
     try {
       fileResponse = await fetch(invoice.documentUrl);

@@ -60,10 +60,10 @@ export const numberToWordsIndian = (value) => {
 export const amountInWordsRupees = (value) => `Rupees ${numberToWordsIndian(value)} Only`;
 
 // Indian digit grouping for display, e.g. 200000 -> "2,00,000"
-export const formatIndianNumber = (value) => {
+export const formatIndianNumber = (value, decimals = 2) => {
   const n = Number(value) || 0;
   const isNegative = n < 0;
-  const [intPart, decPart] = Math.abs(n).toFixed(Number.isInteger(n) ? 0 : 2).split(".");
+  const [intPart, decPart] = Math.abs(n).toFixed(decimals).split(".");
 
   let formatted;
   if (intPart.length <= 3) {

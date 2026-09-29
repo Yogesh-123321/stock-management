@@ -34,6 +34,10 @@ const taxInvoiceSchema = new mongoose.Schema(
           quantity: { type: Number, default: null },
           unitPrice: { type: Number, default: null },
           amount: { type: Number, default: null },
+          // 1-based page of the invoice PDF this row was read from. Absent on
+          // extractions cached before page tracking — "Regenerate extraction"
+          // fills it in.
+          page: { type: Number, default: null },
         },
       ],
       default: undefined,

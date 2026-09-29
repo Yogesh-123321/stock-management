@@ -131,6 +131,78 @@ const extractJsonObject = (text) => {
   return null;
 };
 
+// Like findMatchingBrace, but for either bracket pair ("{"/"}" or "["/"]").
+const findMatchingClose = (s, openIndex) => {
+  const open = s[openIndex];
+  const close = open === "[" ? "]" : "}";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = openIndex; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+};
+
+const ITEM_KEYS = ["description", "partNumber", "quantity", "unitPrice", "amount"];
+const ARRAY_KEY_ALIASES = ["items", "line_items", "lines", "rows"];
+const looksLikeItems = (arr) =>
+  arr.length > 0 && arr.every((x) => x && typeof x === "object" && !Array.isArray(x)) &&
+  ITEM_KEYS.some((k) => k in arr[0]);
+
+// Free models don't reliably follow "return exactly { lineItems: [...] }":
+// some reply with a bare [...] array, some rename the key, some wrap it in
+// prose or think out loud with the schema quoted back. Rather than insist on
+// one shape, look at EVERY balanced {...} / [...] in the reply and take the
+// list of item-like objects — the longest one, so a one-line schema example
+// quoted in the model's reasoning never beats the real answer. Returns null
+// if nothing usable is in the text; [] only if the model explicitly gave an
+// empty list under the requested key.
+const findItemArray = (text, key) => {
+  if (!text) return null;
+  let s = String(text);
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+  s = s.replace(/```(?:json)?/gi, "");
+
+  let best = null;
+  let sawEmptyExplicit = false;
+  const consider = (arr, explicitEmpty = false) => {
+    if (Array.isArray(arr) && arr.length === 0 && explicitEmpty) sawEmptyExplicit = true;
+    if (Array.isArray(arr) && looksLikeItems(arr) && (!best || arr.length > best.length)) best = arr;
+  };
+
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== "{" && s[i] !== "[") continue;
+    const end = findMatchingClose(s, i);
+    if (end === -1) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(s.slice(i, end + 1));
+    } catch {
+      continue;
+    }
+    if (Array.isArray(parsed)) consider(parsed);
+    else if (parsed && typeof parsed === "object") {
+      consider(parsed[key], true);
+      for (const alias of ARRAY_KEY_ALIASES) consider(parsed[alias]);
+    }
+  }
+  if (best) return best;
+  return sawEmptyExplicit ? [] : null;
+};
+
 const buildFieldSchemaText = (fields) =>
   fields
     .map((f) => `- "${f.name}" (${f.type || "string"}): ${f.description || "no description given"}`)
@@ -181,7 +253,38 @@ const renderAsImageDataUrls = async ({ buffer, mimeType, fileName }) => {
   return null;
 };
 
-const callOpenRouter = async ({ model, imageUrls, promptText, systemPrompt, timeoutMs }) => {
+// Re-renders ONE page of a PDF at a given scale. Used on retry rounds: a phone
+// photo of an invoice rasterised at scale 2 can be a multi-MB PNG, which free
+// providers intermittently reject ("Provider returned error") or answer with an
+// empty reply — the same page at a lower scale usually goes through.
+const renderSinglePdfPage = async (buffer, pageNumber, scale) => {
+  const doc = await renderPdfPages(buffer, { scale });
+  const pageBuffer = await doc.getPage(pageNumber);
+  return dataUrl("image/png", pageBuffer);
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Errors that will NEVER succeed on a retry, on this page or any later one:
+// retired models, models that can't be called through the plain chat API
+// (e.g. the "inkling" models: "only available on agentic harnesses"), bad
+// keys, etc. These are dropped from the chain for the rest of the request.
+const PERMANENT_MODEL_ERROR =
+  /No endpoints found|is not a valid model|model .* does not exist|only available on agentic harnesses|agentic harness|does not support image|no image input|not support(ed)? .*(image|vision)|Invalid API key|No auth credentials|User not found/i;
+
+const callOpenRouter = async ({
+  model,
+  imageUrls,
+  promptText,
+  systemPrompt,
+  timeoutMs,
+  maxTokens = 2000,
+  // When set, the reply must contain this key as an ARRAY, otherwise the
+  // attempt counts as failed (so the next model in the chain is tried)
+  // instead of being returned as if it were a usable answer. See the note
+  // in extractInvoiceLineItems for why this matters.
+  requireArrayKey = null,
+}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -197,7 +300,7 @@ const callOpenRouter = async ({ model, imageUrls, promptText, systemPrompt, time
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 2000,
+        max_tokens: maxTokens,
         // We only want the final JSON, not a visible chain-of-thought —
         // and more importantly, hidden reasoning tokens are billed out of
         // this same max_tokens budget, so an enabled-by-default "thinking"
@@ -220,15 +323,46 @@ const callOpenRouter = async ({ model, imageUrls, promptText, systemPrompt, time
 
     const body = await response.json().catch(() => null);
     if (!response.ok) {
-      const msg = body?.error?.message || `HTTP ${response.status}`;
+      // OpenRouter's top-level message for an upstream failure is just
+      // "Provider returned error" — the actual reason (rate limit, image too
+      // large, provider overloaded) is in error.metadata.raw.
+      let msg = body?.error?.message || `HTTP ${response.status}`;
+      const meta = body?.error?.metadata;
+      const rawDetail = meta?.raw ? (typeof meta.raw === "string" ? meta.raw : JSON.stringify(meta.raw)) : "";
+      const detail = [meta?.provider_name, rawDetail && rawDetail.replace(/\s+/g, " ").slice(0, 200)]
+        .filter(Boolean)
+        .join(": ");
+      msg = `${msg}${detail ? ` [${detail}]` : ""} (HTTP ${response.status})`;
       throw new Error(msg);
     }
 
     const message = body?.choices?.[0]?.message;
-    // Some providers still route output to `reasoning` even with
-    // reasoning disabled, so try `content` first and fall back to it.
+    const finishReason = body?.choices?.[0]?.finish_reason;
+    // Say WHY a reply was unusable — an empty reply, a token cut-off and a
+    // chatty non-JSON answer all look identical otherwise, and each needs a
+    // different fix.
+    const describeReply = () => {
+      const raw = String(message?.content || message?.reasoning || "").replace(/\s+/g, " ").trim();
+      return `finish_reason=${finishReason || "?"}, ${raw.length} chars${raw ? `, starts: "${raw.slice(0, 80)}"` : ""}`;
+    };
+
+    if (requireArrayKey) {
+      // Some providers still route output to `reasoning` even with
+      // reasoning disabled, so try `content` first and fall back to it.
+      const arr = findItemArray(message?.content, requireArrayKey) ?? findItemArray(message?.reasoning, requireArrayKey);
+      if (arr) return { [requireArrayKey]: arr };
+      // A reply cut off by the token limit is unbalanced JSON, so nothing
+      // balanced (or only a fragment) is found — that used to be read as
+      // "no line items" instead of as a failed attempt.
+      throw new Error(
+        finishReason === "length"
+          ? `Reply was cut off by the token limit before the "${requireArrayKey}" list finished (${describeReply()})`
+          : `Reply had no "${requireArrayKey}" list (${describeReply()})`
+      );
+    }
+
     const parsed = extractJsonObject(message?.content) || extractJsonObject(message?.reasoning);
-    if (!parsed) throw new Error("Model reply wasn't a parseable JSON object");
+    if (!parsed) throw new Error(`Model reply wasn't a parseable JSON object (${describeReply()})`);
     return parsed;
   } finally {
     clearTimeout(timer);
@@ -309,12 +443,22 @@ export async function extractDocumentFields({ buffer, mimeType, fileName, fields
   shape differ, so it's kept in this file rather than duplicated.
 */
 const LINE_ITEMS_SYSTEM_PROMPT = `You are a data-extraction assistant reading a scanned/uploaded vendor tax
-invoice / bill, provided to you as one or more page images. Read every line
-item in the invoice's item table (ignore header/footer info like billing
-address, tax summary rows, and totals).
+invoice / bill, provided to you as ONE page image (invoices often run over
+several pages and you are given them one at a time, with the item numbers
+S.N. carrying on from one page to the next). Read every line item in the
+item table on this page (ignore header/footer info like billing address, tax
+summary rows, and totals). At the foot of a page there may be a
+carry-forward total ("Totals c/o", "c/f") and at the top of the next page the
+same figure again ("b/d", "b/f", "brought down"): those are subtotals, not
+items, so never return them as line items. The LAST page usually also carries
+a tax / totals block under the item table ("Add : IGST", "CGST", "SGST",
+"Rounded Off", "Grand Total", an HSN-wise tax summary table, bank details):
+none of that is a line item either — only rows with a serial number S.N. and a
+goods description are items.
 
 Return ONLY a single valid JSON object — no markdown code fences, no
-commentary before or after it — of the shape:
+commentary before or after it — written compactly (no indentation or blank
+lines, so a long invoice isn't cut off) of the shape:
 
 { "lineItems": [
   {
@@ -331,7 +475,50 @@ Rules:
 - Use null for any value you cannot find or are not reasonably confident
   about — never invent or guess a value.
 - Numbers must be plain numbers (no currency symbols or thousands separators).
-- If the document has no readable line-item table, return { "lineItems": [] }.`;
+- If this page has no line-item rows, return { "lineItems": [] }.`;
+
+// Output budget PER PAGE. A page holds ~20-25 lines at ~50 tokens of JSON each,
+// and reasoning-style free models also spend part of this budget "thinking" —
+// so the 2000 the scalar-field extraction uses is too small. Override with
+// AI_LINE_ITEMS_MAX_TOKENS in .env.
+const LINE_ITEMS_MAX_TOKENS = Number(process.env.AI_LINE_ITEMS_MAX_TOKENS) || 4000;
+
+// How many passes through the whole model chain a single page gets before we
+// give up on it, the pause (ms) before rounds 2 and 3, and the PDF render
+// scale used on those later rounds (first round uses scale 2, see
+// renderAsImageDataUrls). Override rounds with AI_LINE_ITEMS_ROUNDS.
+const LINE_ITEMS_ROUNDS = Math.max(1, Number(process.env.AI_LINE_ITEMS_ROUNDS) || 3);
+const ROUND_BACKOFF_MS = [3000, 8000];
+const RETRY_RENDER_SCALES = [1.5, 1.1];
+
+// Carry-forward / subtotal rows a model may still emit despite the prompt.
+const NON_ITEM_ROW =
+  /^\s*(b\/?[df]\b|c\/?[of]\b|totals?\b|sub\s*-?total|brought|carried|add\s*:|less\s*:|(i|c|s)gst\b|round(ed)?\s*off|grand\s*total|net\s*(amount|total|payable)|amount\s*in\s*words)/i;
+
+// Models sometimes hand numbers back as strings ("1,460.00") which the
+// schema's Number fields would reject — coerce, or null if it isn't numeric.
+const toNumber = (v) => {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const n = Number(String(v).replace(/[,\s₹]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+
+const cleanLineItems = (items) =>
+  items
+    .filter((it) => {
+      if (!it || typeof it !== "object") return false;
+      const desc = String(it.description ?? "").trim();
+      if (!desc && !it.partNumber) return false;
+      return !NON_ITEM_ROW.test(desc);
+    })
+    .map((it) => ({
+      partNumber: it.partNumber == null || it.partNumber === "" ? null : String(it.partNumber),
+      description: String(it.description ?? "").trim(),
+      quantity: toNumber(it.quantity),
+      unitPrice: toNumber(it.unitPrice),
+      amount: toNumber(it.amount),
+    }));
 
 export async function extractInvoiceLineItems({ buffer, mimeType, fileName }) {
   if (!isAiExtractConfigured()) {
@@ -354,27 +541,94 @@ export async function extractInvoiceLineItems({ buffer, mimeType, fileName }) {
     );
   }
 
+  // One request PER PAGE rather than every page in a single request. A
+  // long invoice (53 lines over 3 pages) as one request needs a big reply
+  // that free models routinely cut off, garble or time out on, and several
+  // page images at once is where free vision models are weakest; a single
+  // page is ~20 lines and one image, which they handle reliably.
+  //
+  // Free models fail TRANSIENTLY all the time (upstream 5xx, rate limits,
+  // empty replies on a large image), so a page is only given up on after
+  // several ROUNDS through the model chain, with a growing pause between
+  // rounds and a smaller rendering of the page on the later ones. Pages
+  // already read are kept — only the failing page is retried.
+  const isPdf = mimeType === "application/pdf" || PDF_EXTS.includes(extOf(fileName));
   const attempts = [];
-  for (const model of OPENROUTER_MODELS) {
-    try {
-      const parsed = await callOpenRouter({
-        model,
-        imageUrls,
-        promptText: "Extract the line items as instructed and return only the JSON object.",
-        systemPrompt: LINE_ITEMS_SYSTEM_PROMPT,
-        timeoutMs: AI_EXTRACT_TIMEOUT_MS,
-      });
-      const lineItems = Array.isArray(parsed?.lineItems) ? parsed.lineItems : [];
-      return { lineItems, modelUsed: model };
-    } catch (err) {
-      attempts.push({ model, error: err.message });
+  const deadModels = new Set(); // permanently unusable — never retried
+  const modelsUsed = [];
+  const lineItems = [];
+  let preferred = null; // the model that last worked goes first on the next page
+
+  for (let p = 0; p < imageUrls.length; p++) {
+    let pageItems = null;
+
+    for (let round = 0; round < LINE_ITEMS_ROUNDS && !pageItems; round++) {
+      const liveModels = OPENROUTER_MODELS.filter((m) => !deadModels.has(m));
+      if (liveModels.length === 0) break; // nothing left worth calling
+
+      if (round > 0) await sleep(ROUND_BACKOFF_MS[round - 1] ?? 8000);
+
+      // Rounds after the first: same page, smaller image.
+      let pageImage = imageUrls[p];
+      if (round > 0 && isPdf) {
+        try {
+          pageImage = await renderSinglePdfPage(buffer, p + 1, RETRY_RENDER_SCALES[round - 1] ?? 1);
+        } catch {
+          // keep the original rendering if a re-render isn't possible
+        }
+      }
+
+      const order =
+        preferred && liveModels.includes(preferred)
+          ? [preferred, ...liveModels.filter((m) => m !== preferred)]
+          : liveModels;
+
+      for (const model of order) {
+        try {
+          const parsed = await callOpenRouter({
+            model,
+            imageUrls: [pageImage],
+            promptText: `This is page ${p + 1} of ${imageUrls.length}. Extract the line items as instructed and return only the JSON object.`,
+            systemPrompt: LINE_ITEMS_SYSTEM_PROMPT,
+            timeoutMs: AI_EXTRACT_TIMEOUT_MS,
+            maxTokens: LINE_ITEMS_MAX_TOKENS,
+            requireArrayKey: "lineItems",
+          });
+          pageItems = cleanLineItems(parsed.lineItems);
+          preferred = model;
+          if (!modelsUsed.includes(model)) modelsUsed.push(model);
+          break;
+        } catch (err) {
+          attempts.push({ model, page: p + 1, round: round + 1, error: err.message });
+          if (PERMANENT_MODEL_ERROR.test(err.message)) deadModels.add(model);
+        }
+      }
     }
+
+    if (!pageItems) {
+      const summary = [...new Map(
+        attempts.filter((a) => a.page === p + 1).map((a) => [`${a.model}|${a.error}`, a])
+      ).values()]
+        .map((a) => `${a.model}${deadModels.has(a.model) ? " (unusable, skipped)" : ""} — ${a.error}`)
+        .join("; ");
+      throw new AiExtractionError(
+        `Couldn't read page ${p + 1} of ${imageUrls.length} of this invoice — every configured model failed on it after ${LINE_ITEMS_ROUNDS} rounds (${summary})`,
+        attempts
+      );
+    }
+    // Remember which page of the PDF each row came from (1-based), so the UI
+    // can group the invoice's lines page-wise.
+    lineItems.push(...pageItems.map((it) => ({ ...it, page: p + 1 })));
   }
 
-  throw new AiExtractionError(
-    `Every configured model failed to read line items from this invoice (tried: ${attempts
-      .map((a) => `${a.model} — ${a.error}`)
-      .join("; ")})`,
-    attempts
-  );
+  // A page with no rows is fine (e.g. a totals-only last page), but an
+  // invoice with none at all is a failed read, not a real answer — surface
+  // an error rather than a silent empty result that then gets cached.
+  if (lineItems.length === 0) {
+    throw new AiExtractionError(
+      "The models replied but found no line items on any page of this invoice — try again, or check the file is a clear scan",
+      attempts
+    );
+  }
+  return { lineItems, modelUsed: modelsUsed.join(", ") };
 }

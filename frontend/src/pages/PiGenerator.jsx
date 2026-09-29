@@ -40,8 +40,7 @@ const emptyForm = () => ({
 
 const fmtIndian = (n) => {
   const num = Number(n) || 0;
-  const isInt = Number.isInteger(num);
-  const [intPart, decPart] = Math.abs(num).toFixed(isInt ? 0 : 2).split(".");
+  const [intPart, decPart] = Math.abs(num).toFixed(2).split(".");
   const last3 = intPart.slice(-3);
   const rest = intPart.slice(0, -3);
   const grouped = rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + last3 : last3;
@@ -584,11 +583,11 @@ export default function PiGenerator() {
                 </div>
                 <div className="space-y-1.5 sm:col-span-1">
                   <Label>Qty</Label>
-                  <Input type="number" min="0" value={item.quantity} onChange={setItem(i, "quantity")} />
+                  <Input type="number" min="0" step="any" value={item.quantity} onChange={setItem(i, "quantity")} />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>Rate</Label>
-                  <Input type="number" min="0" value={item.rate} onChange={setItem(i, "rate")} placeholder="200000" />
+                  <Input type="number" min="0" step="any" value={item.rate} onChange={setItem(i, "rate")} placeholder="200000.00" />
                 </div>
                 <div className="space-y-1.5 sm:col-span-1">
                   <Label className="text-xs text-muted-foreground">Amount</Label>
@@ -632,6 +631,7 @@ export default function PiGenerator() {
                 type="number"
                 min="0"
                 max="100"
+                step="any"
                 value={form.taxRate}
                 onChange={set("taxRate")}
                 disabled={form.taxType === "NONE"}

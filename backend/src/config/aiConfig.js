@@ -44,6 +44,12 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 // provider having a bad day doesn't take the whole feature down. All three
 // are free (":free") vision-capable models, so this whole feature runs at
 // $0 in token cost by default.
+//
+// NOTE: don't put "thinkingmachines/inkling*" models in this list — OpenRouter
+// rejects them from plain API calls ("only available on agentic harnesses"),
+// so they can never succeed here. (The extractor now skips such models
+// automatically after the first rejection, but leaving them out saves a
+// wasted request per page.)
 const DEFAULT_MODEL_CHAIN = [
   "nvidia/nemotron-nano-12b-v2-vl:free",
   "moonshotai/kimi-vl-a3b-thinking:free",

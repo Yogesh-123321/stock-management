@@ -31,6 +31,7 @@ const activityLogSchema = new mongoose.Schema(
         "kit",
         "receiving",
         "invoice",
+        "payment",
         "user",
         "auth",
         "other",

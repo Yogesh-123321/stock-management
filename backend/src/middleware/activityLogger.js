@@ -32,6 +32,7 @@ const ENTITY_BY_SEGMENT = {
   receive: "receiving",
   invoices: "invoice",
   "tax-invoices": "invoice",
+  "payment-bills": "payment",
   users: "user",
   auth: "auth",
   approvals: "other",
@@ -50,6 +51,7 @@ const LABEL = {
   kit: "kit",
   receiving: "material receipt",
   invoice: "tax invoice",
+  payment: "payment bill",
   user: "user",
   auth: "session",
   other: "record",
@@ -68,6 +70,8 @@ function describe(req, segment, entityType) {
     "issue",
     "edit",
   ];
+  if (tail === "pay") return `marked the ${LABEL[entityType]} as paid`;
+  if (tail === "resubmit") return `resubmitted the ${LABEL[entityType]}`;
   if (actionish.includes(tail)) return `${tail}d the ${LABEL[entityType]}`.replace("eed", "ed");
   if (segment === "auth" && tail === "login") return "signed in";
   if (segment === "auth" && tail === "logout") return "signed out";
@@ -88,6 +92,8 @@ function actionKey(req, segment) {
     "download",
     "issue",
     "edit",
+    "pay",
+    "resubmit",
   ];
   const suffix = known.includes(tail)
     ? tail
@@ -137,6 +143,7 @@ export function activityLogger(options = {}) {
         entityLabel:
           bodySnapshot?.voucherNo ||
           bodySnapshot?.invoiceNo ||
+          bodySnapshot?.billNo ||
           bodySnapshot?.ttUniquePartNumber ||
           bodySnapshot?.companyName ||
           bodySnapshot?.kitName ||

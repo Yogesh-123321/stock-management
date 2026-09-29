@@ -755,7 +755,7 @@ export default function PoGenerator() {
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>Quantity</Label>
-                  <Input type="number" min="0" value={item.quantity} onChange={setItem(i, "quantity")} />
+                  <Input type="number" min="0" step="any" value={item.quantity} onChange={setItem(i, "quantity")} />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>Unit</Label>
@@ -763,7 +763,7 @@ export default function PoGenerator() {
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>Rate</Label>
-                  <Input type="number" min="0" value={item.rate} onChange={setItem(i, "rate")} />
+                  <Input type="number" min="0" step="any" value={item.rate} onChange={setItem(i, "rate")} />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>per</Label>
@@ -813,6 +813,7 @@ export default function PoGenerator() {
                 type="number"
                 min="0"
                 max="100"
+                step="any"
                 value={form.taxRate}
                 onChange={set("taxRate")}
                 disabled={form.taxType === "NONE"}

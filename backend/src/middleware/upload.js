@@ -25,6 +25,10 @@ export const uploadBuyerDoc = makeUploader();
 
 export const uploadPODoc = makeUploader();
 
+// Bills uploaded to the payment approval flow (Payments page). The file is
+// streamed to Cloudinary under misc/payment-bills by paymentBillController.js.
+export const uploadPaymentBillDoc = makeUploader();
+
 export const uploadTaxInvoiceDoc = makeUploader();
 
 // Part photo (JPEG) + datasheet (PDF) — used both when raising a new-part
