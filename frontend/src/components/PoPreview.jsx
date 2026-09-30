@@ -23,7 +23,7 @@ const company = {
   gstin: "06AANCT1097L1ZS",
   stateName: "Haryana",
   stateCode: "06",
-  email: "info@technotrendz.co.in",
+  email: "presales@technotrendz.co.in",
 };
 
 const taxRows = (po) => {
