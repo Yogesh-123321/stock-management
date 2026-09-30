@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { ShieldCheck, ShieldX, Clock, RefreshCw } from "lucide-react";
+import { ShieldCheck, ShieldX, Clock, RefreshCw, Eye } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { APPROVAL_LABEL } from "@/lib/permissions";
 import { useAuth } from "@/lib/auth";
+import ApprovalPreviewDialog from "@/components/ApprovalPreviewDialog";
 
 const TABS = [
   { key: "pending", label: "Pending" },
@@ -57,6 +58,7 @@ export default function Approvals() {
   const [remarks, setRemarks] = useState({});
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [previewRow, setPreviewRow] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,6 +84,7 @@ export default function Approvals() {
       });
       toast.success(action === "approve" ? "Approved" : "Rejected");
       setRemarks((r) => ({ ...r, [row._id]: "" }));
+      setPreviewRow((p) => (p?._id === row._id ? null : p));
       load();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Could not record the decision");
@@ -165,12 +168,19 @@ export default function Approvals() {
                 </TableEmpty>
               )}
               {items.map((row) => (
-                <TableRow key={row._id}>
+                <TableRow
+                  key={row._id}
+                  className="cursor-pointer"
+                  onClick={() => setPreviewRow(row)}
+                >
                   <TableCell>
                     <Badge variant="outline">{APPROVAL_LABEL[row.entityType]}</Badge>
                   </TableCell>
                   <TableCell>
-                    <p className="font-medium">{row.title}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium">{row.title}</p>
+                      <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Click to preview" />
+                    </div>
                     {row.summary && (
                       <p className="text-[11px] text-muted-foreground">{row.summary}</p>
                     )}
@@ -198,7 +208,7 @@ export default function Approvals() {
                       {row.status}
                     </span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {row.status === "pending" && mayDecide(row) ? (
                       <div className="flex items-center gap-1.5">
                         <Input
@@ -243,6 +253,17 @@ export default function Approvals() {
           </Table>
         </CardContent>
       </Card>
+
+      <ApprovalPreviewDialog
+        row={previewRow}
+        open={!!previewRow}
+        onOpenChange={(o) => !o && setPreviewRow(null)}
+        canDecide={previewRow ? mayDecide(previewRow) : false}
+        busy={previewRow ? busyId === previewRow._id : false}
+        remark={previewRow ? remarks[previewRow._id] || "" : ""}
+        onRemarkChange={(v) => previewRow && setRemarks((r) => ({ ...r, [previewRow._id]: v }))}
+        onDecide={decide}
+      />
     </div>
   );
 }

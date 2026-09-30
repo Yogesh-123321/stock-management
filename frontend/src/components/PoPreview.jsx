@@ -235,6 +235,7 @@ export default function PoPreview({ po }) {
                     <td className="border-r border-black" />
                     <td className="border-r border-black" />
                     <td className="border-r border-black" />
+                    <td className="border-r border-black" />
                     <td className="px-1 py-0.5 text-right font-bold">{fmtIndian(value)}</td>
                   </tr>
                 ))}
