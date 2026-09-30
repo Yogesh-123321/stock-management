@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 
+// How a supplier invoice was settled. "Cash purchase" is the only method with
+// no UTR / bank reference — every other method must carry one.
+export const CASH_METHOD = "Cash purchase";
+export const PAYMENT_METHODS = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque", "Card", "Other", CASH_METHOD];
+
 /*
   The tax invoice is the final document in the receiving flow: uploaded
   after stock entry is done for a delivery, tied back to the vendor and to
@@ -44,8 +49,27 @@ const taxInvoiceSchema = new mongoose.Schema(
     },
     lineExtractionModel: { type: String, default: null },
     lineExtractedAt: { type: Date, default: null },
+
+    // Billing: every tax invoice uploaded at stock entry lands in the Billing
+    // page as UNPAID and is marked paid there. Invoices saved before this
+    // field existed have no payment.status at all — treat "not paid" as unpaid.
+    payment: {
+      status: { type: String, enum: ["unpaid", "paid"], default: "unpaid" },
+      method: { type: String, enum: [...PAYMENT_METHODS, ""], default: "" },
+      // Required for every method except a cash purchase, where it stays null.
+      utrNumber: { type: String, trim: true, default: null },
+      // Date the money actually went out (entered by the person paying).
+      paymentDate: { type: Date, default: null },
+      // When it was recorded in the system, and by whom.
+      paidAt: { type: Date, default: null },
+      paidBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      paidByName: { type: String, default: "" },
+      remarks: { type: String, trim: true, default: "" },
+    },
   },
   { timestamps: true }
 );
+
+taxInvoiceSchema.index({ "payment.status": 1, createdAt: -1 });
 
 export default mongoose.model("TaxInvoice", taxInvoiceSchema);

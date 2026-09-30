@@ -18,9 +18,9 @@ const fmtIndian = (value, decimals = 2) => {
 };
 
 const company = {
-  name: "TECHNOTRENDZ SOLUTIONS PRIVATE LIMITED",
-  address: "Plot No. 101 (HUDA),Sector 59,HSIIDC Industrial Estate,Faridabad-Haryana-121004",
-  gstin: "06AAFCT7227C1ZJ",
+  name: "TECHNOTRENDZ INNOVATIVE SOLUTIONS PRIVATE LIMITED",
+  address: "2nd Floor Plot No. 101 (HUDA),Sector 59,HSIIDC Industrial Estate,Faridabad-Haryana-121004",
+  gstin: "06AANCT1097L1ZS",
   stateName: "Haryana",
   stateCode: "06",
   email: "info@technotrendz.co.in",
@@ -41,8 +41,8 @@ const taxRows = (po) => {
 };
 
 const DEFAULT_DECLARATION =
-  "2). Dispatch Each Lot only after Clearance from our QA department on Test Report, R.M. Report & Third Party R.M. Report.\n" +
-  "3)Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.";
+  "1). Dispatch Each Lot only after Clearance from our QA department on Test Report, R.M. Report & Third Party R.M. Report.\n" +
+  "2). Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.";
 
 const DECLARATION_FOOT =
   "4)Suppler to send Original Dispatch documents, Test Certificate, Material Test Reports along with the shipment and on email to Stores & QA department";

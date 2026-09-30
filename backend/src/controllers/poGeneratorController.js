@@ -13,7 +13,7 @@ import { uploadFileToCloudinary } from "../config/cloudinary.js";
  * the running series, exactly like the PI generator.                  *
  * ------------------------------------------------------------------ */
 const PREFIX = "TISPL/PO";
-const START_SEQ = 7;
+const START_SEQ = 16;
 
 export function financialYearLabel(date = new Date()) {
   const d = new Date(date);

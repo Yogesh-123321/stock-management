@@ -18,10 +18,8 @@ export const PERMISSIONS = [
   // Parts
   { key: "part.request", group: "Parts", label: "Raise new / alternate part request" },
   { key: "part.approve", group: "Parts", label: "Approve part numbers", adminOnly: true },
-  // Payments (bill -> admin approval -> cashier pays)
-  { key: "payment.submit", group: "Payments", label: "Upload bills for payment" },
-  { key: "payment.approve", group: "Payments", label: "Approve bills for payment", adminOnly: true },
-  { key: "payment.pay", group: "Payments", label: "Cashier — pay approved bills & enter transaction ID" },
+  // Billing (tax invoices from stock entry -> unpaid / paid with UTR)
+  { key: "payment.pay", group: "Billing", label: "Billing — view stock-entry invoices, mark them paid & enter UTR" },
   // Parties
   { key: "vendor.create", group: "Vendors & buyers", label: "Register / edit vendor" },
   {
@@ -75,7 +73,6 @@ export const DEFAULT_PERMISSIONS = {
     "po.create",
     "pi.create",
     "part.request",
-    "payment.submit",
     "vendor.create",
     "buyer.create",
     "receive.manage",

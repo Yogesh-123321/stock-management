@@ -44,13 +44,7 @@ const navItems = [
   },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
-  {
-    to: "/payments",
-    label: "Payments",
-    icon: Wallet,
-    anyOf: ["payment.submit", "payment.approve", "payment.pay"],
-    badge: "payments",
-  },
+  { to: "/payments", label: "Billing", icon: Wallet, permission: "payment.pay", badge: "payments" },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
   { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
@@ -95,8 +89,8 @@ export default function Layout() {
   const { user, can, canAny, signOut } = useAuth();
   const navigate = useNavigate();
   const pendingApprovals = useApprovalBadge();
-  // Bills waiting on me: to approve (admin) or to pay (cashier).
-  const pendingPayments = useApprovalBadge("/payment-bills/pending-count");
+  // Unpaid invoices waiting in Billing (0 for anyone without access).
+  const pendingPayments = useApprovalBadge("/billing/pending-count");
   const badgeCounts = { approvals: pendingApprovals, payments: pendingPayments };
 
   const visible = navItems
