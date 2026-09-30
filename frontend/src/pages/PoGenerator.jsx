@@ -35,6 +35,7 @@ const emptyItem = () => ({
   description: "",
   partNo: "",
   hsnSac: "",
+  additionalInfo: "",
   dueOn: "",
   quantity: "",
   unit: "NOS",
@@ -60,11 +61,36 @@ const blankForm = () => ({
   supplierStateCode: "",
   consigneeName: "",
   consigneeAddress: "",
+  consigneeEmail: "",
+  consigneeGSTIN: "",
+  consigneeStateName: "",
+  consigneeStateCode: "",
   taxType: "IGST",
   taxRate: 18,
   declaration: "",
   items: [emptyItem()],
 });
+
+// GST state codes (first two digits of a GSTIN) -> state / UT name.
+const GST_STATES = {
+  "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+  "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh",
+  "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur",
+  "15": "Mizoram", "16": "Tripura", "17": "Meghalaya", "18": "Assam", "19": "West Bengal",
+  "20": "Jharkhand", "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+  "26": "Dadra & Nagar Haveli and Daman & Diu", "27": "Maharashtra", "29": "Karnataka", "30": "Goa",
+  "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu", "34": "Puducherry",
+  "35": "Andaman & Nicobar Islands", "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh",
+};
+
+const CONSIGNEE_KEYS = [
+  "consigneeName",
+  "consigneeAddress",
+  "consigneeEmail",
+  "consigneeGSTIN",
+  "consigneeStateName",
+  "consigneeStateCode",
+];
 
 
 /**
@@ -168,6 +194,114 @@ function PartPicker({ item, onPick, onClear }) {
   );
 }
 
+/**
+ * Consignee name box with a vendor/buyer dropdown. Opening it lists the
+ * registered parties (and filters as you type); picking one fills every
+ * consignee field. If the party isn't registered, just keep typing — whatever
+ * is typed is used as the consignee name and the other fields are entered by hand.
+ */
+function ConsigneePicker({ value, picked, onType, onPick, onClear }) {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const onClick = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/po-generator/parties", { params: { q: value.trim() } });
+        setResults(Array.isArray(data) ? data : []);
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [value, open]);
+
+  return (
+    <div className="relative space-y-1.5" ref={boxRef}>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          className="pl-9"
+          value={value}
+          placeholder="Select a vendor, or type a new consignee name…"
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            onType(e.target.value);
+            setOpen(true);
+          }}
+        />
+        {open && (
+          <div className="absolute left-0 top-full z-[100] mt-1 w-full overflow-hidden rounded-md border border-border bg-card text-card-foreground shadow-xl isolate">
+            <ul className="max-h-64 overflow-y-auto bg-card">
+              {loading && <li className="px-3 py-2 text-sm text-muted-foreground">Searching…</li>}
+              {!loading && results.length === 0 && (
+                <li className="px-3 py-2 text-sm text-muted-foreground">
+                  {value.trim()
+                    ? "Not a registered vendor — the name you typed will be used; fill in the details below."
+                    : "No vendors found."}
+                </li>
+              )}
+              {!loading &&
+                results.map((p) => (
+                  <li key={`${p.source}-${p.id}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPick(p);
+                        setOpen(false);
+                      }}
+                      className="flex w-full items-start justify-between gap-3 bg-card px-3 py-2 text-left hover:bg-secondary"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium truncate">
+                          {p.name}
+                          {p.activeStatus === "inactive" && (
+                            <span className="ml-2 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] uppercase text-destructive">
+                              Inactive
+                            </span>
+                          )}
+                        </span>
+                        <span className="block text-xs text-muted-foreground truncate">
+                          {p.gstin ? `GSTIN ${p.gstin}` : "No GSTIN on file"}
+                          {p.address ? ` · ${p.address}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0 mt-0.5">
+                        {p.source}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      {picked && (
+        <p className="text-xs text-muted-foreground">
+          Details pulled from the {picked.source} records — edit any field below ·{" "}
+          <button type="button" className="underline" onClick={onClear}>
+            clear
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Table cell that spans the whole row for empty/loading states.
 function TableEmpty({ colSpan, children }) {
   return (
@@ -206,6 +340,11 @@ export default function PoGenerator() {
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [copySource, setCopySource] = useState(null);
+
+  // consignee: the vendor/buyer it was picked from (null when typed by hand)
+  // and our own works address (used by the "Use our works address" button)
+  const [pickedConsignee, setPickedConsignee] = useState(null);
+  const [company, setCompany] = useState(null);
 
   // supplier search
   const [partyQuery, setPartyQuery] = useState("");
@@ -267,6 +406,7 @@ export default function PoGenerator() {
   const loadNextNo = async () => {
     try {
       const { data } = await api.get("/po-generator/next-no");
+      if (data.company) setCompany(data.company);
       setForm((f) => (f.voucherNo ? f : { ...f, voucherNo: data.voucherNo, declaration: f.declaration || data.declaration }));
     } catch {
       /* the user can always type the voucher no. manually */
@@ -352,6 +492,59 @@ export default function PoGenerator() {
 
   const setGstin = (value) => setForm((f) => ({ ...f, ...applyGstin(value, f) }));
 
+  // ---- consignee (ship to) ----
+  // Typing a new name means it is no longer a picked vendor.
+  const typeConsigneeName = (value) => {
+    setPickedConsignee(null);
+    setForm((f) => ({ ...f, consigneeName: value }));
+  };
+
+  const pickConsignee = (p) => {
+    const code = (p.gstin || "").trim().slice(0, 2);
+    setPickedConsignee(p);
+    setForm((f) => ({
+      ...f,
+      consigneeName: p.name || "",
+      consigneeAddress: p.address || "",
+      consigneeEmail: p.email || "",
+      consigneeGSTIN: (p.gstin || "").trim(),
+      consigneeStateName: p.stateName || GST_STATES[code] || "",
+      consigneeStateCode: /^\d{2}$/.test(code) ? code : "",
+    }));
+    if (p.activeStatus === "inactive") toast(`${p.name} is marked inactive.`, { icon: "⚠️" });
+  };
+
+  const clearConsignee = () => {
+    setPickedConsignee(null);
+    setForm((f) => ({ ...f, ...Object.fromEntries(CONSIGNEE_KEYS.map((k) => [k, ""])) }));
+  };
+
+  const useWorksAddress = () => {
+    if (!company) return;
+    setPickedConsignee(null);
+    setForm((f) => ({
+      ...f,
+      consigneeName: company.name || "",
+      consigneeAddress: company.address || "",
+      consigneeEmail: company.email || "",
+      consigneeGSTIN: company.gstin || "",
+      consigneeStateName: company.stateName || "",
+      consigneeStateCode: company.stateCode || "",
+    }));
+  };
+
+  // Keep the state code / name in step with the GSTIN the user types.
+  const setConsigneeGstin = (raw) => {
+    const value = raw.toUpperCase().replace(/\s/g, "");
+    const code = value.slice(0, 2);
+    setForm((f) => ({
+      ...f,
+      consigneeGSTIN: value,
+      consigneeStateCode: /^\d{2}$/.test(code) ? code : f.consigneeStateCode,
+      consigneeStateName: GST_STATES[code] || f.consigneeStateName,
+    }));
+  };
+
   // Voucher numbers already used — the form blocks duplicates before submitting.
   const usedVoucherNos = useMemo(
     () => new Set(history.map((p) => String(p.voucherNo).trim().toLowerCase())),
@@ -391,6 +584,10 @@ export default function PoGenerator() {
         supplierStateCode: data.supplierStateCode || "",
         consigneeName: data.consigneeName || "",
         consigneeAddress: data.consigneeAddress || "",
+        consigneeEmail: data.consigneeEmail || "",
+        consigneeGSTIN: data.consigneeGSTIN || "",
+        consigneeStateName: data.consigneeStateName || "",
+        consigneeStateCode: data.consigneeStateCode || "",
         taxType: data.taxType || "IGST",
         taxRate: data.taxRate ?? 18,
         declaration: data.declaration || "",
@@ -399,6 +596,7 @@ export default function PoGenerator() {
           description: it.description || "",
           partNo: it.partNo || "",
           hsnSac: it.hsnSac || "",
+          additionalInfo: it.additionalInfo || "",
           dueOn: toDateInput(it.dueOn),
           quantity: it.quantity ?? "",
           unit: it.unit || "NOS",
@@ -408,6 +606,7 @@ export default function PoGenerator() {
       });
       setPartyQuery(data.supplierName || "");
       setPickedParty(null);
+      setPickedConsignee(null);
       setCopySource(data.sourceVoucherNo || po.voucherNo);
       setCopyOpen(false);
       setCopyQuery("");
@@ -424,6 +623,7 @@ export default function PoGenerator() {
     setGenerated(null);
     setCopySource(null);
     setPickedParty(null);
+    setPickedConsignee(null);
     setPartyQuery("");
     const { data } = await api.get("/po-generator/next-no").catch(() => ({ data: {} }));
     if (data?.voucherNo) setForm((f) => ({ ...f, voucherNo: data.voucherNo, declaration: data.declaration || "" }));
@@ -440,6 +640,10 @@ export default function PoGenerator() {
   const submit = async (e) => {
     e.preventDefault();
     if (voucherNoTaken) return;
+    if (!form.consigneeName.trim() && CONSIGNEE_KEYS.some((k) => String(form[k] || "").trim())) {
+      toast.error("Enter the consignee name, or clear the consignee details to use our works address");
+      return;
+    }
     if (form.items.some((it) => !it.partNo)) {
       toast.error("Every line item must be picked from the part master");
       return;
@@ -712,16 +916,48 @@ export default function PoGenerator() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-display">Consignee (ship to)</CardTitle>
-            <CardDescription>Leave blank to print our own works address.</CardDescription>
+            <CardDescription>
+              Pick a registered vendor to fill the details, or type a new consignee — every field stays editable.
+              Leave everything blank to print our own works address.
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label>Consignee name</Label>
-              <Input value={form.consigneeName} onChange={set("consigneeName")} placeholder="Technotrendz (default)" />
+            <div className="relative z-30 space-y-1.5 sm:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Consignee name</Label>
+                {company && (
+                  <button type="button" className="text-xs underline text-muted-foreground" onClick={useWorksAddress}>
+                    Use our works address
+                  </button>
+                )}
+              </div>
+              <ConsigneePicker
+                value={form.consigneeName}
+                picked={pickedConsignee}
+                onType={typeConsigneeName}
+                onPick={pickConsignee}
+                onClear={clearConsignee}
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Consignee address</Label>
+              <Textarea rows={2} value={form.consigneeAddress} onChange={set("consigneeAddress")} />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>E-mail</Label>
+              <Input type="email" value={form.consigneeEmail} onChange={set("consigneeEmail")} />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>GSTIN/UIN</Label>
+              <Input value={form.consigneeGSTIN} onChange={(e) => setConsigneeGstin(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Consignee address</Label>
-              <Input value={form.consigneeAddress} onChange={set("consigneeAddress")} placeholder="Plot 101 (default)" />
+              <Label>State name</Label>
+              <Input value={form.consigneeStateName} onChange={set("consigneeStateName")} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>State code</Label>
+              <Input value={form.consigneeStateCode} onChange={set("consigneeStateCode")} maxLength={2} />
             </div>
           </CardContent>
         </Card>
@@ -737,12 +973,20 @@ export default function PoGenerator() {
                 key={i}
                 className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end border-b border-border pb-4 last:border-0 last:pb-0"
               >
-                <div className="space-y-1.5 sm:col-span-8">
+                <div className="space-y-1.5 sm:col-span-5">
                   <Label>Part (from part master)</Label>
                   <PartPicker
                     item={item}
                     onPick={(part) => pickItemPart(i, part)}
                     onClear={() => clearItemPart(i)}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-3">
+                  <Label>Additional info</Label>
+                  <Input
+                    value={item.additionalInfo}
+                    onChange={setItem(i, "additionalInfo")}
+                    placeholder="Any extra details for this part"
                   />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">

@@ -19,12 +19,30 @@ export const PO_COMPANY = {
   email: "info@technotrendz.co.in",
 };
 
+const THIRD_POINT =
+  "Supplier to send Original Dispatch documents, Test Certificate, Material Test Reports along with the shipment and on email to Stores & QA department";
+
 export const DEFAULT_DECLARATION =
   "1). Dispatch Each Lot only after Clearance from our QA department on Test Report, R.M. Report & Third Party R.M. Report.\n" +
-  "2). Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.";
+  "2). Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.\n" +
+  `3). ${THIRD_POINT}`;
 
-export const DEFAULT_DECLARATION_FOOT =
-  "4)Suppler to send Original Dispatch documents, Test Certificate, Material Test Reports along with the shipment and on email to Stores & QA department";
+// A saved PO keeps its own copy of the declaration text, so POs created with an
+// older default (which had only two points) never printed the third point.
+// When the saved text is clearly that default but is missing the third point,
+// add it. A declaration someone wrote themselves is printed exactly as typed.
+export const resolveDeclaration = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return DEFAULT_DECLARATION;
+
+  const looksLikeDefault = /Dispatch Each Lot only after Clearance/i.test(text);
+  const hasThird = /Original Dispatch documents/i.test(text);
+  if (!looksLikeDefault || hasThird) return text;
+
+  const numbers = [...text.matchAll(/(?:^|\n)\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
+  const next = numbers.length ? Math.max(...numbers) + 1 : 3;
+  return `${text}\n${next}). ${THIRD_POINT}`;
+};
 
 // 29-Apr-26 — the exact date format used on the reference PO.
 const fmtDate = (value) => {
@@ -121,7 +139,9 @@ export function generatePoPdf(po) {
     const H_THEAD = 20;
     const H_TOTAL_ROW = 18;
     const H_WORDS = 30;
-    const H_DECL = 95;
+    // The declaration box grows with its text so every point stays visible.
+    const declText = resolveDeclaration(po.declaration);
+    const H_DECL = Math.max(95, 13 + Math.ceil(heightOf(declText, W * 0.55, { size: 7.5 })) + 14);
     const H_BOTTOM = H_TOTAL_ROW + H_WORDS + H_DECL;
     const H_TAX_BLOCK = 52; // sub-total / tax / round-off lines above the total row
 
@@ -163,22 +183,48 @@ export function generatePoPdf(po) {
       line(X, ly, xMid, ly);
 
       // ---- left column: Consignee (ship to) ----
-      const consignee = {
-        name: po.consigneeName || PO_COMPANY.name,
-        address: po.consigneeAddress || PO_COMPANY.address,
-        email: po.consigneeEmail || PO_COMPANY.email,
-        gstin: po.consigneeGSTIN || PO_COMPANY.gstin,
-        stateName: po.consigneeStateName || PO_COMPANY.stateName,
-        stateCode: po.consigneeStateCode || PO_COMPANY.stateCode,
-      };
-      put("Consignee (Ship to)", X, ly + 1, xMid - X, { size: 7.5 });
-      put(consignee.name, X, ly + 11, xMid - X, { size: 8.5, bold: true });
-      put(consignee.address, X, ly + 22, xMid - X, { size: 7.5 });
-      put(`e-mail : ${consignee.email}`, X, ly + 42, xMid - X, { size: 7.5 });
-      put("GSTIN/UIN", X, ly + 54, 70, { size: 7.5 });
-      put(`: ${consignee.gstin}`, X + 72, ly + 54, xMid - X - 72, { size: 7.5 });
-      put("State Name", X, ly + 66, 70, { size: 7.5 });
-      put(`: ${consignee.stateName}, Code : ${consignee.stateCode}`, X + 72, ly + 66, xMid - X - 72, { size: 7.5 });
+      // A consignee entered on the PO is printed exactly as entered (blank fields
+      // stay blank). Only a PO with no consignee at all falls back to our works address.
+      const consignee = po.consigneeName
+        ? {
+            name: po.consigneeName,
+            address: po.consigneeAddress || "",
+            email: po.consigneeEmail || "",
+            gstin: po.consigneeGSTIN || "",
+            stateName: po.consigneeStateName || "",
+            stateCode: po.consigneeStateCode || "",
+          }
+        : PO_COMPANY;
+      const consigneeState = [
+        consignee.stateName,
+        consignee.stateCode ? `Code : ${consignee.stateCode}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      // Vendor addresses can run to three or four lines. Shrink the text a touch and
+      // push the rows below it down so nothing overlaps (the band has ~12pt spare).
+      const consigneeW = xMid - X;
+      let addrSize = 7.5;
+      let addrH = heightOf(consignee.address, consigneeW, { size: addrSize });
+      if (addrH > 32) {
+        addrSize = 6.5;
+        addrH = heightOf(consignee.address, consigneeW, { size: addrSize });
+      }
+      const dy = Math.max(0, Math.min(addrH - 20, 12));
+
+      put("Consignee (Ship to)", X, ly + 1, consigneeW, { size: 7.5 });
+      put(consignee.name, X, ly + 11, consigneeW, { size: 8.5, bold: true });
+      put(consignee.address, X, ly + 22, consigneeW, { size: addrSize });
+      if (consignee.email) put(`e-mail : ${consignee.email}`, X, ly + 42 + dy, consigneeW, { size: 7.5 });
+      if (consignee.gstin) {
+        put("GSTIN/UIN", X, ly + 54 + dy, 70, { size: 7.5 });
+        put(`: ${consignee.gstin}`, X + 72, ly + 54 + dy, consigneeW - 72, { size: 7.5 });
+      }
+      if (consigneeState) {
+        put("State Name", X, ly + 66 + dy, 70, { size: 7.5 });
+        put(`: ${consigneeState}`, X + 72, ly + 66 + dy, consigneeW - 72, { size: 7.5 });
+      }
       ly += H_CONSIGNEE;
       line(X, ly, xMid, ly);
 
@@ -255,7 +301,8 @@ export function generatePoPdf(po) {
     const items = (po.items || []).map((it, i) => {
       const descH = heightOf(it.description || "", colW.desc, { size: 8, bold: true });
       const partH = it.partNo ? heightOf(it.partNo, colW.desc - 8, { size: 7.5 }) : 0;
-      return { ...it, index: i + 1, height: Math.max(descH + partH + 4, 18) };
+      const infoH = it.additionalInfo ? heightOf(it.additionalInfo, colW.desc - 8, { size: 7.5 }) : 0;
+      return { ...it, index: i + 1, height: Math.max(descH + partH + infoH + 4, 18) };
     });
 
     // Greedy pagination: fill each page, and make sure the final page still has
@@ -290,9 +337,13 @@ export function generatePoPdf(po) {
       pageItems.forEach((item) => {
         put(String(item.index), xSl, rowY, colW.sl, { size: 8, align: "right" });
         put(item.description || "", xDesc, rowY, colW.desc, { size: 8, bold: true });
+        const descH = heightOf(item.description || "", colW.desc, { size: 8, bold: true });
+        const partH = item.partNo ? heightOf(item.partNo, colW.desc - 8, { size: 7.5 }) : 0;
         if (item.partNo) {
-          const descH = heightOf(item.description || "", colW.desc, { size: 8, bold: true });
           put(item.partNo, xDesc + 8, rowY + descH, colW.desc - 8, { size: 7.5, italic: true });
+        }
+        if (item.additionalInfo) {
+          put(item.additionalInfo, xDesc + 8, rowY + descH + partH, colW.desc - 8, { size: 7.5 });
         }
         put(item.hsnSac || "", xHsn, rowY, colW.hsn, { size: 8, align: "center" });
         put(fmtDate(item.dueOn || po.voucherDate), xDue, rowY, colW.due, { size: 7.5, italic: true, align: "center" });
@@ -356,8 +407,7 @@ export function generatePoPdf(po) {
       line(signX, y + H_DECL - 40, signX, y + H_DECL);
       line(signX, y + H_DECL - 40, xEnd, y + H_DECL - 40);
       put("Declaration", X, y + 1, signX - X, { size: 7.5 });
-      put(po.declaration || DEFAULT_DECLARATION, X, y + 11, signX - X, { size: 7.5, lineGap: 0.5 });
-      put(DEFAULT_DECLARATION_FOOT, X, y + H_DECL - 14, signX - X, { size: 5.5 });
+      put(declText, X, y + 11, signX - X, { size: 7.5, lineGap: 0.5 });
       put(`for ${PO_COMPANY.name}`, signX, y + H_DECL - 36, xEnd - signX, { size: 8, bold: true, align: "center" });
       put("Authorised Signatory", signX, y + H_DECL - 14, xEnd - signX, { size: 8, align: "right" });
 

@@ -26,8 +26,9 @@ async function stampSource(entityType, entityId, status, modelHint, actor, comme
   if (!Model) return;
   try {
     await Model.findByIdAndUpdate(entityId, { approvalStatus: status });
-  } catch {
-    /* the source model may not carry the field — safe to ignore */
+  } catch (err) {
+    // Never fail the decision itself, but don't hide the problem either.
+    console.error(`[approvals] Could not stamp ${entityType} ${entityId} as ${status}:`, err.message);
   }
 }
 
@@ -179,8 +180,9 @@ async function decide(req, res, approved) {
     if (approved && doc.entityType === "po") {
       try {
         await mirrorGeneratedPoToReceiving(doc.entityId);
-      } catch {
-        /* mirroring is best-effort — the decision itself is already saved */
+      } catch (err) {
+        // Best-effort — the decision itself is already saved — but log why.
+        console.error(`[approvals] Could not archive/mirror PO ${doc.entityId}:`, err.message);
       }
     }
 

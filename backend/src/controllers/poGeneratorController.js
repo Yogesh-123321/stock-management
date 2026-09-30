@@ -2,6 +2,7 @@ import PurchaseOrderGen from "../models/PurchaseOrderGen.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import Vendor from "../models/Vendor.js";
 import Buyer from "../models/Buyer.js";
+import ApprovalRequest from "../models/ApprovalRequest.js";
 import { generatePoPdf, PO_COMPANY, DEFAULT_DECLARATION } from "../utils/generatePoPdf.js";
 import { amountInWordsRupees } from "../utils/numberToWordsIndian.js";
 import { requestDocumentApproval } from "../utils/documentApproval.js";
@@ -13,7 +14,7 @@ import { uploadFileToCloudinary } from "../config/cloudinary.js";
  * the running series, exactly like the PI generator.                  *
  * ------------------------------------------------------------------ */
 const PREFIX = "TISPL/PO";
-const START_SEQ = 16;
+const START_SEQ = 7;
 
 export function financialYearLabel(date = new Date()) {
   const d = new Date(date);
@@ -79,19 +80,49 @@ async function computeNextRevision(voucherNo) {
  * Cloudinary archival — the generated PDF is uploaded to the          *
  * supplier's folder (vendors/<supplier-slug>-<gstin>/generated-po/)   *
  * once the PO is admin-approved, and the permanent URL is stored on   *
- * the record as `pdfUrl`. Downloads redirect to the archived file.    *
+ * the record as `pdfUrl`.                                             *
  * ------------------------------------------------------------------ */
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Works out which Cloudinary party folder the PDF belongs in. It must be the
+ * SAME folder the supplier's other documents use, and that folder is built from
+ * the vendor/buyer record (name + GSTIN, or the record id when there is no
+ * GSTIN) — not from whatever was typed on the PO form.
+ */
+async function resolveArchiveParty(doc) {
+  if (doc.supplierVendor) {
+    const vendor = await Vendor.findById(doc.supplierVendor).lean();
+    if (vendor) return { party: vendor, kind: "vendor" };
+  }
+
+  // Supplier picked from the buyers list, or typed in by hand: match on GSTIN.
+  const gstin = String(doc.supplierGSTIN || "").trim();
+  if (gstin) {
+    const exact = new RegExp(`^${escapeRegex(gstin)}$`, "i");
+    const vendor = await Vendor.findOne({ taxRegistrationNo: exact }).lean();
+    if (vendor) return { party: vendor, kind: "vendor" };
+    const buyer = await Buyer.findOne({ taxRegistrationNo: exact }).lean();
+    if (buyer) return { party: buyer, kind: "buyer" };
+  }
+
+  return {
+    party: { companyName: doc.supplierName, taxRegistrationNo: doc.supplierGSTIN },
+    kind: "vendor",
+  };
+}
+
 async function archivePoPdf(doc) {
-  const buffer = await generatePoPdf(doc);
+  // toObject(): the PDF code spreads each item ({ ...item }), which drops every
+  // field of a live Mongoose sub-document and printed the archived copy with
+  // blank item rows.
+  const buffer = await generatePoPdf(doc.toObject());
   const safeName = String(doc.voucherNo).replace(/[\\/:*?"<>|]/g, "-");
+  const { party, kind } = await resolveArchiveParty(doc);
 
   const pdfUrl = await uploadFileToCloudinary(
     { buffer, mimetype: "application/pdf", originalname: `${safeName}.pdf` },
-    {
-      party: { companyName: doc.supplierName, taxRegistrationNo: doc.supplierGSTIN },
-      kind: "vendor",
-      category: "generated-po",
-    },
+    { party, kind, category: "generated-po" },
   );
 
   doc.pdfUrl = pdfUrl;
@@ -111,6 +142,38 @@ async function tryArchivePoPdf(doc) {
   }
 }
 
+/**
+ * Older POs were approved while the model had no approvalStatus field, so the
+ * decision only lives on the approval request. Copy it across (once) so those
+ * POs show the right status and can be downloaded. Accepts lean objects or
+ * Mongoose documents; updates them in place and in the database.
+ */
+async function healApprovalStatus(docs) {
+  const list = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
+  const undecided = list.filter((d) => d.approvalStatus !== "approved" && d.approvalStatus !== "rejected");
+  if (!undecided.length) return;
+
+  const requests = await ApprovalRequest.find({
+    entityType: "po",
+    entityId: { $in: undecided.map((d) => d._id) },
+    status: { $in: ["approved", "rejected"] },
+  })
+    .sort({ reviewedAt: 1, createdAt: 1 })
+    .lean();
+
+  const decided = new Map();
+  for (const r of requests) decided.set(String(r.entityId), r.status); // oldest -> newest, newest wins
+
+  const ops = [];
+  for (const d of undecided) {
+    const status = decided.get(String(d._id));
+    if (!status) continue;
+    d.approvalStatus = status;
+    ops.push({ updateOne: { filter: { _id: d._id }, update: { $set: { approvalStatus: status } } } });
+  }
+  if (ops.length) await PurchaseOrderGen.bulkWrite(ops);
+}
+
 /* ------------------------------------------------------------------ *
  * Totals                                                              *
  * ------------------------------------------------------------------ */
@@ -124,6 +187,7 @@ function computeTotals(body) {
         description: (it.description || "").trim(),
         partNo: (it.partNo || "").trim(),
         hsnSac: (it.hsnSac || "").trim(),
+        additionalInfo: (it.additionalInfo || "").trim(),
         dueOn: it.dueOn || body.voucherDate || null,
         quantity,
         unit: (it.unit || "NOS").trim(),
@@ -161,12 +225,14 @@ export const listPurchaseOrdersGen = async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
   const docs = await PurchaseOrderGen.find(filter).sort({ createdAt: -1 }).lean();
+  await healApprovalStatus(docs);
   res.json(docs);
 };
 
 export const getPurchaseOrderGen = async (req, res) => {
   const doc = await PurchaseOrderGen.findById(req.params.id).lean();
   if (!doc) return res.status(404).json({ message: "Purchase order not found" });
+  await healApprovalStatus(doc);
   res.json(doc);
 };
 
@@ -282,14 +348,18 @@ export const createPurchaseOrderGen = async (req, res) => {
  */
 export async function mirrorGeneratedPoToReceiving(poId) {
   const doc = await PurchaseOrderGen.findById(poId);
-  if (!doc || !doc.supplierVendor) return null;
+  if (!doc) return null;
+
+  // File the PDF under the supplier in Cloudinary — whether or not the supplier
+  // is a registered vendor. (It used to be skipped for anything not linked to a
+  // vendor record, so those suppliers never appeared in Cloudinary at all.)
+  const pdfUrl = doc.pdfUrl || (await tryArchivePoPdf(doc));
+
+  // Only a registered vendor's PO goes into the receiving dropdown.
+  if (!doc.supplierVendor) return null;
 
   const already = await PurchaseOrder.findOne({ generatedSource: doc._id });
   if (already) return already;
-
-  // Archival must never block approval — falls back to on-the-fly generation
-  // at download time if Cloudinary is unavailable.
-  const pdfUrl = await tryArchivePoPdf(doc);
 
   return PurchaseOrder.create({
     vendor: doc.supplierVendor,
@@ -332,12 +402,15 @@ export const setPurchaseOrderGenStatus = async (req, res) => {
 };
 
 // GET /api/po-generator/:id/download
-// Only an admin-approved PO may leave the building. Serves the archived
-// Cloudinary PDF when present (the same file, surviving restarts);
-// otherwise generates on the fly and lazily archives it for next time.
+// Only an admin-approved PO may leave the building. The PDF is generated from
+// the saved PO (always current, and it survives restarts) and streamed back
+// directly. It used to redirect the browser to the Cloudinary copy, which a
+// cross-origin blob download can't reliably follow.
 export const downloadPurchaseOrderGen = async (req, res) => {
   const doc = await PurchaseOrderGen.findById(req.params.id);
   if (!doc) return res.status(404).json({ message: "Purchase order not found" });
+
+  await healApprovalStatus(doc);
 
   if (doc.approvalStatus !== "approved") {
     return res.status(403).json({
@@ -349,19 +422,15 @@ export const downloadPurchaseOrderGen = async (req, res) => {
     });
   }
 
-  if (doc.pdfUrl) {
-    return res.redirect(doc.pdfUrl);
-  }
-
   const buffer = await generatePoPdf(doc.toObject());
   const safeName = String(doc.voucherNo).replace(/[\\/:*?"<>|]/g, "-");
-
-  // Lazy archive for approved POs that don't have a pdfUrl yet (e.g. the
-  // archive attempt during approval failed).
-  tryArchivePoPdf(doc);
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
   res.setHeader("Content-Length", buffer.length);
   res.send(buffer);
+
+  // Approved before it was ever archived (the archive attempt failed, or the PO
+  // was approved before this fix): file it under the supplier now.
+  if (!doc.pdfUrl) await tryArchivePoPdf(doc);
 };

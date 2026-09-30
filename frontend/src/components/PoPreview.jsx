@@ -40,12 +40,30 @@ const taxRows = (po) => {
   return rows;
 };
 
+const THIRD_POINT =
+  "Supplier to send Original Dispatch documents, Test Certificate, Material Test Reports along with the shipment and on email to Stores & QA department";
+
 const DEFAULT_DECLARATION =
   "1). Dispatch Each Lot only after Clearance from our QA department on Test Report, R.M. Report & Third Party R.M. Report.\n" +
-  "2). Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.";
+  "2). Supplier to Replenish any Rejected / Unaccepted Quantity on Next Day of the Report by Technotrendz (Rejected Qty to be settled without hindrance on our Production ). Else Any Financial loss shall be on Supplier's account.\n" +
+  `3). ${THIRD_POINT}`;
 
-const DECLARATION_FOOT =
-  "4)Suppler to send Original Dispatch documents, Test Certificate, Material Test Reports along with the shipment and on email to Stores & QA department";
+// A saved PO keeps its own copy of the declaration text, so POs created with an
+// older default (which had only two points) never showed the third point.
+// When the saved text is clearly that default but is missing the third point,
+// add it. A declaration someone wrote themselves is shown exactly as typed.
+const resolveDeclaration = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return DEFAULT_DECLARATION;
+
+  const looksLikeDefault = /Dispatch Each Lot only after Clearance/i.test(text);
+  const hasThird = /Original Dispatch documents/i.test(text);
+  if (!looksLikeDefault || hasThird) return text;
+
+  const numbers = [...text.matchAll(/(?:^|\n)\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
+  const next = numbers.length ? Math.max(...numbers) + 1 : 3;
+  return `${text}\n${next}). ${THIRD_POINT}`;
+};
 
 export default function PoPreview({ po }) {
   if (!po) return null;
@@ -55,14 +73,24 @@ export default function PoPreview({ po }) {
   const totalQty = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
   const rows = taxRows(po);
 
-  const consignee = {
-    name: po.consigneeName || company.name,
-    address: po.consigneeAddress || company.address,
-    email: po.consigneeEmail || company.email,
-    gstin: po.consigneeGSTIN || company.gstin,
-    stateName: po.consigneeStateName || company.stateName,
-    stateCode: po.consigneeStateCode || company.stateCode,
-  };
+  // A consignee entered on the PO is printed exactly as entered (blank fields stay
+  // blank). Only a PO with no consignee at all falls back to our works address.
+  const consignee = po.consigneeName
+    ? {
+        name: po.consigneeName,
+        address: po.consigneeAddress || "",
+        email: po.consigneeEmail || "",
+        gstin: po.consigneeGSTIN || "",
+        stateName: po.consigneeStateName || "",
+        stateCode: po.consigneeStateCode || "",
+      }
+    : company;
+  const consigneeState = [
+    consignee.stateName,
+    consignee.stateCode ? `Code : ${consignee.stateCode}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <article className="mx-auto w-[816px] shrink-0 bg-white p-[28px] font-[Arial,sans-serif] text-[9px] leading-[1.2] text-black shadow-sm print:w-full print:p-0 print:shadow-none">
@@ -92,14 +120,20 @@ export default function PoPreview({ po }) {
               <div>Consignee (Ship to)</div>
               <div className="text-[10px] font-bold">{consignee.name}</div>
               <div className="whitespace-pre-line">{consignee.address}</div>
-              <div className="mt-1">e-mail : {consignee.email}</div>
+              {consignee.email && <div className="mt-1">e-mail : {consignee.email}</div>}
               <div className="mt-1 grid grid-cols-[76px_1fr]">
-                <span>GSTIN/UIN</span>
-                <span>: {consignee.gstin}</span>
-                <span>State Name</span>
-                <span>
-                  : {consignee.stateName}, Code : {consignee.stateCode}
-                </span>
+                {consignee.gstin && (
+                  <>
+                    <span>GSTIN/UIN</span>
+                    <span>: {consignee.gstin}</span>
+                  </>
+                )}
+                {consigneeState && (
+                  <>
+                    <span>State Name</span>
+                    <span>: {consigneeState}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -200,6 +234,7 @@ export default function PoPreview({ po }) {
                 <td className="border-r border-black px-1 py-1">
                   <div className="font-bold">{item.description}</div>
                   {item.partNo && <div className="pl-2 italic">{item.partNo}</div>}
+                  {item.additionalInfo && <div className="pl-2">{item.additionalInfo}</div>}
                 </td>
                 <td className="border-r border-black px-1 py-1 text-center">{item.hsnSac || ""}</td>
                 <td className="border-r border-black px-1 py-1 text-center italic">
@@ -282,8 +317,7 @@ export default function PoPreview({ po }) {
         <div className="grid grid-cols-[55%_45%] border-t border-black" style={{ minHeight: 110 }}>
           <div className="border-r border-black px-1 py-1">
             <div>Declaration</div>
-            <div className="whitespace-pre-line">{po.declaration || DEFAULT_DECLARATION}</div>
-            <div className="mt-1 text-[6.5px]">{DECLARATION_FOOT}</div>
+            <div className="whitespace-pre-line">{resolveDeclaration(po.declaration)}</div>
           </div>
           <div className="relative">
             <div className="absolute inset-x-0 bottom-[46px] border-b border-black" />

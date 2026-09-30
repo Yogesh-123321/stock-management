@@ -9,6 +9,7 @@ const poGenItemSchema = new mongoose.Schema(
     description: { type: String, required: true, trim: true },
     partNo: { type: String, trim: true }, // manufacturer part no., printed under the description
     hsnSac: { type: String, trim: true },
+    additionalInfo: { type: String, trim: true }, // free-text note for this line, printed under the part no.
     dueOn: { type: Date },
     quantity: { type: Number, required: true, min: 0 },
     unit: { type: String, trim: true, default: "NOS" },
@@ -58,8 +59,19 @@ const purchaseOrderGenSchema = new mongoose.Schema(
     amountInWords: { type: String, trim: true },
     declaration: { type: String, trim: true },
 
-    // Permanent Cloudinary URL of the archived PDF (set when the PO is created)
+    // Permanent Cloudinary URL of the archived PDF (set once the admin approves the PO)
     pdfUrl: { type: String, trim: true },
+
+    // Admin sign-off gate — a PO can only be downloaded once approved.
+    // (This field was missing, so Mongoose silently dropped every "approved" /
+    // "rejected" stamp and the PO stayed stuck as waiting for approval.)
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
+    },
+    createdByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
     // Same open/closed lifecycle the other documents use
     status: { type: String, enum: ["open", "closed"], default: "open", index: true },
