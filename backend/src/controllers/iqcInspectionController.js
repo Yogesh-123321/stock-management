@@ -203,3 +203,106 @@ export const submitIqcReport = asyncHandler(async (req, res) => {
   const populated = await populateEntry(StockEntry.findById(entry._id));
   res.json(populated);
 });
+
+/*
+  POST /api/stock-entries/iqc-report/bulk
+  Body:
+    entryIds   - [stockEntryId, ...] lines currently in IQC stock
+    templateId - the IqcTemplate every selected line is being checked against
+    items      - [{ name, specification, unit, checked }], the checklist as
+                 filled in — every item must be checked
+
+  Bulk approval: the same checklist is recorded on each selected line and
+  the FULL received quantity of each is approved (credited to
+  Part.quantityInStock). Partial approvals / rejections need a reason and a
+  quantity per line, so they stay on the single-line IQC report.
+
+  Each line is handled on its own, so one that can't be approved (already
+  inspected, deleted meanwhile) doesn't stop the rest. Response:
+    { approved: [entryId, ...], failed: [{ id, message }] }
+  The inspector is recorded from the signed-in user, same as a single report.
+*/
+export const submitBulkIqcReport = asyncHandler(async (req, res) => {
+  const { entryIds, templateId, items } = req.body;
+
+  const ids = [...new Set((Array.isArray(entryIds) ? entryIds : []).map(String))];
+  if (ids.length === 0) {
+    res.status(400);
+    throw new Error("Select at least one stock entry");
+  }
+
+  const cleanItems = (Array.isArray(items) ? items : [])
+    .map((it) => ({
+      name: String(it?.name || "").trim(),
+      specification: String(it?.specification || "").trim(),
+      unit: String(it?.unit || "").trim(),
+      checked: !!it?.checked,
+    }))
+    .filter((it) => it.name);
+
+  if (cleanItems.length === 0) {
+    res.status(400);
+    throw new Error("At least one IQC point is required");
+  }
+  if (!cleanItems.every((it) => it.checked)) {
+    res.status(400);
+    throw new Error("Every point on the IQC report must be checked before it can be submitted");
+  }
+
+  const template = templateId ? await IqcTemplate.findById(templateId) : null;
+  const round3 = (n) => Math.round(n * 1000) / 1000;
+
+  const approved = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const entry = await StockEntry.findById(id);
+      if (!entry) {
+        failed.push({ id, message: "Stock entry not found" });
+        continue;
+      }
+      if (entry.iqcStatus !== "in_iqc_stock") {
+        failed.push({ id, message: "Not waiting on an IQC report any more" });
+        continue;
+      }
+
+      const total = round3(Number(entry.quantityReceived) || 0);
+      const partId = entry.part?._id || entry.part;
+
+      if (partId) {
+        await Part.findByIdAndUpdate(partId, { $inc: { quantityInStock: total } });
+      }
+      try {
+        entry.iqcReport = {
+          template: template ? template._id : null,
+          materialName: template ? template.materialName : "",
+          items: cleanItems.map((it) => ({ ...it })),
+          inspectedBy: req.user?.name || "",
+          inspectedByUser: req.user?._id || null,
+          inspectedAt: new Date(),
+          originalQuantity: total,
+          acceptedQuantity: total,
+          rejectedQuantity: 0,
+          rejectionReason: "",
+          decision: "accepted",
+        };
+        entry.iqcStatus = "accepted";
+        entry.stockApplied = true;
+        entry.appliedAt = new Date();
+        await entry.save();
+      } catch (err) {
+        // Undo the stock credit so this line stays in IQC stock, untouched.
+        if (partId) {
+          await Part.findByIdAndUpdate(partId, { $inc: { quantityInStock: -total } }).catch(() => {});
+        }
+        throw err;
+      }
+      approved.push(id);
+    } catch (err) {
+      failed.push({ id, message: err.message || "Could not approve this line" });
+    }
+  }
+
+  res.json({ approved, failed });
+});

@@ -279,6 +279,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   const receipts = await StockEntry.find({ part: part._id })
     .populate("vendor", "companyName")
     .populate("purchaseOrder", "documentType documentNumber")
+    .populate("appliedVia", "invoiceNumber")
     .sort({ createdAt: 1 }); // oldest first, so the balance can be walked forward
 
   // Every kit issue with at least one line against this part. A single
@@ -310,7 +311,9 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     // StockEntry.appliedVia) — separate from `reference`, which points at
     // the PO/PI instead. Lets the ledger link straight to the invoice tab
     // for the specific tax invoice this delivery was booked against.
-    taxInvoiceId: entry.appliedVia || null,
+    taxInvoiceId: entry.appliedVia?._id || null,
+    // Number printed on that tax invoice, shown under the link in the ledger.
+    taxInvoiceNumber: entry.appliedVia?.invoiceNumber || null,
     matchType: entry.matchType,
     enteredBy: entry.enteredBy || null,
     remarks: entry.remarks || null,

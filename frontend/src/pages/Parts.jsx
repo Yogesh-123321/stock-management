@@ -2045,7 +2045,16 @@ useEffect(() => {
                                         : "Tax invoice"}
                                     </span>
                                   </button>
-                                ) : (
+                                ) : null}
+                                {e.taxInvoiceId && e.taxInvoiceNumber ? (
+                                  <span
+                                    className="mt-0.5 block truncate font-mono-tech text-[11px] text-foreground"
+                                    title={`Tax invoice no. ${e.taxInvoiceNumber}`}
+                                  >
+                                    Inv. no: {e.taxInvoiceNumber}
+                                  </span>
+                                ) : null}
+                                {e.taxInvoiceId ? null : (
                                   <span
                                     className="block truncate"
                                     title={

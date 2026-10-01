@@ -8,7 +8,11 @@ import {
   reportQuantityMismatch,
 } from "../controllers/stockController.js";
 import { parseStockImport, commitStockImport } from "../controllers/stockImportController.js";
-import { getIqcStockEntries, submitIqcReport } from "../controllers/iqcInspectionController.js";
+import {
+  getIqcStockEntries,
+  submitIqcReport,
+  submitBulkIqcReport,
+} from "../controllers/iqcInspectionController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadStockSheet } from "../middleware/upload.js";
 import { getPartPriceAnalysis } from "../controllers/stockAnalysisController.js";
@@ -30,6 +34,8 @@ router.post("/report-mismatch", protect, reportQuantityMismatch);
 // Open to every signed-in user (no receive.manage needed): IQC is done by
 // whoever is asked to inspect the material, and the inspector is recorded.
 router.get("/iqc-stock", protect, getIqcStockEntries);
+// Bulk approve: one checklist/template applied to many lines at once.
+router.post("/iqc-report/bulk", protect, submitBulkIqcReport);
 router.post("/:id/iqc-report", protect, submitIqcReport);
 
 router.get("/", getStockEntries);
