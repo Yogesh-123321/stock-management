@@ -318,6 +318,11 @@ const partLabel = (np) =>
 
 // Shared by the "matched existing part" and "approved request" phases —
 // both just need a quantity + optional remarks.
+// Per-unit prices (component rates, bulk items) often need more than the 2
+// decimals used for money totals, so price fields allow up to 6.
+const PRICE_REGEX = /^\d+(\.\d{1,6})?$/;
+const PRICE_MESSAGE = "Numbers only, up to 6 decimal places";
+
 const QTY_REMARKS_SCHEMA = {
   quantityReceived: {
     required: true,
@@ -331,7 +336,7 @@ const QTY_REMARKS_SCHEMA = {
   // carries no price of its own and history/analysis falls back to the
   // master rate, same as before this field existed.
   unit: { regex: "alphaNumSpace", maxLength: 20 },
-  entryPrice: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+  entryPrice: { regex: PRICE_REGEX, message: PRICE_MESSAGE },
   remarks: { maxLength: 500 },
 };
 
@@ -354,7 +359,7 @@ const NEW_PART_SCHEMA = {
   // matched against a vendor's tax invoice later (unitPrice AI-extracts
   // from the invoice's own line items).
   unit: { regex: "alphaNumSpace", maxLength: 20 },
-  price: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+  price: { regex: PRICE_REGEX, message: PRICE_MESSAGE },
   quantityReceived: { regex: "positiveDecimal" },
   remarks: { maxLength: 500 },
 };
@@ -1159,7 +1164,7 @@ export default function StockEntryStep({
                   <Input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="any"
                     value={entryPrice}
                     onChange={(e) => setEntryPrice(e.target.value)}
                     onBlur={() =>
@@ -1256,7 +1261,7 @@ export default function StockEntryStep({
                   <Input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="any"
                     value={entryPrice}
                     onChange={(e) => setEntryPrice(e.target.value)}
                     onBlur={() =>
@@ -1474,7 +1479,7 @@ export default function StockEntryStep({
                   <Input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="any"
                     value={newPart.price}
                     onChange={(e) => setNewPart({ ...newPart, price: e.target.value })}
                     onBlur={() =>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CheckCircle2, XCircle, ClipboardList } from "lucide-react";
 import IqcReferenceViewer from "@/components/IqcReferenceViewer";
+import AlternatePartPicker from "@/components/AlternatePartPicker";
 
 // One line's IQC checklist. Nothing is submitted until every point is
 // checked. The inspector then enters how much of the received quantity they
@@ -20,8 +21,19 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
   const { user } = useAuth();
   const [templateId, setTemplateId] = useState("");
   const [items, setItems] = useState([]);
-  const total = Number(entry?.quantityReceived) || 0;
+  // The inspector can correct the stock entry itself (part, received
+  // quantity, unit, rate, remarks) while doing the IQC. Whatever is left
+  // here when the report is submitted becomes the final stock entry.
+  const [part, setPart] = useState(entry?.part || null);
+  const [recvQty, setRecvQty] = useState(String(entry?.quantityReceived ?? ""));
+  const [unit, setUnit] = useState(entry?.unit || "");
+  const [price, setPrice] = useState(entry?.price != null ? String(entry.price) : "");
+  const [remarks, setRemarks] = useState(entry?.remarks || "");
+  const recvNum = recvQty === "" ? NaN : Number(recvQty);
+  const recvValid = Number.isFinite(recvNum) && recvNum > 0;
+  const total = recvValid ? recvNum : 0;
   const [approvedQty, setApprovedQty] = useState(String(entry?.quantityReceived ?? ""));
+  const prevTotalRef = useRef(Number(entry?.quantityReceived) || 0);
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -60,11 +72,46 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId, templates]);
 
-  // A fresh line starts with everything approved and no reason.
+  // A fresh line starts with everything approved, no reason, and the entry's
+  // own details loaded for correction.
   useEffect(() => {
     setApprovedQty(String(entry?.quantityReceived ?? ""));
     setReason("");
+    setPart(entry?.part || null);
+    setRecvQty(String(entry?.quantityReceived ?? ""));
+    setUnit(entry?.unit || "");
+    setPrice(entry?.price != null ? String(entry.price) : "");
+    setRemarks(entry?.remarks || "");
+    prevTotalRef.current = Number(entry?.quantityReceived) || 0;
   }, [entry?._id, entry?.quantityReceived]);
+
+  // Correcting the received quantity carries the approved quantity along
+  // when it was still "approve everything", and never lets it exceed it.
+  useEffect(() => {
+    if (!recvValid) return;
+    const prev = prevTotalRef.current;
+    if (recvNum !== prev) {
+      setApprovedQty((cur) => {
+        const n = cur === "" ? NaN : Number(cur);
+        return Number.isFinite(n) && n === prev ? String(recvNum) : n > recvNum ? String(recvNum) : cur;
+      });
+      prevTotalRef.current = recvNum;
+    }
+  }, [recvNum, recvValid]);
+
+  // Only what actually differs from the entry is sent.
+  const buildCorrections = () => {
+    const c = {};
+    const origPartId = entry?.part?._id || entry?.part || null;
+    if (part?._id && String(part._id) !== String(origPartId)) c.partId = part._id;
+    if (recvValid && round3(recvNum) !== round3(Number(entry?.quantityReceived) || 0)) c.quantityReceived = recvNum;
+    if (unit.trim() !== (entry?.unit || "")) c.unit = unit.trim();
+    const origPrice = entry?.price != null ? String(entry.price) : "";
+    if (price.trim() !== origPrice) c.price = price.trim() === "" ? null : Number(price);
+    if (remarks.trim() !== (entry?.remarks || "")) c.remarks = remarks.trim();
+    return Object.keys(c).length > 0 ? c : null;
+  };
+  const priceValid = price.trim() === "" || (Number.isFinite(Number(price)) && Number(price) >= 0);
 
   const allChecked = items.length > 0 && items.every((it) => it.checked);
 
@@ -72,7 +119,7 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
   const qtyValid = Number.isFinite(approvedNum) && approvedNum >= 0 && approvedNum <= total;
   const rejectedNum = qtyValid ? round3(total - approvedNum) : 0;
   const needsReason = qtyValid && rejectedNum > 0;
-  const canSubmit = allChecked && qtyValid && (!needsReason || reason.trim().length > 0);
+  const canSubmit = allChecked && recvValid && priceValid && qtyValid && (!needsReason || reason.trim().length > 0);
 
   const toggleItem = (idx) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, checked: !it.checked } : it)));
@@ -81,6 +128,14 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
   const handleSubmit = async () => {
     if (!allChecked) {
       toast.error("Check every point on the IQC report first");
+      return;
+    }
+    if (!recvValid) {
+      toast.error("Received quantity must be greater than 0");
+      return;
+    }
+    if (!priceValid) {
+      toast.error("Rate must be a number, 0 or more");
       return;
     }
     if (!qtyValid) {
@@ -98,8 +153,9 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
         items,
         acceptedQuantity: approvedNum,
         rejectionReason: needsReason ? reason.trim() : "",
+        corrections: buildCorrections() || undefined,
       });
-      const label = entry.part?.ttUniquePartNumber || "Line";
+      const label = data?.part?.ttUniquePartNumber || part?.ttUniquePartNumber || entry.part?.ttUniquePartNumber || "Line";
       toast.success(
         rejectedNum === 0
           ? `${label} accepted — ${approvedNum} added to main stock`
@@ -201,6 +257,86 @@ export default function IqcReportForm({ entry, templates, onDone, onCancel }) {
           )}
         </div>
       )}
+
+      <div className="space-y-2 rounded border border-border bg-card p-2.5">
+        <Label className="text-xs">Stock entry details</Label>
+        <p className="text-xs text-muted-foreground">
+          Correct anything that was entered wrongly at stock entry. The final stock entry follows what is
+          saved here, and the original values are kept in the IQC record.
+        </p>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Part (search to change)</Label>
+          <AlternatePartPicker value={part} onChange={setPart} placeholder="Search part number or description" />
+          {!part && (
+            <p className="text-xs text-muted-foreground">
+              Nothing picked — the current part ({entry?.part?.ttUniquePartNumber || "—"}) is kept.
+            </p>
+          )}
+          {part?.manufacturerPartNumber && (
+            <p className="text-xs text-muted-foreground">
+              Mfr. part no. <span className="font-mono text-foreground">{part.manufacturerPartNumber}</span>
+            </p>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <Label htmlFor={`iqc-recv-${entry._id}`} className="text-xs text-muted-foreground">
+              Quantity received
+            </Label>
+            <Input
+              id={`iqc-recv-${entry._id}`}
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              className="mt-1"
+              value={recvQty}
+              onChange={(e) => setRecvQty(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor={`iqc-unit-${entry._id}`} className="text-xs text-muted-foreground">
+              Unit
+            </Label>
+            <Input
+              id={`iqc-unit-${entry._id}`}
+              maxLength={20}
+              placeholder="PCS, KG, MTR…"
+              className="mt-1"
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor={`iqc-price-${entry._id}`} className="text-xs text-muted-foreground">
+              Rate (per unit)
+            </Label>
+            <Input
+              id={`iqc-price-${entry._id}`}
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              className="mt-1"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </div>
+        </div>
+        {!recvValid && <p className="text-xs text-destructive">Enter a received quantity greater than 0.</p>}
+        {!priceValid && <p className="text-xs text-destructive">Rate must be a number, 0 or more.</p>}
+        <div>
+          <Label htmlFor={`iqc-remarks-${entry._id}`} className="text-xs text-muted-foreground">
+            Remarks
+          </Label>
+          <Input
+            id={`iqc-remarks-${entry._id}`}
+            className="mt-1"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+          />
+        </div>
+      </div>
 
       <div className="space-y-2">
         <Label className="text-xs">Quantity</Label>

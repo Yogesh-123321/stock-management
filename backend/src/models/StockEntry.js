@@ -114,6 +114,22 @@ const stockEntrySchema = new mongoose.Schema(
       inspectedBy: { type: String, trim: true, default: "" },
       inspectedByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       inspectedAt: { type: Date, default: null },
+      // Corrections the inspector made to this line while doing the IQC
+      // (wrong part number picked at stock entry, short/over delivery,
+      // wrong unit or rate, ...). The fields on the line itself already hold
+      // the corrected, final values — this only keeps what was originally
+      // entered, plus which fields changed, so the change can be audited.
+      corrections: {
+        changed: { type: [String], default: [] },
+        original: {
+          part: { type: mongoose.Schema.Types.ObjectId, ref: "Part", default: null },
+          partNumber: { type: String, trim: true, default: "" },
+          quantityReceived: { type: Number, default: null },
+          unit: { type: String, trim: true, default: "" },
+          price: { type: Number, default: null },
+          remarks: { type: String, trim: true, default: "" },
+        },
+      },
     },
 
     // Lot code in WW/YY format (ISO week / 2-digit year), stamped on once

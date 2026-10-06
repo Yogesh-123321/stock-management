@@ -1115,6 +1115,35 @@ function InvoiceStockDialog({ invoice, onClose }) {
   );
 }
 
+const fmtInr = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Grand total cell: the total on top, then the breakdown it was built from
+// (payment + CGST + SGST | IGST), then freight on its own line — freight is
+// shown but not part of the total. Invoices saved before bill amounts were
+// captured have no total, so they show a dash.
+function BillCell({ row }) {
+  // Grand total is the invoice's own final figure; older rows saved before it
+  // existed fall back to the calculated total bill.
+  const headline = row.grandTotal ?? row.totalBill;
+  const freight = Number(row.freightCharges) > 0 ? Number(row.freightCharges) : 0;
+  if (headline == null && !freight) return <span className="text-muted-foreground">—</span>;
+  const parts = [];
+  if (row.paymentAmount != null) parts.push(`Payment ${fmtInr(row.paymentAmount)}`);
+  if (row.gstType === "cgst_sgst") {
+    parts.push(`CGST ${fmtInr(row.cgstAmount)}`, `SGST ${fmtInr(row.sgstAmount)}`);
+  } else if (row.gstType === "igst") {
+    parts.push(`IGST ${fmtInr(row.igstAmount)}`);
+  }
+  return (
+    <div className="leading-tight">
+      <div className="font-medium">{headline == null ? "—" : fmtInr(headline)}</div>
+      {parts.length > 0 && <div className="mt-0.5 text-xs text-muted-foreground">{parts.join(" + ")}</div>}
+      {freight > 0 && <div className="mt-0.5 text-xs text-muted-foreground">Freight {fmtInr(freight)} (not in total)</div>}
+    </div>
+  );
+}
+
 function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1266,19 +1295,20 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
               <th className="px-3 py-2 font-medium">Vendor</th>
               <th className="px-3 py-2 font-medium">Against</th>
               <th className="px-3 py-2 font-medium">Date</th>
+              <th className="px-3 py-2 font-medium">Grand total</th>
               <th className="px-3 py-2 font-medium text-right">File</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
                   {search.trim() ? "No tax invoices match that search." : "No tax invoices uploaded yet."}
                 </td>
               </tr>
@@ -1303,6 +1333,9 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
                       : "—"}
                   </td>
                   <td className="px-3 py-2">{fmtDate(row.invoiceDate || row.createdAt)}</td>
+                  <td className="px-3 py-2">
+                    <BillCell row={row} />
+                  </td>
                   <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-2">
                       {isPdfFile(row) && (

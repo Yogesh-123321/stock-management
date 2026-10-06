@@ -8,6 +8,9 @@ const populateEntry = (query) =>
     { path: "part", populate: { path: "vendors", select: "companyName" } },
     { path: "vendor" },
     { path: "purchaseOrder" },
+    // The tax invoice this line arrived under — lets the IQC stock window
+    // group material invoice-wise and search by invoice number.
+    { path: "appliedVia", select: "invoiceNumber invoiceDate documentUrl originalFileName" },
   ]);
 
 /*
@@ -57,6 +60,13 @@ export const getIqcStockEntries = asyncHandler(async (req, res) => {
                        approves (0 .. quantityReceived). Everything not
                        approved is rejected.
     rejectionReason  - required whenever any quantity is rejected
+    corrections      - optional { partId, quantityReceived, unit, price,
+                       remarks }: the inspector's corrections to the stock
+                       entry itself. Only the keys sent are changed. They are
+                       applied BEFORE anything is credited, so the final
+                       stock entry (part, quantity, unit, rate) is what the
+                       IQC decided; the original values are kept on
+                       iqcReport.corrections.original
     decision         - legacy: "accepted" (= approve all) | "rejected"
                        (= approve none), used only if acceptedQuantity is
                        not sent
@@ -110,6 +120,78 @@ export const submitIqcReport = asyncHandler(async (req, res) => {
   // How much of the delivered quantity is approved. Quantities can be
   // decimal (metres, kg), so work to 3 places like the StockEntry model.
   const round3 = (n) => Math.round(n * 1000) / 1000;
+
+  // ---- Inspector's corrections to the stock entry itself ----------------
+  // Applied in memory first; nothing is saved until the decision below goes
+  // through, so a failed submit leaves the line exactly as it was.
+  const corr = req.body.corrections && typeof req.body.corrections === "object" ? req.body.corrections : null;
+  const has = (k) => !!corr && Object.prototype.hasOwnProperty.call(corr, k);
+  const originalValues = {
+    part: entry.part?._id || entry.part || null,
+    partNumber: entry.part?.ttUniquePartNumber || "",
+    quantityReceived: entry.quantityReceived,
+    unit: entry.unit || "",
+    price: entry.price ?? null,
+    remarks: entry.remarks || "",
+  };
+  const changedFields = [];
+  let correctedPartId = null;
+
+  if (has("partId") && corr.partId && String(corr.partId) !== String(originalValues.part)) {
+    const newPart = await Part.findById(corr.partId);
+    if (!newPart) {
+      res.status(400);
+      throw new Error("The part you chose isn't in the part master");
+    }
+    entry.part = newPart._id;
+    // The inspector has confirmed this existing part, so the line is no
+    // longer a new / alternate part booking.
+    entry.matchType = "existing_part_number";
+    entry.alternateOfPart = null;
+    correctedPartId = newPart._id;
+    changedFields.push("part");
+  }
+  if (has("quantityReceived")) {
+    const q = round3(Number(corr.quantityReceived));
+    if (!Number.isFinite(q) || q <= 0) {
+      res.status(400);
+      throw new Error("Received quantity must be greater than 0");
+    }
+    if (q !== round3(Number(entry.quantityReceived) || 0)) {
+      entry.quantityReceived = q;
+      changedFields.push("quantity");
+    }
+  }
+  if (has("unit")) {
+    const u = String(corr.unit || "").trim();
+    if (u !== (entry.unit || "")) {
+      entry.unit = u;
+      changedFields.push("unit");
+    }
+  }
+  if (has("price")) {
+    let pr = null;
+    if (corr.price !== null && corr.price !== undefined && corr.price !== "") {
+      pr = Number(corr.price);
+      if (!Number.isFinite(pr) || pr < 0) {
+        res.status(400);
+        throw new Error("Rate must be a number, 0 or more");
+      }
+    }
+    if (pr !== (entry.price ?? null)) {
+      entry.price = pr;
+      changedFields.push("price");
+    }
+  }
+  if (has("remarks")) {
+    const r = String(corr.remarks || "").trim();
+    if (r !== (entry.remarks || "")) {
+      entry.remarks = r;
+      changedFields.push("remarks");
+    }
+  }
+
+  // From here on `total` is the quantity AFTER any correction.
   const total = round3(Number(entry.quantityReceived) || 0);
 
   let acceptedQty;
@@ -151,9 +233,10 @@ export const submitIqcReport = asyncHandler(async (req, res) => {
     acceptedQuantity: acceptedQty,
     rejectedQuantity: rejectedQty,
     rejectionReason: rejectedQty > 0 ? reason : "",
+    corrections: { changed: changedFields, original: changedFields.length > 0 ? originalValues : {} },
   };
 
-  const partId = entry.part?._id || entry.part;
+  const partId = correctedPartId || entry.part?._id || entry.part;
 
   if (acceptedQty === 0) {
     // Nothing approved -> the whole line is rejected stock.

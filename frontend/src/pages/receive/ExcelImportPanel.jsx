@@ -87,6 +87,11 @@ const emptyNewPart = () => ({
 // Same field rules as the manual "new part" form on the Stock entry step —
 // this is the bulk-import path for the same data, so it should be no more
 // permissive than typing it in one row at a time.
+// Per-unit prices (component rates, bulk items) often need more than the 2
+// decimals used for money totals, so price fields allow up to 6.
+const PRICE_REGEX = /^\d+(\.\d{1,6})?$/;
+const PRICE_MESSAGE = "Numbers only, up to 6 decimal places";
+
 const ROW_FIELD_RULES = {
   itemDescription: { required: true, requiredMessage: "Item description is required", maxLength: 200 },
   manufacturerPartNumber: { regex: "docNumber" },
@@ -101,7 +106,7 @@ const ROW_FIELD_RULES = {
   // Both optional, same rules as the manual stock-entry form: the unit of
   // measure (PCS, KG, MTR, ...) and the rate charged per unit on THIS delivery.
   unit: { regex: "alphaNumSpace", maxLength: 20 },
-  price: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+  price: { regex: PRICE_REGEX, message: PRICE_MESSAGE },
 };
 
 function validateRowField(field, value) {

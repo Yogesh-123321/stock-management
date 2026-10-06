@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 
+// GST on a bill: intra-state supply = CGST + SGST, inter-state = IGST, or none.
+export const GST_TYPES = ["cgst_sgst", "igst", "none"];
+
 // How a supplier invoice was settled. "Cash purchase" is the only method with
 // no UTR / bank reference — every other method must carry one.
 export const CASH_METHOD = "Cash purchase";
@@ -49,6 +52,30 @@ const taxInvoiceSchema = new mongoose.Schema(
     },
     lineExtractionModel: { type: String, default: null },
     lineExtractedAt: { type: Date, default: null },
+
+    // Bill amounts, captured at stock entry (Receive material, step 5).
+    // Recorded for later use under Payments — nothing reads them for payment
+    // yet. totalBill is always computed server-side (see computeBillAmounts in
+    // controllers/taxInvoiceController.js), never trusted from the client:
+    //   totalBill = paymentAmount + GST (CGST + SGST, or IGST)
+    // Freight is stored separately and is NOT part of totalBill / grandTotal.
+    // All of these are optional; invoices saved before they existed have none.
+    //
+    // paymentAmount = the invoice's taxable value, i.e. the amount before GST
+    // and before freight.
+    paymentAmount: { type: Number, min: 0, default: null },
+    // Which GST applies: intra-state = CGST + SGST, inter-state = IGST.
+    gstType: { type: String, enum: [...GST_TYPES, null], default: null },
+    cgstAmount: { type: Number, min: 0, default: 0 },
+    sgstAmount: { type: Number, min: 0, default: 0 },
+    igstAmount: { type: Number, min: 0, default: 0 },
+    // Optional, kept separate from the GST figures.
+    freightCharges: { type: Number, min: 0, default: 0 },
+    totalBill: { type: Number, min: 0, default: null },
+    // The invoice's own final total (as printed, so it can differ from totalBill
+    // by a round-off). Entered or read off the invoice at step 5; when nothing
+    // is entered it defaults to totalBill.
+    grandTotal: { type: Number, min: 0, default: null },
 
     // Billing: every tax invoice uploaded at stock entry lands in the Billing
     // page as UNPAID and is marked paid there. Invoices saved before this

@@ -1,7 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { uploadFileToCloudinary } from "../config/cloudinary.js";
 import mongoose from "mongoose";
-import TaxInvoice from "../models/TaxInvoice.js";
+import TaxInvoice, { GST_TYPES } from "../models/TaxInvoice.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import Vendor from "../models/Vendor.js";
 import StockEntry from "../models/StockEntry.js";
@@ -12,6 +12,81 @@ import { extractInvoiceLineItems, AiExtractionError } from "../utils/aiDocumentE
 import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
 
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Rounds to 2 decimal places without floating-point drift (e.g. 0.1 + 0.2).
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+/*
+  Reads the bill-amount fields off a request body and returns either
+  { error } or { amounts } ready to spread into TaxInvoice.create().
+
+    totalBill  = paymentAmount + CGST + SGST (or IGST)   — freight is NOT added
+    grandTotal = the invoice's own final total as entered / read off the
+                 invoice; falls back to totalBill when not given
+
+
+  Every field is optional (the invoice file is still the only thing required),
+  but anything that IS sent must be a valid non-negative number, and only the
+  GST figures matching gstType are kept — e.g. with "igst" any CGST/SGST sent
+  is dropped, so the stored split can never contradict the chosen type.
+  totalBill is computed here so it can't be tampered with from the client; it
+  stays null when no amount at all was entered.
+*/
+const parseAmount = (raw, label) => {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return { value: null };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return { error: `${label} must be a number, 0 or more` };
+  return { value: round2(n) };
+};
+
+export const computeBillAmounts = (body = {}) => {
+  const fields = [
+    ["paymentAmount", "Payment amount"],
+    ["cgstAmount", "CGST"],
+    ["sgstAmount", "SGST"],
+    ["igstAmount", "IGST"],
+    ["freightCharges", "Freight charges"],
+    ["grandTotal", "Grand total"],
+  ];
+  const v = {};
+  for (const [key, label] of fields) {
+    const r = parseAmount(body[key], label);
+    if (r.error) return { error: r.error };
+    v[key] = r.value;
+  }
+
+  let gstType = String(body.gstType || "").trim() || null;
+  if (gstType && !GST_TYPES.includes(gstType)) return { error: "Choose a valid GST type" };
+
+  // GST amounts entered with no type picked: infer it from which ones were
+  // filled in, rather than silently throwing the figures away.
+  if (!gstType) {
+    if (v.igstAmount) gstType = "igst";
+    else if (v.cgstAmount || v.sgstAmount) gstType = "cgst_sgst";
+  }
+
+  const cgst = gstType === "cgst_sgst" ? v.cgstAmount || 0 : 0;
+  const sgst = gstType === "cgst_sgst" ? v.sgstAmount || 0 : 0;
+  const igst = gstType === "igst" ? v.igstAmount || 0 : 0;
+  const freight = v.freightCharges || 0;
+
+  // Freight is stored and shown alongside the bill but never added to it.
+  const anyEntered = v.paymentAmount != null || cgst || sgst || igst;
+  const totalBill = anyEntered ? round2((v.paymentAmount || 0) + cgst + sgst + igst) : null;
+
+  return {
+    amounts: {
+      paymentAmount: v.paymentAmount,
+      gstType,
+      cgstAmount: cgst,
+      sgstAmount: sgst,
+      igstAmount: igst,
+      freightCharges: freight,
+      totalBill,
+      grandTotal: v.grandTotal != null ? v.grandTotal : totalBill,
+    },
+  };
+};
 
 // GET /api/tax-invoices?purchaseOrder=&vendor=&search=
 // search: matches invoiceNumber OR the vendor's company name/GSTIN OR the
@@ -548,6 +623,14 @@ const moveDeliveryStockToIqc = async (poDoc, vendorId, invoiceId, invoiceDate, r
 export const uploadTaxInvoice = asyncHandler(async (req, res) => {
   const { vendor, purchaseOrder, invoiceNumber, invoiceDate, notes, invoiceQuantity, receivingSession } = req.body;
 
+  // Bill amounts (payment + GST; freight kept separate) — optional, validated up front so a
+  // bad figure is rejected before the file is uploaded or any stock moves.
+  const { error: amountError, amounts } = computeBillAmounts(req.body);
+  if (amountError) {
+    res.status(400);
+    throw new Error(amountError);
+  }
+
   if (!vendor) {
     res.status(400);
     throw new Error("vendor is required");
@@ -601,6 +684,7 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
     notes,
     documentUrl,
     originalFileName: req.file.originalname,
+    ...amounts,
   });
 
   // The invoice has now arrived — every stock entry for this delivery that

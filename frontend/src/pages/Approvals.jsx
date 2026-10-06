@@ -77,6 +77,15 @@ export default function Approvals() {
   }, [load]);
 
   const decide = async (row, action) => {
+    // Approving / rejecting is a final decision, so ask first. Both the row
+    // buttons and the preview dialog's buttons come through here.
+    const label = (APPROVAL_LABEL[row.entityType] || "request").toLowerCase();
+    const verb = action === "approve" ? "approve" : "reject";
+    const ok = window.confirm(
+      `Are you sure you want to ${verb} this ${label}${row.title ? ` — ${row.title}` : ""}?`
+    );
+    if (!ok) return;
+
     setBusyId(row._id);
     try {
       await api.patch(`/approvals/${row._id}/${action}`, {

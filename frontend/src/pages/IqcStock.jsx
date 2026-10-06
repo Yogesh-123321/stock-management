@@ -11,7 +11,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import IqcReportForm from "@/components/IqcReportForm";
 import IqcReferenceViewer from "@/components/IqcReferenceViewer";
-import { ClipboardList, ClipboardCheck, ListChecks, XCircle, CheckCircle2, X, Search } from "lucide-react";
+import { ClipboardList, ClipboardCheck, ListChecks, XCircle, CheckCircle2, X, Search, FileText, ChevronDown, ChevronRight } from "lucide-react";
 
 const TABS = [
   { key: "in_iqc_stock", label: "IQC stock", description: "Awaiting an IQC report — not yet in main stock." },
@@ -25,6 +25,14 @@ const TABS = [
 ];
 
 const TAB_ICON = { in_iqc_stock: ClipboardList, rejected: XCircle, accepted: CheckCircle2 };
+
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+
+// Lines are grouped by the tax invoice they arrived under. Anything with no
+// invoice on record (older entries) goes into one "No tax invoice" group.
+const NO_INVOICE_KEY = "__no_invoice__";
+const invoiceKeyOf = (e) => e.appliedVia?._id || NO_INVOICE_KEY;
 
 const fmtWhen = (d) =>
   d
@@ -120,6 +128,9 @@ function BulkIqcPanel({ selected, templates, onDone, onCancel }) {
               <span className="truncate">
                 <span className="font-mono">{e.part?.ttUniquePartNumber}</span>
                 <span className="ml-1.5 text-muted-foreground">{e.part?.itemDescription}</span>
+                {e.part?.manufacturerPartNumber && (
+                  <span className="ml-1.5 font-mono text-muted-foreground">[{e.part.manufacturerPartNumber}]</span>
+                )}
               </span>
               <span className="shrink-0 font-mono-tech">{e.quantityReceived}</span>
             </li>
@@ -210,6 +221,67 @@ function BulkIqcPanel({ selected, templates, onDone, onCancel }) {
 }
 
 /*
+  Header strip for one invoice's group of lines in the IQC stock window.
+  On the "IQC stock" tab it carries a checkbox that ticks every line of that
+  invoice for the bulk IQC report.
+*/
+function InvoiceHeader({ group, selectable = false, allSelected = false, onToggle, collapsed = false, onToggleCollapse }) {
+  const { invoice, vendorName, entries } = group;
+  const title = invoice ? `Invoice ${invoice.invoiceNumber || "(no number)"}` : "No tax invoice linked";
+  const meta = [
+    invoice?.invoiceDate ? fmtDate(invoice.invoiceDate) : null,
+    vendorName || null,
+    `${entries.length} line${entries.length === 1 ? "" : "s"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div
+      className={`flex cursor-pointer flex-wrap items-center justify-between gap-2 bg-muted/40 px-3 py-2 hover:bg-muted/60 ${
+        collapsed ? "" : "border-b border-border"
+      }`}
+      onClick={onToggleCollapse}
+      role="button"
+      aria-expanded={!collapsed}
+      title={collapsed ? "Expand this invoice" : "Collapse this invoice"}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        {collapsed ? (
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+        {selectable && (
+          <input
+            type="checkbox"
+            className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+            checked={allSelected}
+            onChange={onToggle}
+            onClick={(ev) => ev.stopPropagation()}
+            title="Select every line of this invoice for the bulk IQC report"
+          />
+        )}
+        <FileText className="h-4 w-4 shrink-0 text-accent" />
+        <span className="truncate text-sm font-semibold">{title}</span>
+        <span className="truncate text-xs text-muted-foreground">{meta}</span>
+      </div>
+      {invoice?.documentUrl && (
+        <a
+          href={invoice.documentUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(ev) => ev.stopPropagation()}
+          className="shrink-0 text-xs text-primary hover:underline"
+        >
+          View invoice
+        </a>
+      )}
+    </div>
+  );
+}
+
+/*
   IQC stock approve / reject window.
 
   No longer a page of its own (there is no sidebar entry any more) — it opens
@@ -230,6 +302,9 @@ export default function IqcStock({ onClose, onChanged }) {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  // Invoice groups the user has expanded (by group key). Every invoice starts
+  // collapsed; this is cleared again on tab change.
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const changedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -257,6 +332,7 @@ export default function IqcStock({ onClose, onChanged }) {
   useEffect(() => {
     setSelectedIds(new Set());
     setBulkOpen(false);
+    setExpandedKeys(new Set());
   }, [tab]);
 
   const handleClose = () => {
@@ -313,6 +389,7 @@ export default function IqcStock({ onClose, onChanged }) {
         e.part?.ttUniquePartNumber,
         e.part?.itemDescription,
         e.part?.manufacturerPartNumber,
+        e.appliedVia?.invoiceNumber,
         e.vendor?.companyName,
         e.iqcReport?.inspectedBy,
         e.iqcReport?.rejectionReason,
@@ -325,9 +402,49 @@ export default function IqcStock({ onClose, onChanged }) {
   }, [entries, search]);
   const isSearching = search.trim() !== "";
 
+  // Invoice-wise grouping of whatever is currently visible. Entries arrive
+  // newest first, so groups keep that order (the first line of each group
+  // decides where the group sits).
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const e of visibleEntries) {
+      const key = invoiceKeyOf(e);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          invoice: e.appliedVia || null,
+          vendorName: e.vendor?.companyName || "",
+          entries: [],
+        });
+      }
+      map.get(key).entries.push(e);
+    }
+    return [...map.values()];
+  }, [visibleEntries]);
+
+  // While a search is active every group stays open so matching lines are
+  // never hidden inside a collapsed invoice.
+  const isCollapsed = (key) => !isSearching && !expandedKeys.has(key);
+  const toggleCollapse = (key) =>
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allCollapsed = groups.length > 0 && groups.every((g) => !expandedKeys.has(g.key));
+  const toggleAllCollapsed = () => setExpandedKeys(allCollapsed ? new Set(groups.map((g) => g.key)) : new Set());
+
   // Lines ticked for the bulk report (only ones still on this tab).
   const selectedEntries = useMemo(() => entries.filter((e) => selectedIds.has(e._id)), [entries, selectedIds]);
   const allVisibleSelected = visibleEntries.length > 0 && visibleEntries.every((e) => selectedIds.has(e._id));
+  const toggleGroup = (group) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allIn = group.entries.every((e) => next.has(e._id));
+      group.entries.forEach((e) => (allIn ? next.delete(e._id) : next.add(e._id)));
+      return next;
+    });
   const toggleAllVisible = () =>
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -368,10 +485,16 @@ export default function IqcStock({ onClose, onChanged }) {
                 );
               })}
             </div>
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {groups.length > 1 && !isSearching && (
+              <Button type="button" size="sm" variant="outline" onClick={toggleAllCollapsed}>
+                {allCollapsed ? "Expand all" : "Collapse all"}
+              </Button>
+            )}
             <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search part no., description or vendor"
+                placeholder="Search invoice no., part no. or vendor"
                 className="pl-9 pr-8"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -386,6 +509,7 @@ export default function IqcStock({ onClose, onChanged }) {
                   <X className="h-4 w-4" />
                 </button>
               )}
+            </div>
             </div>
           </div>
 
@@ -411,50 +535,75 @@ export default function IqcStock({ onClose, onChanged }) {
                   No line matches "{search.trim()}".
                 </p>
               ) : tab !== "in_iqc_stock" ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Part no.</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      {tab === "rejected" && <TableHead>Reason</TableHead>}
-                      <TableHead>Inspected by</TableHead>
-                      <TableHead>Inspected on</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visibleEntries.map((e) => (
-                      <TableRow key={e._id}>
-                        <TableCell className="font-mono text-xs">{e.part?.ttUniquePartNumber}</TableCell>
-                        <TableCell className="truncate max-w-[240px]" title={e.part?.itemDescription}>
-                          {e.part?.itemDescription}
-                        </TableCell>
-                        <TableCell>{e.vendor?.companyName}</TableCell>
-                        <TableCell className="text-right whitespace-nowrap">
-                          {e.quantityReceived}
-                          {e.iqcReport?.originalQuantity > e.quantityReceived && (
-                            <span className="ml-1 text-[10px] text-muted-foreground">
-                              of {e.iqcReport.originalQuantity}
-                            </span>
-                          )}
-                        </TableCell>
-                        {tab === "rejected" && (
-                          <TableCell
-                            className="max-w-[220px] text-xs"
-                            title={e.iqcReport?.rejectionReason || ""}
-                          >
-                            <span className="line-clamp-2">{e.iqcReport?.rejectionReason || "—"}</span>
-                          </TableCell>
-                        )}
-                        <TableCell>{e.iqcReport?.inspectedBy || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                          {fmtWhen(e.iqcReport?.inspectedAt)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <div className="space-y-4">
+                  {groups.map((g) => (
+                    <section key={g.key} className="overflow-hidden rounded-md border border-border">
+                      <InvoiceHeader
+                        group={g}
+                        collapsed={isCollapsed(g.key)}
+                        onToggleCollapse={() => toggleCollapse(g.key)}
+                      />
+                      {!isCollapsed(g.key) && (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Part no.</TableHead>
+                            <TableHead>Mfr. part no.</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            {tab === "rejected" && <TableHead>Reason</TableHead>}
+                            <TableHead>Inspected by</TableHead>
+                            <TableHead>Inspected on</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {g.entries.map((e) => (
+                            <TableRow key={e._id}>
+                              <TableCell className="font-mono text-xs">
+                                {e.part?.ttUniquePartNumber}
+                                {e.iqcReport?.corrections?.changed?.length > 0 && (
+                                  <Badge
+                                    variant="outline"
+                                    className="ml-1.5 align-middle text-[10px]"
+                                    title={`Edited at IQC: ${e.iqcReport.corrections.changed.join(", ")}${
+                                      e.iqcReport.corrections.original?.partNumber
+                                        ? ` · entered as ${e.iqcReport.corrections.original.partNumber}`
+                                        : ""
+                                    }`}
+                                  >
+                                    Edited at IQC
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{e.part?.manufacturerPartNumber || "—"}</TableCell>
+                              <TableCell className="truncate max-w-[240px]" title={e.part?.itemDescription}>
+                                {e.part?.itemDescription}
+                              </TableCell>
+                              <TableCell className="text-right whitespace-nowrap">
+                                {e.quantityReceived}
+                                {e.iqcReport?.originalQuantity > e.quantityReceived && (
+                                  <span className="ml-1 text-[10px] text-muted-foreground">
+                                    of {e.iqcReport.originalQuantity}
+                                  </span>
+                                )}
+                              </TableCell>
+                              {tab === "rejected" && (
+                                <TableCell className="max-w-[220px] text-xs" title={e.iqcReport?.rejectionReason || ""}>
+                                  <span className="line-clamp-2">{e.iqcReport?.rejectionReason || "—"}</span>
+                                </TableCell>
+                              )}
+                              <TableCell>{e.iqcReport?.inspectedBy || "—"}</TableCell>
+                              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                {fmtWhen(e.iqcReport?.inspectedAt)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      )}
+                    </section>
+                  ))}
+                </div>
               ) : (
                 <>
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -488,49 +637,72 @@ export default function IqcStock({ onClose, onChanged }) {
                     />
                   )}
 
-                <ul className="space-y-2">
-                  {visibleEntries.map((e) => (
-                    <li key={e._id} className="rounded-md border border-border p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <input
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
-                          checked={selectedIds.has(e._id)}
-                          onChange={() => toggleSelected(e._id)}
-                          title="Select for bulk IQC report"
+                  <div className="space-y-4">
+                    {groups.map((g) => (
+                      <section key={g.key} className="overflow-hidden rounded-md border border-border">
+                        <InvoiceHeader
+                          group={g}
+                          selectable
+                          allSelected={g.entries.every((e) => selectedIds.has(e._id))}
+                          onToggle={() => toggleGroup(g)}
+                          collapsed={isCollapsed(g.key)}
+                          onToggleCollapse={() => toggleCollapse(g.key)}
                         />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">
-                            <span className="font-mono text-xs bg-muted rounded px-1.5 py-0.5 mr-1.5">
-                              {e.part?.ttUniquePartNumber}
-                            </span>
-                            {e.part?.itemDescription}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {e.vendor?.companyName} · Qty received: {e.quantityReceived}
-                          </p>
-                        </div>
-                        <Badge variant="warning">In IQC stock</Badge>
-                      </div>
+                        {!isCollapsed(g.key) && (
+                        <ul className="space-y-2 p-3">
+                          {g.entries.map((e) => (
+                            <li key={e._id} className="rounded-md border border-border p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
+                                  checked={selectedIds.has(e._id)}
+                                  onChange={() => toggleSelected(e._id)}
+                                  title="Select for bulk IQC report"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium truncate">
+                                    <span className="font-mono text-xs bg-muted rounded px-1.5 py-0.5 mr-1.5">
+                                      {e.part?.ttUniquePartNumber}
+                                    </span>
+                                    {e.part?.itemDescription}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    {e.part?.manufacturerPartNumber && (
+                                      <>
+                                        Mfr. part no.{" "}
+                                        <span className="font-mono text-foreground">{e.part.manufacturerPartNumber}</span>
+                                        {" · "}
+                                      </>
+                                    )}
+                                    {e.vendor?.companyName} · Qty received: {e.quantityReceived}
+                                  </p>
+                                </div>
+                                <Badge variant="warning">In IQC stock</Badge>
+                              </div>
 
-                      <div className="mt-2">
-                        {openEntryId === e._id ? (
-                          <IqcReportForm
-                            entry={e}
-                            templates={templates}
-                            onDone={handleResolved}
-                            onCancel={() => setOpenEntryId(null)}
-                          />
-                        ) : (
-                          <Button type="button" size="sm" variant="outline" onClick={() => setOpenEntryId(e._id)}>
-                            <ClipboardCheck className="h-4 w-4 mr-1.5" />
-                            Fill IQC report
-                          </Button>
+                              <div className="mt-2">
+                                {openEntryId === e._id ? (
+                                  <IqcReportForm
+                                    entry={e}
+                                    templates={templates}
+                                    onDone={handleResolved}
+                                    onCancel={() => setOpenEntryId(null)}
+                                  />
+                                ) : (
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setOpenEntryId(e._id)}>
+                                    <ClipboardCheck className="h-4 w-4 mr-1.5" />
+                                    Fill IQC report
+                                  </Button>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
                         )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                      </section>
+                    ))}
+                  </div>
                 </>
               )}
             </CardContent>

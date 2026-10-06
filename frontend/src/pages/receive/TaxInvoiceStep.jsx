@@ -27,7 +27,27 @@ import {
 const TAX_INVOICE_SCHEMA = {
   invoiceNumber: { required: true, regex: "docNumber" },
   invoiceQuantity: { regex: "decimal2", message: "Numbers only, up to 2 decimal places" },
+  // Bill amounts — all optional, recorded now and used later under Payments.
+  paymentAmount: { regex: "decimal2" },
+  cgstAmount: { regex: "decimal2" },
+  sgstAmount: { regex: "decimal2" },
+  igstAmount: { regex: "decimal2" },
+  freightCharges: { regex: "decimal2" },
+  grandTotal: { regex: "decimal2" },
 };
+
+const GST_TYPE_OPTIONS = [
+  { value: "cgst_sgst", label: "CGST + SGST (same state)" },
+  { value: "igst", label: "IGST (other state)" },
+  { value: "none", label: "No GST" },
+];
+
+const num = (v) => {
+  const n = Number(v);
+  return v === "" || v == null || !Number.isFinite(n) ? 0 : n;
+};
+const inr = (n) =>
+  Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // AI-read fields off the uploaded tax invoice, checked against what's
 // typed into this step (and the vendor already selected).
@@ -36,6 +56,7 @@ const TAX_INVOICE_DOC_MAPPING = [
   { extractedKey: "invoiceNumber", enteredKey: "invoiceNumber", label: "Invoice number", type: "text" },
   { extractedKey: "invoiceDate", enteredKey: "invoiceDate", label: "Invoice date", type: "text" },
   { extractedKey: "totalQuantity", enteredKey: "invoiceQuantity", label: "Total quantity", type: "number" },
+  { extractedKey: "totalAmount", enteredKey: "grandTotal", label: "Grand total", type: "number" },
 ];
 
 // purchaseOrder here is whichever PO/PI document anchors this delivery (the
@@ -59,9 +80,32 @@ export default function TaxInvoiceStep({
   const [invoiceDate, setInvoiceDate] = useState("");
   const [invoiceQuantity, setInvoiceQuantity] = useState("");
   const [notes, setNotes] = useState("");
+  // Bill amounts: payment (taxable value) + GST = total bill. Freight is recorded
+  // separately and is not added to it.
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [gstType, setGstType] = useState("");
+  const [cgstAmount, setCgstAmount] = useState("");
+  const [sgstAmount, setSgstAmount] = useState("");
+  const [igstAmount, setIgstAmount] = useState("");
+  const [freightCharges, setFreightCharges] = useState("");
+  // Grand total follows payment + GST until it is typed in (or read
+  // off the invoice), after which it is the person's own figure.
+  const [grandTotalInput, setGrandTotalInput] = useState("");
+  const [grandTotalEdited, setGrandTotalEdited] = useState(false);
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const v = useFormValidation(TAX_INVOICE_SCHEMA);
+
+  // Calculated bill = payment + (CGST + SGST | IGST). Freight is not included. Only the GST
+  // fields matching the chosen type count, same as the server.
+  const gstTotal =
+    gstType === "cgst_sgst" ? num(cgstAmount) + num(sgstAmount) : gstType === "igst" ? num(igstAmount) : 0;
+  const anyAmount = paymentAmount !== "" || gstTotal > 0;
+  const calcTotal = Math.round((num(paymentAmount) + gstTotal) * 100) / 100;
+  const grandTotal = grandTotalEdited ? grandTotalInput : anyAmount ? calcTotal.toFixed(2) : "";
+  const grandDiff = grandTotal !== "" && anyAmount ? Math.round((num(grandTotal) - calcTotal) * 100) / 100 : 0;
+
+  const amountValues = { paymentAmount, cgstAmount, sgstAmount, igstAmount, freightCharges, grandTotal };
 
   // Duplicate-invoice-number check — whether typed by hand or filled in by
   // the AI auto-read below, the moment invoiceNumber settles this asks the
@@ -109,6 +153,29 @@ export default function TaxInvoiceStep({
     if (!invoiceNumber.trim() && aiFields.invoiceNumber) setInvoiceNumber(aiFields.invoiceNumber);
     if (!invoiceDate && aiFields.invoiceDate) setInvoiceDate(aiFields.invoiceDate);
     if (invoiceQuantity === "" && aiFields.totalQuantity != null) setInvoiceQuantity(String(aiFields.totalQuantity));
+
+    // Bill amounts read off the invoice — fills blanks only (never overwrites
+    // something already typed) and every field stays editable.
+    const aiNum = (k) => (aiFields[k] != null && Number.isFinite(Number(aiFields[k])) ? String(Number(aiFields[k])) : "");
+    const aiTaxable = aiNum("taxableAmount");
+    const aiCgst = aiNum("cgstAmount");
+    const aiSgst = aiNum("sgstAmount");
+    const aiIgst = aiNum("igstAmount");
+    const aiFreight = aiNum("freightCharges");
+    const aiTotal = aiNum("totalAmount");
+    if (paymentAmount === "" && aiTaxable) setPaymentAmount(aiTaxable);
+    if (!gstType) {
+      if (Number(aiIgst) > 0 && !(Number(aiCgst) > 0 || Number(aiSgst) > 0)) setGstType("igst");
+      else if (Number(aiCgst) > 0 || Number(aiSgst) > 0) setGstType("cgst_sgst");
+    }
+    if (cgstAmount === "" && aiCgst) setCgstAmount(aiCgst);
+    if (sgstAmount === "" && aiSgst) setSgstAmount(aiSgst);
+    if (igstAmount === "" && aiIgst) setIgstAmount(aiIgst);
+    if (freightCharges === "" && aiFreight) setFreightCharges(aiFreight);
+    if (!grandTotalEdited && aiTotal) {
+      setGrandTotalInput(aiTotal);
+      setGrandTotalEdited(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiStatus, aiFields, file]);
 
@@ -116,7 +183,7 @@ export default function TaxInvoiceStep({
     aiStatus === "done"
       ? findMismatches(
           aiFields,
-          { vendorName: vendor?.companyName, invoiceNumber, invoiceDate, invoiceQuantity },
+          { vendorName: vendor?.companyName, invoiceNumber, invoiceDate, invoiceQuantity, grandTotal },
           TAX_INVOICE_DOC_MAPPING
         )
       : [];
@@ -273,7 +340,7 @@ export default function TaxInvoiceStep({
       toast.error("Attach the tax invoice file — stock only goes to IQC once the invoice is uploaded");
       return;
     }
-    if (!v.validateAll({ invoiceNumber, invoiceQuantity })) {
+    if (!v.validateAll({ invoiceNumber, invoiceQuantity, ...amountValues })) {
       toast.error("Fix the highlighted field before uploading");
       return;
     }
@@ -320,6 +387,15 @@ export default function TaxInvoiceStep({
       if (invoiceDate) fd.append("invoiceDate", invoiceDate);
       if (invoiceQuantity !== "") fd.append("invoiceQuantity", invoiceQuantity);
       fd.append("notes", notes);
+      if (paymentAmount !== "") fd.append("paymentAmount", paymentAmount);
+      if (gstType) fd.append("gstType", gstType);
+      if (gstType === "cgst_sgst") {
+        if (cgstAmount !== "") fd.append("cgstAmount", cgstAmount);
+        if (sgstAmount !== "") fd.append("sgstAmount", sgstAmount);
+      }
+      if (gstType === "igst" && igstAmount !== "") fd.append("igstAmount", igstAmount);
+      if (freightCharges !== "") fd.append("freightCharges", freightCharges);
+      if (grandTotal !== "") fd.append("grandTotal", grandTotal);
       fd.append("document", file);
 
       const { data } = await api.post("/tax-invoices", fd, {
@@ -501,7 +577,7 @@ export default function TaxInvoiceStep({
             <Input
               value={invoiceNumber}
               onChange={(e) => setInvoiceNumber(e.target.value)}
-              onBlur={() => v.handleBlur("invoiceNumber", invoiceNumber, { invoiceNumber, invoiceQuantity })}
+              onBlur={() => v.handleBlur("invoiceNumber", invoiceNumber, { invoiceNumber, invoiceQuantity, ...amountValues })}
               placeholder="INV-2026-0142"
               className={duplicateInvoice ? "border-red-400 focus-visible:ring-red-400" : undefined}
             />
@@ -524,7 +600,7 @@ export default function TaxInvoiceStep({
               min="0"
               value={invoiceQuantity}
               onChange={(e) => setInvoiceQuantity(e.target.value)}
-              onBlur={() => v.handleBlur("invoiceQuantity", invoiceQuantity, { invoiceNumber, invoiceQuantity })}
+              onBlur={() => v.handleBlur("invoiceQuantity", invoiceQuantity, { invoiceNumber, invoiceQuantity, ...amountValues })}
               placeholder={String(receivedTotal || "")}
             />
             <FieldError error={v.fieldError("invoiceQuantity")} />
@@ -539,6 +615,156 @@ export default function TaxInvoiceStep({
               </p>
             )}
           </div>
+          <div className="sm:col-span-2 rounded-md border border-border p-3 space-y-3">
+            <div>
+              <p className="text-sm font-medium">Bill amount &amp; GST</p>
+              <p className="text-xs text-muted-foreground">
+                Optional — read from the uploaded invoice when possible and always editable. Recorded for the
+                payment stage later.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Payment amount (before GST)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  onBlur={() => v.handleBlur("paymentAmount", paymentAmount, amountValues)}
+                  placeholder="0.00"
+                />
+                <FieldError error={v.fieldError("paymentAmount")} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>GST type</Label>
+                <select
+                  value={gstType}
+                  onChange={(e) => setGstType(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                >
+                  <option value="">Select…</option>
+                  {GST_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {gstType === "cgst_sgst" && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>CGST amount</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={cgstAmount}
+                      onChange={(e) => setCgstAmount(e.target.value)}
+                      onBlur={() => v.handleBlur("cgstAmount", cgstAmount, amountValues)}
+                      placeholder="0.00"
+                    />
+                    <FieldError error={v.fieldError("cgstAmount")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>SGST amount</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={sgstAmount}
+                      onChange={(e) => setSgstAmount(e.target.value)}
+                      onBlur={() => v.handleBlur("sgstAmount", sgstAmount, amountValues)}
+                      placeholder="0.00"
+                    />
+                    <FieldError error={v.fieldError("sgstAmount")} />
+                  </div>
+                </>
+              )}
+              {gstType === "igst" && (
+                <div className="space-y-1.5">
+                  <Label>IGST amount</Label>
+                  <Input
+                    inputMode="decimal"
+                    value={igstAmount}
+                    onChange={(e) => setIgstAmount(e.target.value)}
+                    onBlur={() => v.handleBlur("igstAmount", igstAmount, amountValues)}
+                    placeholder="0.00"
+                  />
+                  <FieldError error={v.fieldError("igstAmount")} />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label>Freight charges (optional, not added to grand total)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={freightCharges}
+                  onChange={(e) => setFreightCharges(e.target.value)}
+                  onBlur={() => v.handleBlur("freightCharges", freightCharges, amountValues)}
+                  placeholder="0.00"
+                />
+                <FieldError error={v.fieldError("freightCharges")} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Grand total (as on the invoice)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={grandTotal}
+                  onChange={(e) => {
+                    setGrandTotalInput(e.target.value);
+                    setGrandTotalEdited(true);
+                  }}
+                  onBlur={() => v.handleBlur("grandTotal", grandTotal, amountValues)}
+                  placeholder="0.00"
+                  className="font-semibold"
+                />
+                <FieldError error={v.fieldError("grandTotal")} />
+                {grandTotalEdited && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGrandTotalEdited(false);
+                      setGrandTotalInput("");
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Use calculated total
+                  </button>
+                )}
+              </div>
+              {anyAmount && (
+                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground self-end">
+                  <p>
+                    {[
+                      paymentAmount !== "" ? `Payment ₹${inr(num(paymentAmount))}` : null,
+                      gstType === "cgst_sgst"
+                        ? `CGST ₹${inr(num(cgstAmount))} + SGST ₹${inr(num(sgstAmount))}`
+                        : gstType === "igst"
+                        ? `IGST ₹${inr(num(igstAmount))}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" + ")}
+                  </p>
+                  <p className="mt-0.5 font-medium text-foreground">Calculated total: ₹{inr(calcTotal)}</p>
+                  {freightCharges !== "" && (
+                    <p className="mt-0.5">Freight ₹{inr(num(freightCharges))} — shown separately, not in the total</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {Math.abs(grandDiff) >= 0.5 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
+                <p>
+                  Grand total is ₹{inr(Math.abs(grandDiff))} {grandDiff > 0 ? "more" : "less"} than payment + GST
+                  (₹{inr(calcTotal)}; freight is not included). A small gap can be round-off — otherwise check the amounts above.
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes (optional)</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
