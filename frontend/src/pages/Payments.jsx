@@ -179,6 +179,77 @@ function PayDialog({ invoice, onClose, onPaid }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Payment details of an already-paid invoice (read-only)              */
+/* ------------------------------------------------------------------ */
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="grid grid-cols-[130px_1fr] gap-2 border-b border-border/60 py-2 last:border-b-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm">{children}</dd>
+    </div>
+  );
+}
+
+function PaymentDetailsDialog({ invoice, onClose, onPreview }) {
+  const payment = invoice?.payment;
+  const cash = payment?.method === CASH_METHOD;
+  const paidBy = payment?.paidBy?.name || payment?.paidByName;
+
+  return (
+    <Dialog open={Boolean(invoice)} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Payment details</DialogTitle>
+          <DialogDescription>
+            {invoice?.vendor?.companyName || "Vendor"} · invoice {invoice?.invoiceNumber || "—"}
+          </DialogDescription>
+        </DialogHeader>
+
+        {invoice && (
+          <dl>
+            <DetailRow label="Status">
+              <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                Paid
+              </span>
+            </DetailRow>
+            <DetailRow label="Payment method">{payment?.method || "—"}</DetailRow>
+            <DetailRow label="UTR number">
+              {cash ? (
+                <span className="text-muted-foreground">Not applicable (cash purchase)</span>
+              ) : (
+                payment?.utrNumber || "—"
+              )}
+            </DetailRow>
+            <DetailRow label="Payment date">{fmtDate(payment?.paymentDate)}</DetailRow>
+            <DetailRow label="Remarks">
+              {payment?.remarks ? (
+                <span className="whitespace-pre-wrap">{payment.remarks}</span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </DetailRow>
+            <DetailRow label="Marked paid by">{paidBy || "—"}</DetailRow>
+            {payment?.paidAt && <DetailRow label="Marked paid on">{fmtDate(payment.paidAt)}</DetailRow>}
+          </dl>
+        )}
+
+        <DialogFooter>
+          {invoice?.documentUrl && (
+            <Button type="button" variant="outline" onClick={() => onPreview(invoice)}>
+              <Eye className="mr-1.5 h-4 w-4" /> View invoice
+            </Button>
+          )}
+          <Button type="button" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -193,6 +264,7 @@ export default function Payments() {
   const [loading, setLoading] = useState(false);
   const [payInvoice, setPayInvoice] = useState(null);
   const [previewInvoice, setPreviewInvoice] = useState(null);
+  const [detailsInvoice, setDetailsInvoice] = useState(null);
 
   const load = useCallback(async () => {
     if (!allowed) return;
@@ -237,7 +309,8 @@ export default function Payments() {
             </CardTitle>
             <CardDescription>
               Tax invoices uploaded at stock entry appear here as unpaid. Mark each one paid with its
-              UTR number (not needed for a cash purchase).
+              UTR number (not needed for a cash purchase). Click a paid invoice to see its payment
+              details.
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -303,7 +376,25 @@ export default function Payments() {
                 const paid = isPaid(row);
                 const cash = row.payment?.method === CASH_METHOD;
                 return (
-                  <TableRow key={row._id}>
+                  <TableRow
+                    key={row._id}
+                    // Paid rows open a read-only details popup; unpaid rows stay inert.
+                    onClick={paid ? () => setDetailsInvoice(row) : undefined}
+                    onKeyDown={
+                      paid
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setDetailsInvoice(row);
+                            }
+                          }
+                        : undefined
+                    }
+                    tabIndex={paid ? 0 : undefined}
+                    role={paid ? "button" : undefined}
+                    aria-label={paid ? "View payment details" : undefined}
+                    className={cn(paid && "cursor-pointer hover:bg-secondary/50")}
+                  >
                     <TableCell>
                       <p className="font-medium">{row.vendor?.companyName || "—"}</p>
                       {row.vendor?.taxRegistrationNo && (
@@ -361,14 +452,26 @@ export default function Payments() {
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
                         {!paid && (
-                          <Button size="sm" className="h-8" onClick={() => setPayInvoice(row)}>
+                          <Button
+                            size="sm"
+                            className="h-8"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPayInvoice(row);
+                            }}
+                          >
                             <Banknote className="mr-1.5 h-3.5 w-3.5" /> Mark paid
                           </Button>
                         )}
                         {row.documentUrl && (
                           <button
                             type="button"
-                            onClick={() => setPreviewInvoice(row)}
+                            onClick={(e) => {
+                              // Don't also trigger the row's details popup.
+                              e.stopPropagation();
+                              setPreviewInvoice(row);
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
                             title="Preview the invoice"
                             aria-label="Preview the invoice"
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -393,6 +496,16 @@ export default function Payments() {
           // Close the preview first so the two dialogs never stack.
           setPreviewInvoice(null);
           setPayInvoice(inv);
+        }}
+      />
+
+      <PaymentDetailsDialog
+        invoice={detailsInvoice}
+        onClose={() => setDetailsInvoice(null)}
+        onPreview={(inv) => {
+          // Close the details popup first so the two dialogs never stack.
+          setDetailsInvoice(null);
+          setPreviewInvoice(inv);
         }}
       />
 
