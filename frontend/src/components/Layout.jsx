@@ -44,7 +44,7 @@ const navItems = [
   },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
-  { to: "/payments", label: "Billing", icon: Wallet, permission: "payment.pay", badge: "payments" },
+  { to: "/payments", label: "Payments", icon: Wallet, permission: "payment.pay", badge: "payments" },
   { to: "/pi-generator", label: "PI generator", icon: FileSpreadsheet, permission: "pi.create" },
   { to: "/documents", label: "PO / PI / invoices", icon: FileStack, permission: "documents.view" },
   { to: "/po-generator", label: "PO generator", icon: FileText, permission: "po.create" },
