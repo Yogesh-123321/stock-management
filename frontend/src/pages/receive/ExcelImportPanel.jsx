@@ -15,6 +15,9 @@ import SearchableSelect from "@/components/ui/SearchableSelect";
 import { validateValue } from "@/lib/validators";
 import {
   FileSpreadsheet,
+  FileText,
+  Sparkles,
+  PackageSearch,
   UploadCloud,
   CalendarDays,
   ArrowLeft,
@@ -45,6 +48,16 @@ import {
                 straight away, unmatched rows raise a PartApprovalRequest and
                 wait for the Parts section to approve them, same as always.
   4. done     - summary of what was booked vs. sent for approval.
+
+  The same panel also runs in `source="pdf"` mode ("Import from invoice PDF"):
+  the upload is the vendor's invoice (PDF / photo), read with AI on the
+  server (POST /import/parse-pdf). An invoice has no sheet dates, so the
+  pick-date phase is skipped and every line goes straight to the preview.
+  Lines whose item code matches a part number / manufacturer part number are
+  matched automatically; the rest show a "Suggested parts" list (parts with a
+  similar description) the operator can link with one click, else they create
+  a new part for admin approval exactly like a sheet row. Review, per-row
+  save and commit are identical to the sheet flow.
 
   Vendor (and PO/PI, if any) come from the receiving wizard itself — the
   same vendor applies to every row in the sheet, matching how a single
@@ -140,7 +153,16 @@ function collectRowErrors(r) {
   return errors;
 }
 
-export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, sessionId = null, onImported, onClose }) {
+export default function ExcelImportPanel({
+  vendor,
+  purchaseOrder,
+  enteredBy,
+  sessionId = null,
+  onImported,
+  onClose,
+  source = "sheet", // "sheet" (vendor workbook) | "pdf" (vendor invoice, read with AI)
+}) {
+  const isPdf = source === "pdf";
   const [phase, setPhase] = useState("upload"); // upload -> pick-date -> preview -> done
   const [file, setFile] = useState(null);
   const [fileInputKey, setFileInputKey] = useState(0); // bump to force-remount the <input type=file>
@@ -208,7 +230,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
   const handleParse = async (e) => {
     e.preventDefault();
     if (!file) {
-      toast.error("Choose the vendor's stock sheet (.xlsx or .xls) first");
+      toast.error(isPdf ? "Choose the vendor's invoice (PDF or image) first" : "Choose the vendor's stock sheet (.xlsx or .xls) first");
       return;
     }
     setParsing(true);
@@ -218,10 +240,18 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await api.post("/stock-entries/import/parse", fd, {
+      const { data } = await api.post(isPdf ? "/stock-entries/import/parse-pdf" : "/stock-entries/import/parse", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setParsed(data);
+      if (isPdf) {
+        if (!data.rows || data.rows.length === 0) {
+          toast.error("No line items were found on that invoice");
+          return;
+        }
+        pickDate(null, data);
+        return;
+      }
       if (!data.dates || data.dates.length === 0) {
         toast.error("No usable dates were found on that sheet");
         return;
@@ -249,10 +279,13 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
     [parsed]
   );
 
-  const pickDate = (dateValue) => {
+  // `source` lets handleParse hand over the just-parsed PDF result directly
+  // (state set a moment earlier isn't readable yet in the same tick). An
+  // invoice has no dates, so every line is taken.
+  const pickDate = (dateValue, source = parsed) => {
     setSelectedDate(dateValue);
-    const dayRows = parsed.rows
-      .filter((r) => r.dateKey === dateValue)
+    const dayRows = source.rows
+      .filter((r) => isPdf || r.dateKey === dateValue)
       .map((r) => ({
         rowIndex: r.rowIndex,
         itemDescription: r.itemDescription,
@@ -261,6 +294,9 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
         // What the sheet itself matched — restored if the operator clears a
         // part they linked by hand through the row's search box.
         sheetMatchedPart: r.matchedPart,
+        // PDF import only: parts with a similar description (server-side),
+        // offered as one-click links for lines that didn't match on code.
+        suggestions: r.suggestions || [],
         searchPick: null,
         saved: savedRows[r.rowIndex] || null,
         saveError: "",
@@ -371,13 +407,14 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
   });
 
   const buildPayload = (list) => ({
+    source: isPdf ? "invoice_pdf" : "vendor_sheet",
     vendor: vendor._id,
     purchaseOrder: purchaseOrder?._id ?? null,
     // Stamped on every booked line so it reappears under "Logged this
     // session" after a Save & exit / Resume, same as a hand-entered line.
     receivingSession: sessionId || null,
     enteredBy,
-    date: selectedDate,
+    date: isPdf ? undefined : selectedDate,
     rows: list.map(buildRowPayload),
   });
 
@@ -453,13 +490,23 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
       <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
         <div>
           <CardTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5" />
-            Import from vendor sheet
+            {isPdf ? <FileText className="h-5 w-5" /> : <FileSpreadsheet className="h-5 w-5" />}
+            {isPdf ? "Import from invoice PDF" : "Import from vendor sheet"}
           </CardTitle>
           <CardDescription>
-            Upload {vendor?.companyName ? `${vendor.companyName}'s` : "the vendor's"} own inward-stock workbook,
-            pick a date, then review before anything is booked. Vendor is fixed to{" "}
-            <strong>{vendor?.companyName}</strong> for every row.
+            {isPdf ? (
+              <>
+                Upload {vendor?.companyName ? `${vendor.companyName}'s` : "the vendor's"} invoice. Its line items
+                are read with AI and matched to the parts master — review them before anything is booked. Vendor
+                is fixed to <strong>{vendor?.companyName}</strong> for every row.
+              </>
+            ) : (
+              <>
+                Upload {vendor?.companyName ? `${vendor.companyName}'s` : "the vendor's"} own inward-stock
+                workbook, pick a date, then review before anything is booked. Vendor is fixed to{" "}
+                <strong>{vendor?.companyName}</strong> for every row.
+              </>
+            )}
           </CardDescription>
         </div>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
@@ -471,22 +518,30 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
         <form onSubmit={handleParse}>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Vendor stock sheet (.xlsx / .xls)</Label>
+              <Label>{isPdf ? "Vendor invoice (.pdf / .jpg / .png)" : "Vendor stock sheet (.xlsx / .xls)"}</Label>
               <Input
                 key={fileInputKey}
                 type="file"
-                accept=".xlsx,.xls"
+                accept={isPdf ? ".pdf,.jpg,.jpeg,.png" : ".xlsx,.xls"}
                 onChange={(e) => {
                   setFile(e.target.files?.[0] || null);
                   setUploadError("");
                 }}
               />
+              {isPdf ? (
+                <p className="text-xs text-muted-foreground">
+                  The invoice is read by AI (a long invoice can take a minute) and only used to build a preview —
+                  nothing is saved until you approve it on the next screen. AI can misread a blurry scan, so check
+                  each line's quantity and price before importing.
+                </p>
+              ) : (
               <p className="text-xs text-muted-foreground">
                 The sheet is only read to build a preview — nothing is saved until you approve it on the next
                 screen. Every time you pick a file here it's re-read fresh from disk; nothing from an earlier
                 upload carries over. The sheet must cover a single date — a sheet with more than one date on it
                 will be rejected below.
               </p>
+              )}
               {uploadError && (
                 <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-2.5 text-xs text-red-800">
                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
@@ -504,7 +559,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
             </Button>
             <Button type="submit" disabled={parsing}>
               <UploadCloud className="h-4 w-4 mr-2" />
-              {parsing ? "Reading sheet…" : "Read sheet"}
+              {parsing ? (isPdf ? "Reading invoice…" : "Reading sheet…") : isPdf ? "Read invoice" : "Read sheet"}
             </Button>
           </CardFooter>
         </form>
@@ -619,15 +674,16 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
                   pickRowPart={pickRowPart}
                   onSave={handleSaveRow}
                   saving={savingRowIndex === r.rowIndex}
+                  isPdf={isPdf}
                   busy={committing || savingRowIndex != null}
                 />
               ))}
             </div>
           </CardContent>
           <CardFooter className="justify-between">
-            <Button type="button" variant="outline" onClick={() => setPhase("pick-date")}>
+            <Button type="button" variant="outline" onClick={() => (isPdf ? resetImport() : setPhase("pick-date"))}>
               <ArrowLeft className="h-4 w-4 mr-1.5" />
-              Back to dates
+              {isPdf ? "Choose a different invoice" : "Back to dates"}
             </Button>
             {includedRows.length === 0 && savedCount > 0 ? (
               <Button type="button" onClick={onClose}>
@@ -679,9 +735,11 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
           )}
 
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setPhase("pick-date")}>
-              Import another date from this sheet
-            </Button>
+            {!isPdf && (
+              <Button type="button" variant="outline" onClick={() => setPhase("pick-date")}>
+                Import another date from this sheet
+              </Button>
+            )}
             <Button type="button" onClick={onClose}>
               Done
             </Button>
@@ -692,7 +750,7 @@ export default function ExcelImportPanel({ vendor, purchaseOrder, enteredBy, ses
   );
 }
 
-function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, onSave, saving, busy }) {
+function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, onSave, saving, busy, isPdf }) {
   const isNew = row.matchType === "new_part_number";
   const normalize = (s) => String(s || "").trim().toLowerCase();
   // Only set for a row that started out unmatched and was then resolved to
@@ -711,7 +769,7 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, o
   return (
     <div
       className={
-        "rounded-md border border-border p-2.5 space-y-2.5" + (!row.included ? " opacity-50" : "")
+        "min-w-0 max-w-full rounded-md border border-border p-2.5 space-y-2.5" + (!row.included ? " opacity-50" : "")
       }
     >
       {/* Top line: checkbox, description, part number, qty, status — wraps
@@ -747,17 +805,19 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, o
           )}
         </div>
 
-        <div className="shrink-0 pt-1.5">
+        <div className="min-w-0 max-w-full shrink pt-1.5">
           {row.matchedPart ? (
             <span className="font-mono text-xs bg-muted rounded px-1.5 py-0.5 break-all">
               {row.matchedPart.ttUniquePartNumber}
             </span>
           ) : row.ttUniquePartNumber ? (
-            <span className="font-mono text-xs bg-amber-100 text-amber-900 rounded px-1.5 py-0.5 break-all">
+            <span className="inline-block max-w-full font-mono text-xs bg-amber-100 text-amber-900 rounded px-1.5 py-0.5 [overflow-wrap:anywhere]">
               {row.ttUniquePartNumber} (not found)
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">No code on sheet</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {isPdf ? "No code on invoice" : "No code on sheet"}
+            </span>
           )}
         </div>
 
@@ -860,8 +920,48 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, o
         </div>
       )}
 
+      {isPdf && isNew && row.included && row.suggestions?.length > 0 && (
+        <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 space-y-1.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-900">
+            <Sparkles className="h-3 w-3" />
+            Suggested parts from the master — is this line one of them?
+          </p>
+          <ul className="space-y-1">
+            {row.suggestions.map((p) => (
+              <li
+                key={p._id}
+                className="flex min-w-0 items-center justify-between gap-2 rounded border border-amber-200 bg-white/60 p-1.5 text-xs"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono bg-muted rounded px-1.5 py-0.5 break-all">{p.ttUniquePartNumber}</span>
+                    {p.manufacturerPartNumber && (
+                      <span className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+                        Mfr: {p.manufacturerPartNumber}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block [overflow-wrap:anywhere]">{p.itemDescription}</span>
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => pickRowPart(row.rowIndex, p)}
+                >
+                  <PackageSearch className="h-3.5 w-3.5 mr-1.5" />
+                  Use this
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-amber-800">None of these? Fill in the new-part details below instead.</p>
+        </div>
+      )}
+
       {showDescriptionMismatch && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start gap-2">
+        <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div className="space-y-1.5 min-w-0">
             <p className="break-words">
@@ -875,11 +975,11 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, o
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="rounded border border-amber-200 bg-white/60 p-1.5 min-w-0">
                 <p className="font-medium">Existing description (will be used)</p>
-                <p className="break-words">{row.matchedPart.itemDescription}</p>
+                <p className="[overflow-wrap:anywhere]">{row.matchedPart.itemDescription}</p>
               </div>
               <div className="rounded border border-amber-200 bg-white/60 p-1.5 min-w-0">
                 <p className="font-medium">On the sheet / typed as new</p>
-                <p className="break-words">{row.newPart.itemDescription}</p>
+                <p className="[overflow-wrap:anywhere]">{row.newPart.itemDescription}</p>
               </div>
             </div>
             <Button
@@ -969,13 +1069,15 @@ function RowEditor({ row, updateRow, updateNewPart, blurRowField, pickRowPart, o
             </div>
           )}
 
-          <PartDuplicateCheck
-            manufacturerPartNumber={row.newPart.manufacturerPartNumber}
-            itemDescription={row.newPart.itemDescription}
-            onUseExisting={(part) =>
-              updateRow(row.rowIndex, { matchType: "existing_part_number", matchedPart: part })
-            }
-          />
+          {!isPdf && (
+            <PartDuplicateCheck
+              manufacturerPartNumber={row.newPart.manufacturerPartNumber}
+              itemDescription={row.newPart.itemDescription}
+              onUseExisting={(part) =>
+                updateRow(row.rowIndex, { matchType: "existing_part_number", matchedPart: part })
+              }
+            />
+          )}
         </div>
       )}
     </div>

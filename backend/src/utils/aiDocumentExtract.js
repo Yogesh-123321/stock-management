@@ -17,7 +17,12 @@
        never writes to the database itself, and nothing here should be
        treated as final/authoritative until a person has looked at it.
 
-  Provider: OpenRouter (one OpenAI-compatible endpoint, many providers).
+  Providers, in order: Google Gemini first (reads the WHOLE PDF in one
+  request — fast, one request per document), then OpenRouter's free models
+  as the fallback (page images, a few pages in parallel). A source that is
+  out of quota is skipped instantly until it recovers — see aiQuota.js.
+
+  OpenRouter (one OpenAI-compatible endpoint, many providers).
   Reliability: a chain of fallback models (config/aiConfig.js) is tried in
   order; the first one that returns valid, well-formed JSON wins. A
   provider outage, rate limit, or garbled reply just moves to the next
@@ -42,8 +47,15 @@ import {
   OPENROUTER_SITE_URL,
   OPENROUTER_APP_NAME,
   AI_EXTRACT_TIMEOUT_MS,
+  AI_TOTAL_DEADLINE_MS,
+  GEMINI_API_KEY,
+  GEMINI_BASE_URL,
+  GEMINI_MODELS,
   isAiExtractConfigured,
+  isGeminiConfigured,
+  isOpenRouterConfigured,
 } from "../config/aiConfig.js";
+import { classifyHttpError, guarded, isCoolingDown, soonestRecovery } from "./aiQuota.js";
 
 export class AiExtractionError extends Error {
   constructor(message, attempts) {
@@ -210,7 +222,7 @@ const buildFieldSchemaText = (fields) =>
 
 const buildSystemPrompt = (fields) => `You are a data-extraction assistant reading a scanned/uploaded business
 document (invoice, purchase order, vendor certificate, etc.), provided to
-you as one or more page images.
+you as a PDF or one or more page images.
 
 Extract exactly these fields and return ONLY a single valid JSON object —
 no markdown code fences, no commentary before or after it, nothing but the
@@ -264,13 +276,6 @@ const renderSinglePdfPage = async (buffer, pageNumber, scale) => {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Errors that will NEVER succeed on a retry, on this page or any later one:
-// retired models, models that can't be called through the plain chat API
-// (e.g. the "inkling" models: "only available on agentic harnesses"), bad
-// keys, etc. These are dropped from the chain for the rest of the request.
-const PERMANENT_MODEL_ERROR =
-  /No endpoints found|is not a valid model|model .* does not exist|only available on agentic harnesses|agentic harness|does not support image|no image input|not support(ed)? .*(image|vision)|Invalid API key|No auth credentials|User not found/i;
 
 const callOpenRouter = async ({
   model,
@@ -333,7 +338,7 @@ const callOpenRouter = async ({
         .filter(Boolean)
         .join(": ");
       msg = `${msg}${detail ? ` [${detail}]` : ""} (HTTP ${response.status})`;
-      throw new Error(msg);
+      throw classifyHttpError(response.status, msg, rawDetail);
     }
 
     const message = body?.choices?.[0]?.message;
@@ -364,10 +369,141 @@ const callOpenRouter = async ({
     const parsed = extractJsonObject(message?.content) || extractJsonObject(message?.reasoning);
     if (!parsed) throw new Error(`Model reply wasn't a parseable JSON object (${describeReply()})`);
     return parsed;
+  } catch (err) {
+    if (err?.name === "AbortError") throw new Error(`timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 };
+
+// ---- Gemini ------------------------------------------------------------
+// Gemini's inline-data request limit is 20MB in total and base64 adds ~33%.
+const GEMINI_MAX_INLINE_BYTES = 14 * 1024 * 1024;
+
+// Sends the file itself (PDF or image) — no page rendering — and returns the
+// parsed JSON. Same contract as callOpenRouter: with requireArrayKey the reply
+// must contain that list; otherwise a JSON object.
+const callGemini = async ({
+  model,
+  buffer,
+  mimeType,
+  systemPrompt,
+  promptText,
+  timeoutMs,
+  maxTokens = 4000,
+  requireArrayKey = null,
+}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const generationConfig = {
+      temperature: 0,
+      maxOutputTokens: maxTokens,
+      responseMimeType: "application/json",
+    };
+    // Extraction doesn't need the model to "think" first, and thinking costs
+    // seconds and eats the output budget. 2.5 uses a token budget; the 3.x
+    // models use a level. If a model rejects the setting we retry without it.
+    const thinking = /2\.5-/i.test(model)
+      ? { thinkingBudget: 0 }
+      : /gemini-3/i.test(model)
+        ? { thinkingLevel: "minimal" }
+        : null;
+
+    const send = (config) =>
+      fetch(`${GEMINI_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [
+            {
+              role: "user",
+              parts: [{ inlineData: { mimeType, data: buffer.toString("base64") } }, { text: promptText }],
+            },
+          ],
+          generationConfig: config,
+        }),
+      });
+
+    let response = await send(thinking ? { ...generationConfig, thinkingConfig: thinking } : generationConfig);
+    if (response.status === 400 && thinking) {
+      const peek = await response.clone().json().catch(() => null);
+      if (/think/i.test(peek?.error?.message || "")) response = await send(generationConfig);
+    }
+
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      const msg = `${body?.error?.message || `HTTP ${response.status}`} (HTTP ${response.status})`;
+      throw classifyHttpError(response.status, msg, JSON.stringify(body?.error?.details || "").slice(0, 600));
+    }
+
+    const candidate = body?.candidates?.[0];
+    const text = (candidate?.content?.parts || []).map((p) => p.text || "").join("");
+    const finishReason = candidate?.finishReason || body?.promptFeedback?.blockReason || "?";
+    const describe = () => `finishReason=${finishReason}, ${text.length} chars`;
+
+    if (requireArrayKey) {
+      const arr = findItemArray(text, requireArrayKey);
+      if (arr) return { [requireArrayKey]: arr };
+      throw new Error(
+        finishReason === "MAX_TOKENS"
+          ? `Reply was cut off before the "${requireArrayKey}" list finished (${describe()})`
+          : `Reply had no "${requireArrayKey}" list (${describe()})`
+      );
+    }
+    const parsed = extractJsonObject(text);
+    if (!parsed) throw new Error(`Model reply wasn't a parseable JSON object (${describe()})`);
+    return parsed;
+  } catch (err) {
+    if (err?.name === "AbortError") throw new Error(`timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+// What kind of file this is, for choosing a route. null = unsupported.
+const fileKind = ({ mimeType, fileName }) => {
+  if (mimeType === "application/pdf" || PDF_EXTS.includes(extOf(fileName))) return { kind: "pdf", mime: "application/pdf" };
+  if (mimeType?.startsWith(IMAGE_MIME_PREFIX)) return { kind: "image", mime: mimeType };
+  return null;
+};
+
+const unsupportedError = ({ mimeType, fileName }) =>
+  new AiExtractionError(
+    `Unsupported file type for AI extraction: ${mimeType || extOf(fileName) || "unknown"} (images and PDFs only)`,
+    []
+  );
+
+const notConfiguredError = () =>
+  new AiExtractionError(
+    "AI document extraction isn't configured yet — set GEMINI_API_KEY (and/or OPENROUTER_API_KEY) in the backend .env",
+    []
+  );
+
+// Every configured model, across both providers, is paused (limit hit) — say
+// so immediately instead of making the person wait through a doomed chain.
+const allPausedError = (attempts) => {
+  const keys = [
+    ...(isGeminiConfigured() ? GEMINI_MODELS.map((m) => `gemini:${m}`) : []),
+    ...(isOpenRouterConfigured() ? OPENROUTER_MODELS.map((m) => `openrouter:${m}`) : []),
+    ...(isOpenRouterConfigured() ? ["openrouter"] : []),
+  ];
+  const back = soonestRecovery(keys);
+  return new AiExtractionError(
+    `The free AI sources are at their usage limit right now${
+      back ? ` (retry after about ${new Date(back).toLocaleTimeString()})` : ""
+    } — try again a little later, or enter the details by hand.`,
+    attempts
+  );
+};
+
+const anySourceAvailable = () =>
+  (isGeminiConfigured() && GEMINI_MODELS.some((m) => !isCoolingDown(`gemini:${m}`))) ||
+  (isOpenRouterConfigured() && !isCoolingDown("openrouter") && OPENROUTER_MODELS.some((m) => !isCoolingDown(`openrouter:${m}`)));
 
 /**
  * @param {Object} opts
@@ -380,48 +516,51 @@ const callOpenRouter = async ({
  * @returns {Promise<{ fields: Object, modelUsed: string }>}
  */
 export async function extractDocumentFields({ buffer, mimeType, fileName, fields }) {
-  if (!isAiExtractConfigured()) {
-    throw new AiExtractionError(
-      "AI document extraction isn't configured yet — set OPENROUTER_API_KEY in the backend .env",
-      []
-    );
-  }
+  if (!isAiExtractConfigured()) throw notConfiguredError();
   if (!Array.isArray(fields) || fields.length === 0) {
     throw new AiExtractionError("No fields were specified to extract", []);
   }
-
-  let imageUrls;
-  try {
-    imageUrls = await renderAsImageDataUrls({ buffer, mimeType, fileName });
-  } catch (err) {
-    throw new AiExtractionError(`Couldn't read this file as an image/PDF: ${err.message}`, []);
-  }
-  if (!imageUrls) {
-    throw new AiExtractionError(
-      `Unsupported file type for AI extraction: ${mimeType || extOf(fileName) || "unknown"} (images and PDFs only)`,
-      []
-    );
-  }
+  const kind = fileKind({ mimeType, fileName });
+  if (!kind) throw unsupportedError({ mimeType, fileName });
+  if (!anySourceAvailable()) throw allPausedError([]);
 
   const systemPrompt = buildSystemPrompt(fields);
+  const promptText = "Extract the fields as instructed and return only the JSON object.";
   const attempts = [];
+  const deadline = Date.now() + AI_TOTAL_DEADLINE_MS;
+  const timeLeft = () => Math.max(1000, Math.min(AI_EXTRACT_TIMEOUT_MS, deadline - Date.now()));
 
-  for (const model of OPENROUTER_MODELS) {
-    try {
-      const parsed = await callOpenRouter({
-        model,
-        imageUrls,
-        promptText: "Extract the fields as instructed and return only the JSON object.",
-        systemPrompt,
-        timeoutMs: AI_EXTRACT_TIMEOUT_MS,
-      });
-      return { fields: parsed, modelUsed: model };
-    } catch (err) {
-      attempts.push({ model, error: err.message });
-      // fall through to the next model in the chain
+  // 1. Gemini — the whole file in one request.
+  if (isGeminiConfigured() && buffer.length <= GEMINI_MAX_INLINE_BYTES) {
+    for (const model of GEMINI_MODELS) {
+      if (Date.now() >= deadline) break;
+      const parsed = await guarded({ modelKey: `gemini:${model}`, providerKey: "gemini" }, attempts, () =>
+        callGemini({ model, buffer, mimeType: kind.mime, systemPrompt, promptText, timeoutMs: timeLeft(), maxTokens: 2000 })
+      );
+      if (parsed) return { fields: parsed, modelUsed: `gemini/${model}` };
     }
   }
 
+  // 2. OpenRouter free models — page images.
+  if (isOpenRouterConfigured() && Date.now() < deadline) {
+    let imageUrls = null;
+    try {
+      imageUrls = await renderAsImageDataUrls({ buffer, mimeType, fileName });
+    } catch (err) {
+      attempts.push({ model: "render", error: `Couldn't read this file as an image/PDF: ${err.message}` });
+    }
+    if (imageUrls) {
+      for (const model of OPENROUTER_MODELS) {
+        if (Date.now() >= deadline) break;
+        const parsed = await guarded({ modelKey: `openrouter:${model}`, providerKey: "openrouter" }, attempts, () =>
+          callOpenRouter({ model, imageUrls, promptText, systemPrompt, timeoutMs: timeLeft() })
+        );
+        if (parsed) return { fields: parsed, modelUsed: model };
+      }
+    }
+  }
+
+  if (!attempts.some((a) => !/^skipped/.test(a.error))) throw allPausedError(attempts);
   throw new AiExtractionError(
     `Every configured model failed to extract this document (tried: ${attempts
       .map((a) => `${a.model} — ${a.error}`)
@@ -435,61 +574,82 @@ export async function extractDocumentFields({ buffer, mimeType, fileName, fields
   of scalar fields": reading every line item off an invoice (part number,
   description, quantity, unit price) as an array, so it can be matched
   line-by-line against what was actually entered into stock — see
-  controllers/taxInvoiceController.js (getTaxInvoiceLineMatch) and
-  utils/embeddings.js for the matching side.
+  controllers/taxInvoiceController.js (getTaxInvoiceLineMatch), the invoice-PDF
+  stock import (controllers/stockImportController.js) and utils/embeddings.js.
 
-  Same provider/fallback machinery as extractDocumentFields (OpenRouter,
-  free model chain, PDF→image handling) — only the prompt and expected
-  shape differ, so it's kept in this file rather than duplicated.
+  Speed: Gemini gets the whole PDF in ONE request (typically a few seconds).
+  Only if that fails does the OpenRouter fallback run, one request per page
+  with a few pages in parallel. The whole scan has a time budget
+  (AI_TOTAL_DEADLINE_MS) and sources that are out of quota are skipped
+  instantly, so a scan can't spin for minutes any more.
 */
-const LINE_ITEMS_SYSTEM_PROMPT = `You are a data-extraction assistant reading a scanned/uploaded vendor tax
-invoice / bill, provided to you as ONE page image (invoices often run over
-several pages and you are given them one at a time, with the item numbers
-S.N. carrying on from one page to the next). Read every line item in the
-item table on this page (ignore header/footer info like billing address, tax
-summary rows, and totals). At the foot of a page there may be a
-carry-forward total ("Totals c/o", "c/f") and at the top of the next page the
-same figure again ("b/d", "b/f", "brought down"): those are subtotals, not
-items, so never return them as line items. The LAST page usually also carries
-a tax / totals block under the item table ("Add : IGST", "CGST", "SGST",
-"Rounded Off", "Grand Total", an HSN-wise tax summary table, bank details):
-none of that is a line item either — only rows with a serial number S.N. and a
-goods description are items.
+const LINE_ITEMS_ITEM_SHAPE = `{ "lineItems": [
+  {
+    "partNumber": string | null,   // SHORT item code only (one word, no spaces), if one is printed in its own column
+    "description": string,          // the item description text as printed
+    "quantity": number | null,      // quantity for this line
+    "unitPrice": number | null,     // per-unit rate, plain number, no currency symbol
+    "amount": number | null         // this line's total amount, plain number__PAGE__
+  }
+]}`;
+
+const LINE_ITEMS_FOOTER = `
+At the foot of a page there may be a carry-forward total ("Totals c/o",
+"c/f") and at the top of the next page the same figure again ("b/d", "b/f",
+"brought down"): those are subtotals, not items, so never return them as
+line items. The LAST page usually also carries a tax / totals block under
+the item table ("Add : IGST", "CGST", "SGST", "Rounded Off", "Grand Total", an
+HSN-wise tax summary table, bank details): none of that is a line item
+either — only rows with a serial number S.N. and a goods description are
+items.
 
 Return ONLY a single valid JSON object — no markdown code fences, no
 commentary before or after it — written compactly (no indentation or blank
 lines, so a long invoice isn't cut off) of the shape:
 
-{ "lineItems": [
-  {
-    "partNumber": string | null,   // manufacturer/vendor part number or item code, if printed
-    "description": string,          // the item description text as printed
-    "quantity": number | null,      // quantity for this line
-    "unitPrice": number | null,     // per-unit rate, plain number, no currency symbol
-    "amount": number | null         // this line's total amount, plain number
-  }
-]}
+__SHAPE__
 
 Rules:
 - One array entry per distinct line item row. Do not merge or split rows.
+- "partNumber" is only a short code (no spaces). If the invoice has no separate
+  code column, use null — NEVER put the description (or part of it) there.
 - Use null for any value you cannot find or are not reasonably confident
   about — never invent or guess a value.
 - Numbers must be plain numbers (no currency symbols or thousands separators).
-- If this page has no line-item rows, return { "lineItems": [] }.`;
+- If there are no line-item rows, return { "lineItems": [] }.`;
 
-// Output budget PER PAGE. A page holds ~20-25 lines at ~50 tokens of JSON each,
-// and reasoning-style free models also spend part of this budget "thinking" —
-// so the 2000 the scalar-field extraction uses is too small. Override with
-// AI_LINE_ITEMS_MAX_TOKENS in .env.
+const PAGE_PROMPT = `You are a data-extraction assistant reading a scanned/uploaded vendor tax
+invoice / bill, provided to you as ONE page image (invoices often run over
+several pages and you are given them one at a time, with the item numbers
+S.N. carrying on from one page to the next). Read every line item in the
+item table on this page (ignore header/footer info like billing address, tax
+summary rows, and totals).
+${LINE_ITEMS_FOOTER.replace("__SHAPE__", LINE_ITEMS_ITEM_SHAPE.replace("__PAGE__", ""))}`;
+
+const WHOLE_DOC_PROMPT = `You are a data-extraction assistant reading a vendor tax invoice / bill, given
+to you as a complete PDF or image (it may run over several pages, with the
+item numbers S.N. carrying on from one page to the next). Read every line
+item in the item table(s) across ALL pages (ignore header/footer info like
+billing address, tax summary rows, and totals), in order.
+${LINE_ITEMS_FOOTER.replace(
+  "__SHAPE__",
+  LINE_ITEMS_ITEM_SHAPE.replace("__PAGE__", ',\n    "page": number                  // 1-based page the row is on')
+)}`;
+
+// Output budgets. PER PAGE for OpenRouter (a page holds ~20-25 lines at ~50
+// tokens of JSON each); the whole document for Gemini. Override with
+// AI_LINE_ITEMS_MAX_TOKENS / AI_LINE_ITEMS_MAX_TOKENS_GEMINI in .env.
 const LINE_ITEMS_MAX_TOKENS = Number(process.env.AI_LINE_ITEMS_MAX_TOKENS) || 4000;
+const LINE_ITEMS_MAX_TOKENS_GEMINI = Number(process.env.AI_LINE_ITEMS_MAX_TOKENS_GEMINI) || 16000;
 
-// How many passes through the whole model chain a single page gets before we
-// give up on it, the pause (ms) before rounds 2 and 3, and the PDF render
-// scale used on those later rounds (first round uses scale 2, see
-// renderAsImageDataUrls). Override rounds with AI_LINE_ITEMS_ROUNDS.
-const LINE_ITEMS_ROUNDS = Math.max(1, Number(process.env.AI_LINE_ITEMS_ROUNDS) || 3);
-const ROUND_BACKOFF_MS = [3000, 8000];
-const RETRY_RENDER_SCALES = [1.5, 1.1];
+// OpenRouter fallback: passes through the model chain per page (default 2 —
+// free models fail transiently a lot, but a third pass rarely helps and made
+// scans crawl), the pause before round 2, the smaller PDF render used on it,
+// and how many pages are read at once.
+const LINE_ITEMS_ROUNDS = Math.max(1, Number(process.env.AI_LINE_ITEMS_ROUNDS) || 2);
+const ROUND_BACKOFF_MS = [2000];
+const RETRY_RENDER_SCALES = [1.3];
+const PAGE_CONCURRENCY = Math.max(1, Number(process.env.AI_PAGE_CONCURRENCY) || 3);
 
 // Carry-forward / subtotal rows a model may still emit despite the prompt.
 const NON_ITEM_ROW =
@@ -512,123 +672,159 @@ const cleanLineItems = (items) =>
       if (!desc && !it.partNumber) return false;
       return !NON_ITEM_ROW.test(desc);
     })
-    .map((it) => ({
-      partNumber: it.partNumber == null || it.partNumber === "" ? null : String(it.partNumber),
-      description: String(it.description ?? "").trim(),
-      quantity: toNumber(it.quantity),
-      unitPrice: toNumber(it.unitPrice),
-      amount: toNumber(it.amount),
-    }));
+    .map((it) => {
+      const page = toNumber(it.page);
+      return {
+        partNumber: it.partNumber == null || it.partNumber === "" ? null : String(it.partNumber),
+        description: String(it.description ?? "").trim(),
+        quantity: toNumber(it.quantity),
+        unitPrice: toNumber(it.unitPrice),
+        amount: toNumber(it.amount),
+        ...(page && page >= 1 ? { page: Math.floor(page) } : {}),
+      };
+    });
+
+// Runs `worker(item, index)` over `items`, at most `limit` at a time.
+const mapLimit = async (items, limit, worker) => {
+  const results = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await worker(items[i], i);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+};
 
 export async function extractInvoiceLineItems({ buffer, mimeType, fileName }) {
-  if (!isAiExtractConfigured()) {
-    throw new AiExtractionError(
-      "AI document extraction isn't configured yet — set OPENROUTER_API_KEY in the backend .env",
-      []
-    );
-  }
+  if (!isAiExtractConfigured()) throw notConfiguredError();
+  const kind = fileKind({ mimeType, fileName });
+  if (!kind) throw unsupportedError({ mimeType, fileName });
+  if (!anySourceAvailable()) throw allPausedError([]);
 
-  let imageUrls;
-  try {
-    imageUrls = await renderAsImageDataUrls({ buffer, mimeType, fileName });
-  } catch (err) {
-    throw new AiExtractionError(`Couldn't read this file as an image/PDF: ${err.message}`, []);
-  }
-  if (!imageUrls) {
-    throw new AiExtractionError(
-      `Unsupported file type for AI extraction: ${mimeType || extOf(fileName) || "unknown"} (images and PDFs only)`,
-      []
-    );
-  }
-
-  // One request PER PAGE rather than every page in a single request. A
-  // long invoice (53 lines over 3 pages) as one request needs a big reply
-  // that free models routinely cut off, garble or time out on, and several
-  // page images at once is where free vision models are weakest; a single
-  // page is ~20 lines and one image, which they handle reliably.
-  //
-  // Free models fail TRANSIENTLY all the time (upstream 5xx, rate limits,
-  // empty replies on a large image), so a page is only given up on after
-  // several ROUNDS through the model chain, with a growing pause between
-  // rounds and a smaller rendering of the page on the later ones. Pages
-  // already read are kept — only the failing page is retried.
-  const isPdf = mimeType === "application/pdf" || PDF_EXTS.includes(extOf(fileName));
   const attempts = [];
-  const deadModels = new Set(); // permanently unusable — never retried
-  const modelsUsed = [];
-  const lineItems = [];
-  let preferred = null; // the model that last worked goes first on the next page
+  const deadline = Date.now() + AI_TOTAL_DEADLINE_MS;
+  const timeLeft = () => Math.max(1000, Math.min(AI_EXTRACT_TIMEOUT_MS * 2, deadline - Date.now()));
 
-  for (let p = 0; p < imageUrls.length; p++) {
-    let pageItems = null;
-
-    for (let round = 0; round < LINE_ITEMS_ROUNDS && !pageItems; round++) {
-      const liveModels = OPENROUTER_MODELS.filter((m) => !deadModels.has(m));
-      if (liveModels.length === 0) break; // nothing left worth calling
-
-      if (round > 0) await sleep(ROUND_BACKOFF_MS[round - 1] ?? 8000);
-
-      // Rounds after the first: same page, smaller image.
-      let pageImage = imageUrls[p];
-      if (round > 0 && isPdf) {
-        try {
-          pageImage = await renderSinglePdfPage(buffer, p + 1, RETRY_RENDER_SCALES[round - 1] ?? 1);
-        } catch {
-          // keep the original rendering if a re-render isn't possible
-        }
-      }
-
-      const order =
-        preferred && liveModels.includes(preferred)
-          ? [preferred, ...liveModels.filter((m) => m !== preferred)]
-          : liveModels;
-
-      for (const model of order) {
-        try {
-          const parsed = await callOpenRouter({
-            model,
-            imageUrls: [pageImage],
-            promptText: `This is page ${p + 1} of ${imageUrls.length}. Extract the line items as instructed and return only the JSON object.`,
-            systemPrompt: LINE_ITEMS_SYSTEM_PROMPT,
-            timeoutMs: AI_EXTRACT_TIMEOUT_MS,
-            maxTokens: LINE_ITEMS_MAX_TOKENS,
-            requireArrayKey: "lineItems",
-          });
-          pageItems = cleanLineItems(parsed.lineItems);
-          preferred = model;
-          if (!modelsUsed.includes(model)) modelsUsed.push(model);
-          break;
-        } catch (err) {
-          attempts.push({ model, page: p + 1, round: round + 1, error: err.message });
-          if (PERMANENT_MODEL_ERROR.test(err.message)) deadModels.add(model);
-        }
-      }
-    }
-
-    if (!pageItems) {
-      const summary = [...new Map(
-        attempts.filter((a) => a.page === p + 1).map((a) => [`${a.model}|${a.error}`, a])
-      ).values()]
-        .map((a) => `${a.model}${deadModels.has(a.model) ? " (unusable, skipped)" : ""} — ${a.error}`)
-        .join("; ");
-      throw new AiExtractionError(
-        `Couldn't read page ${p + 1} of ${imageUrls.length} of this invoice — every configured model failed on it after ${LINE_ITEMS_ROUNDS} rounds (${summary})`,
-        attempts
+  // 1. Gemini — whole document, one request.
+  if (isGeminiConfigured() && buffer.length <= GEMINI_MAX_INLINE_BYTES) {
+    for (const model of GEMINI_MODELS) {
+      if (Date.now() >= deadline) break;
+      const parsed = await guarded({ modelKey: `gemini:${model}`, providerKey: "gemini" }, attempts, () =>
+        callGemini({
+          model,
+          buffer,
+          mimeType: kind.mime,
+          systemPrompt: WHOLE_DOC_PROMPT,
+          promptText: "Extract all the line items as instructed and return only the JSON object.",
+          timeoutMs: timeLeft(),
+          maxTokens: LINE_ITEMS_MAX_TOKENS_GEMINI,
+          requireArrayKey: "lineItems",
+        })
       );
+      if (!parsed) continue;
+      const items = cleanLineItems(parsed.lineItems);
+      if (items.length) {
+        return { lineItems: items.map((it) => ({ ...it, page: it.page || 1 })), modelUsed: `gemini/${model}` };
+      }
+      attempts.push({ model: `gemini:${model}`, error: "replied with no line items" });
     }
-    // Remember which page of the PDF each row came from (1-based), so the UI
-    // can group the invoice's lines page-wise.
-    lineItems.push(...pageItems.map((it) => ({ ...it, page: p + 1 })));
   }
 
-  // A page with no rows is fine (e.g. a totals-only last page), but an
-  // invoice with none at all is a failed read, not a real answer — surface
-  // an error rather than a silent empty result that then gets cached.
-  if (lineItems.length === 0) {
-    throw new AiExtractionError(
-      "The models replied but found no line items on any page of this invoice — try again, or check the file is a clear scan",
-      attempts
-    );
+  // 2. OpenRouter free models — one request per page, a few pages at once.
+  if (isOpenRouterConfigured() && Date.now() < deadline) {
+    let imageUrls;
+    try {
+      imageUrls = await renderAsImageDataUrls({ buffer, mimeType, fileName });
+    } catch (err) {
+      attempts.push({ model: "render", error: `Couldn't read this file as an image/PDF: ${err.message}` });
+    }
+
+    if (imageUrls) {
+      const isPdf = kind.kind === "pdf";
+      const modelsUsed = [];
+      const lineItems = [];
+      let preferred = null; // the model that last worked goes first on the next page
+      let failure = null;
+
+      const readPage = async (_, p) => {
+        if (failure) return [];
+        let pageItems = null;
+
+        for (let round = 0; round < LINE_ITEMS_ROUNDS && !pageItems && !failure; round++) {
+          const liveModels = OPENROUTER_MODELS.filter(
+            (m) => !isCoolingDown(`openrouter:${m}`) && !isCoolingDown("openrouter")
+          );
+          if (liveModels.length === 0) break; // everything paused — don't wait for nothing
+          if (Date.now() >= deadline) break;
+          if (round > 0) await sleep(ROUND_BACKOFF_MS[round - 1] ?? 2000);
+
+          // Rounds after the first: same page, smaller image.
+          let pageImage = imageUrls[p];
+          if (round > 0 && isPdf) {
+            try {
+              pageImage = await renderSinglePdfPage(buffer, p + 1, RETRY_RENDER_SCALES[round - 1] ?? 1);
+            } catch {
+              // keep the original rendering if a re-render isn't possible
+            }
+          }
+
+          const order =
+            preferred && liveModels.includes(preferred)
+              ? [preferred, ...liveModels.filter((m) => m !== preferred)]
+              : liveModels;
+
+          for (const model of order) {
+            if (Date.now() >= deadline) break;
+            const parsed = await guarded({ modelKey: `openrouter:${model}`, providerKey: "openrouter" }, attempts, () =>
+              callOpenRouter({
+                model,
+                imageUrls: [pageImage],
+                promptText: `This is page ${p + 1} of ${imageUrls.length}. Extract the line items as instructed and return only the JSON object.`,
+                systemPrompt: PAGE_PROMPT,
+                timeoutMs: timeLeft(),
+                maxTokens: LINE_ITEMS_MAX_TOKENS,
+                requireArrayKey: "lineItems",
+              })
+            );
+            if (parsed) {
+              pageItems = cleanLineItems(parsed.lineItems);
+              preferred = model;
+              if (!modelsUsed.includes(model)) modelsUsed.push(model);
+              break;
+            }
+          }
+        }
+
+        if (!pageItems) {
+          failure = failure || new Error(`page ${p + 1} of ${imageUrls.length}`);
+          return [];
+        }
+        // Remember which page of the PDF each row came from (1-based).
+        return pageItems.map((it) => ({ ...it, page: p + 1 }));
+      };
+
+      const perPage = await mapLimit(imageUrls, PAGE_CONCURRENCY, readPage);
+      if (!failure) {
+        lineItems.push(...perPage.flat());
+        // A page with no rows is fine (e.g. a totals-only last page), but an
+        // invoice with none at all is a failed read, not a real answer.
+        if (lineItems.length > 0) return { lineItems, modelUsed: modelsUsed.join(", ") };
+        attempts.push({ model: "openrouter", error: "replied with no line items on any page" });
+      }
+    }
   }
-  return { lineItems, modelUsed: modelsUsed.join(", ") };
+
+  if (!attempts.some((a) => !/^skipped/.test(a.error))) throw allPausedError(attempts);
+
+  const summary = [...new Map(attempts.map((a) => [`${a.model}|${a.error}`, a])).values()]
+    .slice(0, 8)
+    .map((a) => `${a.model} — ${a.error}`)
+    .join("; ");
+  throw new AiExtractionError(
+    `Couldn't read the line items from this invoice — every free AI source failed or is at its limit (${summary}). Try again in a few minutes, or enter the lines by hand.`,
+    attempts
+  );
 }

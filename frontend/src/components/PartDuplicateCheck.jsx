@@ -83,9 +83,9 @@ export default function PartDuplicateCheck({ manufacturerPartNumber, itemDescrip
 
   if (mfrTerm && exactMatch) {
     return descriptionMatches ? (
-      <div className="rounded-md border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-900 flex items-start gap-2">
+      <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-900 flex items-start gap-2">
         <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <p>
             <span className="font-mono bg-white/70 rounded px-1.5 py-0.5">{exactMatch.ttUniquePartNumber}</span>{" "}
             already exists in the master with this manufacturer part number and the same description.
@@ -97,9 +97,9 @@ export default function PartDuplicateCheck({ manufacturerPartNumber, itemDescrip
         </div>
       </div>
     ) : (
-      <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start gap-2">
+      <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start gap-2">
         <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <p>
             Manufacturer part number <span className="font-mono bg-white/70 rounded px-1.5 py-0.5">{mfrTerm}</span>{" "}
             is already used by{" "}
@@ -107,13 +107,13 @@ export default function PartDuplicateCheck({ manufacturerPartNumber, itemDescrip
             but with a different description:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <div className="rounded border border-amber-200 bg-white/60 p-1.5">
+            <div className="min-w-0 rounded border border-amber-200 bg-white/60 p-1.5">
               <p className="font-medium">Existing description</p>
-              <p>{exactMatch.itemDescription}</p>
+              <p className="[overflow-wrap:anywhere]">{exactMatch.itemDescription}</p>
             </div>
-            <div className="rounded border border-amber-200 bg-white/60 p-1.5">
+            <div className="min-w-0 rounded border border-amber-200 bg-white/60 p-1.5">
               <p className="font-medium">You entered</p>
-              <p>{descTerm || "—"}</p>
+              <p className="[overflow-wrap:anywhere]">{descTerm || "—"}</p>
             </div>
           </div>
           <p>
@@ -131,7 +131,7 @@ export default function PartDuplicateCheck({ manufacturerPartNumber, itemDescrip
 
   if (!exactMatch && suggestions.length > 0) {
     return (
-      <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 space-y-2">
+      <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 space-y-2">
         <p className="flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           This part number isn't in the master, but the description matches keywords on{" "}
@@ -140,15 +140,15 @@ export default function PartDuplicateCheck({ manufacturerPartNumber, itemDescrip
         </p>
         <ul className="space-y-1">
           {suggestions.map((p) => (
-            <li key={p._id} className="flex items-center justify-between gap-2 rounded border border-amber-200 bg-white/60 p-1.5">
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5">
-                  <span className="font-mono bg-muted rounded px-1.5 py-0.5">{p.ttUniquePartNumber}</span>
+            <li key={p._id} className="flex min-w-0 items-center justify-between gap-2 rounded border border-amber-200 bg-white/60 p-1.5">
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono bg-muted rounded px-1.5 py-0.5 break-all">{p.ttUniquePartNumber}</span>
                   {p.manufacturerPartNumber && (
                     <span className="text-[11px] text-muted-foreground">Mfr: {p.manufacturerPartNumber}</span>
                   )}
                 </span>
-                <span className="block truncate">{p.itemDescription}</span>
+                <span className="block [overflow-wrap:anywhere]">{p.itemDescription}</span>
               </span>
               <Button
                 type="button"

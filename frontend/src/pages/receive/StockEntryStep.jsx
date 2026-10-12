@@ -31,6 +31,7 @@ import {
   ShieldAlert,
   Clock,
   FileSpreadsheet,
+  FileText,
   Sparkles,
   Pencil,
   Trash2,
@@ -847,7 +848,7 @@ export default function StockEntryStep({
     return hay.includes(term.toLowerCase());
   };
 
-  if (phase === "excel-import") {
+  if (phase === "excel-import" || phase === "pdf-import") {
     return (
       <div className="space-y-4">
         <ExcelImportPanel
@@ -855,6 +856,7 @@ export default function StockEntryStep({
           purchaseOrder={purchaseOrder}
           enteredBy={enteredBy}
           sessionId={sessionId}
+          source={phase === "pdf-import" ? "pdf" : "sheet"}
           onImported={handleImported}
           onClose={() => setPhase("lookup")}
         />
@@ -901,12 +903,18 @@ export default function StockEntryStep({
           <CardContent>
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-xs text-muted-foreground">
-                Or import a whole delivery at once from the vendor's own stock sheet.
+                Or import a whole delivery at once from the vendor's own stock sheet or their invoice PDF.
               </p>
-              <Button type="button" size="sm" variant="outline" onClick={() => setPhase("excel-import")}>
-                <FileSpreadsheet className="h-4 w-4 mr-1.5" />
-                Import from vendor sheet
-              </Button>
+              <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setPhase("excel-import")}>
+                  <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+                  Import from vendor sheet
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setPhase("pdf-import")}>
+                  <FileText className="h-4 w-4 mr-1.5" />
+                  Import from invoice PDF
+                </Button>
+              </div>
             </div>
             <div ref={boxRef} className="relative z-40">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

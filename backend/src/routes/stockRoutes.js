@@ -7,7 +7,7 @@ import {
   getStockEntrySuggestions,
   reportQuantityMismatch,
 } from "../controllers/stockController.js";
-import { parseStockImport, commitStockImport } from "../controllers/stockImportController.js";
+import { parseStockImport, parseInvoicePdfImport, commitStockImport } from "../controllers/stockImportController.js";
 import {
   getIqcStockEntries,
   submitIqcReport,
@@ -55,6 +55,15 @@ router.post(
   requirePermission("receive.manage"),
   uploadStockSheet.single("file"),
   parseStockImport
+);
+// Same import, but reading the vendor's invoice PDF/image with AI instead of
+// their workbook. Also read-only; the review + commit step below is shared.
+router.post(
+  "/import/parse-pdf",
+  protect,
+  requirePermission("receive.manage"),
+  uploadStockSheet.single("file"),
+  parseInvoicePdfImport
 );
 router.post("/import/commit", protect, requirePermission("receive.manage"), commitStockImport);
 

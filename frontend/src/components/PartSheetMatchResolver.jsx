@@ -47,7 +47,7 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
   }, [descTerm]);
 
   return (
-    <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 space-y-2.5">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 space-y-2.5">
       <p className="text-xs text-amber-900">
         This row's part number isn't in the master yet. Search for the part it should match, or pick one of the
         suggestions below before creating a new part number.
@@ -79,9 +79,9 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
             {suggestions.map((p) => (
               <li
                 key={p._id}
-                className="flex items-center justify-between gap-2 rounded border border-amber-200 bg-white/60 p-1.5 text-xs"
+                className="flex min-w-0 items-center justify-between gap-2 rounded border border-amber-200 bg-white/60 p-1.5 text-xs"
               >
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="font-mono bg-muted rounded px-1.5 py-0.5 break-all">
                       {p.ttUniquePartNumber}
@@ -90,7 +90,7 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
                       <span className="text-[11px] text-muted-foreground">Mfr: {p.manufacturerPartNumber}</span>
                     )}
                   </span>
-                  <span className="block break-words">{p.itemDescription}</span>
+                  <span className="block [overflow-wrap:anywhere]">{p.itemDescription}</span>
                 </span>
                 <Button
                   type="button"

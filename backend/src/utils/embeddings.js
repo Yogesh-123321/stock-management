@@ -19,8 +19,14 @@ import {
   OPENROUTER_APP_NAME,
   OPENROUTER_EMBEDDING_MODEL,
   AI_EXTRACT_TIMEOUT_MS,
+  GEMINI_API_KEY,
+  GEMINI_BASE_URL,
+  GEMINI_EMBEDDING_MODEL,
   isAiExtractConfigured,
+  isGeminiConfigured,
+  isOpenRouterConfigured,
 } from "../config/aiConfig.js";
+import { classifyHttpError, coolDown, isCoolingDown, recordUsage, ProviderError } from "./aiQuota.js";
 
 export class EmbeddingError extends Error {
   constructor(message) {
@@ -45,16 +51,76 @@ const MAX_INPUTS_PER_REQUEST = 128;
  */
 export async function getEmbeddings(texts) {
   if (!isAiExtractConfigured()) {
-    throw new EmbeddingError("AI matching isn't configured yet — set OPENROUTER_API_KEY in the backend .env");
+    throw new EmbeddingError("AI matching isn't configured yet — set GEMINI_API_KEY (and/or OPENROUTER_API_KEY) in the backend .env");
   }
   const clean = (texts || []).map((t) => (t == null ? "" : String(t).trim()));
   if (clean.length === 0) return [];
+
+  // Gemini first (free tier). Every text in ONE call comes from the SAME
+  // model — vectors from different embedding models can't be compared — so
+  // the whole call falls back to OpenRouter together if Gemini fails.
+  const geminiKey = `gemini:${GEMINI_EMBEDDING_MODEL}`;
+  let geminiError = null;
+  if (isGeminiConfigured() && !isCoolingDown(geminiKey) && !isCoolingDown("gemini")) {
+    try {
+      const vectors = await getGeminiEmbeddings(clean);
+      recordUsage(geminiKey, true);
+      return vectors;
+    } catch (err) {
+      geminiError = err;
+      recordUsage(geminiKey, false, err.message);
+      if (err instanceof ProviderError && err.cooldownMs > 0) coolDown(geminiKey, err.cooldownMs, err.message.slice(0, 160));
+    }
+  }
+  if (!isOpenRouterConfigured()) {
+    throw new EmbeddingError(geminiError ? geminiError.message : "AI matching is paused — the free embedding limit was reached, try again later");
+  }
 
   const vectors = [];
   for (let start = 0; start < clean.length; start += MAX_INPUTS_PER_REQUEST) {
     const batch = clean.slice(start, start + MAX_INPUTS_PER_REQUEST);
     const batchVectors = await getEmbeddingsBatch(batch);
     vectors.push(...batchVectors);
+  }
+  return vectors;
+}
+
+const GEMINI_EMBED_BATCH = 100; // batchEmbedContents accepts up to 100 texts
+
+async function getGeminiEmbeddings(clean) {
+  const vectors = [];
+  for (let start = 0; start < clean.length; start += GEMINI_EMBED_BATCH) {
+    const batch = clean.slice(start, start + GEMINI_EMBED_BATCH);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AI_EXTRACT_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${GEMINI_BASE_URL}/models/${encodeURIComponent(GEMINI_EMBEDDING_MODEL)}:batchEmbedContents`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+        body: JSON.stringify({
+          requests: batch.map((t) => ({
+            model: `models/${GEMINI_EMBEDDING_MODEL}`,
+            content: { parts: [{ text: t.length ? t : " " }] },
+            taskType: "SEMANTIC_SIMILARITY",
+          })),
+        }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw classifyHttpError(response.status, `${body?.error?.message || `HTTP ${response.status}`} (HTTP ${response.status})`, JSON.stringify(body?.error?.details || "").slice(0, 600));
+      }
+      const out = body?.embeddings;
+      if (!Array.isArray(out) || out.length !== batch.length || out.some((e) => !Array.isArray(e?.values))) {
+        throw new Error("Gemini embedding response didn't match the number of inputs sent");
+      }
+      vectors.push(...out.map((e) => e.values));
+    } catch (err) {
+      if (err?.name === "AbortError") throw new Error(`Gemini embeddings timed out after ${Math.round(AI_EXTRACT_TIMEOUT_MS / 1000)}s`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   return vectors;
 }

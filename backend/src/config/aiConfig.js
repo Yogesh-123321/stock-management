@@ -1,6 +1,26 @@
 /*
   Config for the "auto-fill from uploaded document" feature.
 
+  TWO free sources are supported, tried in this order:
+    1. Google Gemini (GEMINI_API_KEY) — reads a whole PDF in ONE request, so
+       it is both the fastest and the cheapest on quota. Free key from
+       https://aistudio.google.com/apikey
+    2. OpenRouter free models (OPENROUTER_API_KEY) — the fallback, used when
+       Gemini isn't configured, is at its limit, or fails.
+  Either key alone works; with both, a limit on one doesn't stop the feature.
+  A source that hits its limit is skipped instantly until it recovers (see
+  utils/aiQuota.js) instead of making every scan wait for it to fail.
+
+  Extra .env settings for Gemini (all optional apart from the key):
+    GEMINI_API_KEY=AIza...
+    # Comma-separated, tried in order. Check the exact IDs your key can use at
+    # https://aistudio.google.com/rate-limit — models get renamed/retired.
+    GEMINI_MODELS=gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite
+    GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+    # Whole-scan time budget in ms — after this a scan stops retrying and
+    # reports what failed rather than spinning for minutes (default 120000).
+    AI_TOTAL_DEADLINE_MS=120000
+
   Uses OpenRouter (https://openrouter.ai) as the single API surface — it's
   OpenAI-compatible and gives access to many providers/models through one
   key, which is what makes the multi-model fallback chain below possible
@@ -66,7 +86,7 @@ export const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || "Inventory
 
 export const AI_EXTRACT_TIMEOUT_MS = Number(process.env.AI_EXTRACT_TIMEOUT_MS) || 45000;
 
-export const isAiExtractConfigured = () => Boolean(OPENROUTER_API_KEY);
+export const isAiExtractConfigured = () => Boolean(OPENROUTER_API_KEY || process.env.GEMINI_API_KEY);
 
 // Used for semantic matching (e.g. tax-invoice line items vs. stock entries
 // entered against them — see utils/embeddings.js). Kept as its own env var
@@ -76,3 +96,18 @@ export const isAiExtractConfigured = () => Boolean(OPENROUTER_API_KEY);
 // Free (":free") by default, same reasoning as the chat model chain above.
 export const OPENROUTER_EMBEDDING_MODEL =
   process.env.OPENROUTER_EMBEDDING_MODEL || "liquid/lfm-2.5-embedding-350m:free";
+
+// ---- Google Gemini (primary) -------------------------------------------
+export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+export const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+export const GEMINI_EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
+
+export const isGeminiConfigured = () => Boolean(GEMINI_API_KEY);
+export const isOpenRouterConfigured = () => Boolean(OPENROUTER_API_KEY);
+
+// One whole scan (all pages, all retries) is cut off after this long.
+export const AI_TOTAL_DEADLINE_MS = Number(process.env.AI_TOTAL_DEADLINE_MS) || 120000;

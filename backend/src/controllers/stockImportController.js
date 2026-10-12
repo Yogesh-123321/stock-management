@@ -35,6 +35,7 @@ import PurchaseOrder from "../models/PurchaseOrder.js";
 import { parseStockWorkbook, UNDATED_DATE_KEY } from "../utils/parseStockSheet.js";
 import { bookExistingPart, BookingError } from "../utils/stockBooking.js";
 import { notifyApprovers } from "../utils/notify.js";
+import { extractInvoiceLineItems, AiExtractionError } from "../utils/aiDocumentExtract.js";
 
 const partLabel = (doc) =>
   [doc.newPart?.itemDescription, doc.newPart?.manufacturerPartNumber].filter(Boolean).join(" · ") ||
@@ -116,6 +117,173 @@ export const parseStockImport = asyncHandler(async (req, res) => {
 });
 
 /*
+  POST /api/stock-entries/import/parse-pdf  (multipart, field name "file")
+
+  Same idea as parseStockImport, but the source is the vendor's invoice as a
+  PDF (or a clear photo/scan of one) instead of their own workbook. The AI
+  line-item reader (extractInvoiceLineItems — the same one the tax-invoice
+  line-match screen uses) turns the item table into rows, and each row is
+  then matched against the parts master:
+
+    1. the invoice's item code equals a TT unique part number  -> matched
+    2. the invoice's item code equals a manufacturer part number
+       (only when exactly one part has it)                       -> matched
+    3. anything else -> left unmatched, but shipped with `suggestions`:
+       parts whose description shares keywords with the line (same keyword
+       scoring as GET /parts/suggest), best first. Suggestions are only
+       shown to the operator — they are never applied automatically.
+
+  Read-only: nothing is written to the database. The rows come back in the
+  same shape as the sheet parser's (rowIndex, itemDescription,
+  ttUniquePartNumber, suggestedQuantity, ratePerUnit, matchedPart, ...), so
+  the same review screen and the same POST /import/commit handle both.
+*/
+const SUGGEST_STOPWORDS = new Set([
+  "the", "and", "for", "with", "per", "nos", "pcs", "set", "item", "type", "make", "size", "new",
+]);
+const keywordsOf = (text) => [
+  ...new Set(
+    String(text || "")
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .filter((w) => w.length >= 3 && !SUGGEST_STOPWORDS.has(w.toLowerCase()))
+  ),
+];
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const PART_FIELDS = "ttUniquePartNumber itemDescription quantityInStock manufacturerPartNumber unit price";
+
+export const parseInvoicePdfImport = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    res.status(400);
+    throw new Error("Attach the vendor's invoice (PDF, JPG or PNG)");
+  }
+  const lower = (req.file.originalname || "").toLowerCase();
+  if (!/\.(pdf|jpe?g|png)$/.test(lower)) {
+    res.status(400);
+    throw new Error("Only a PDF or an image of the invoice can be read here — use the sheet import for Excel files");
+  }
+
+  let extracted;
+  try {
+    extracted = await extractInvoiceLineItems({
+      buffer: req.file.buffer,
+      mimeType: req.file.mimetype,
+      fileName: req.file.originalname,
+    });
+  } catch (err) {
+    res.status(err instanceof AiExtractionError ? 502 : 500);
+    throw new Error(err.message || "Could not read line items from this invoice");
+  }
+
+  // The reader sometimes puts the whole description in the item-code field.
+  // A real code is short and has no spaces: keep a leading "[CODE]" if there
+  // is one, otherwise treat it as "no code" so it isn't shown / matched /
+  // pre-filled as a (very long) manufacturer part number.
+  const cleanCode = (raw) => {
+    const c = String(raw || "").trim();
+    if (!c) return "";
+    if (c.length <= 30 && !/\s/.test(c)) return c;
+    const bracket = c.match(/^\[([^\]\s]{2,30})\]/);
+    return bracket ? bracket[1] : "";
+  };
+  const lines = extracted.lineItems.map((l) => ({ ...l, partNumber: cleanCode(l.partNumber) }));
+
+  // Batch-match every item code against both the TT number and the
+  // manufacturer part number in one query.
+  const codes = [
+    ...new Set(lines.map((l) => String(l.partNumber || "").trim()).filter(Boolean)),
+  ];
+  const upperCodes = codes.map((c) => c.toUpperCase());
+  const candidates = codes.length
+    ? await Part.find({
+        $or: [
+          { ttUniquePartNumber: { $in: upperCodes } },
+          { manufacturerPartNumber: { $in: codes.map((c) => new RegExp(`^${escapeRegex(c)}$`, "i")) } },
+        ],
+      })
+        .select(PART_FIELDS)
+        .lean()
+    : [];
+  const byTt = new Map(candidates.map((p) => [p.ttUniquePartNumber, p]));
+  const byMfr = new Map();
+  for (const p of candidates) {
+    const key = String(p.manufacturerPartNumber || "").trim().toUpperCase();
+    if (!key) continue;
+    byMfr.set(key, [...(byMfr.get(key) || []), p]);
+  }
+
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const code = String(l.partNumber || "").trim();
+    let matchedPart = null;
+    let matchedBy = null;
+    let ambiguous = [];
+    if (code) {
+      const tt = byTt.get(code.toUpperCase());
+      const mfr = byMfr.get(code.toUpperCase()) || [];
+      if (tt) {
+        matchedPart = tt;
+        matchedBy = "tt_part_number";
+      } else if (mfr.length === 1) {
+        matchedPart = mfr[0];
+        matchedBy = "manufacturer_part_number";
+      } else if (mfr.length > 1) {
+        ambiguous = mfr; // several parts share this mfr number — let the operator choose
+      }
+    }
+
+    // Suggestions only for lines that didn't match on their own.
+    let suggestions = [];
+    if (!matchedPart) {
+      const kws = keywordsOf(l.description);
+      if (kws.length) {
+        const found = await Part.find({
+          $or: kws.map((kw) => ({ itemDescription: { $regex: escapeRegex(kw), $options: "i" } })),
+        })
+          .select(PART_FIELDS)
+          .limit(50)
+          .lean();
+        suggestions = found
+          .map((p) => {
+            const hay = String(p.itemDescription || "").toUpperCase();
+            return { ...p, matchedKeywords: kws.reduce((n, kw) => n + (hay.includes(kw) ? 1 : 0), 0) };
+          })
+          .filter((p) => p.matchedKeywords > 0)
+          .sort((a, b) => b.matchedKeywords - a.matchedKeywords)
+          .slice(0, 5);
+      }
+      // Parts that share the invoice's mfr number go first.
+      const seen = new Set(ambiguous.map((p) => String(p._id)));
+      suggestions = [...ambiguous, ...suggestions.filter((p) => !seen.has(String(p._id)))].slice(0, 6);
+    }
+
+    rows.push({
+      rowIndex: i + 1,
+      page: l.page,
+      itemDescription: l.description || code || "(no description)",
+      // The code printed on the invoice. Named like the sheet parser's field
+      // so the review screen treats both sources the same way; for a new part
+      // it is pre-filled as the manufacturer part number.
+      ttUniquePartNumber: code || null,
+      suggestedQuantity: l.quantity,
+      ratePerUnit: l.unitPrice,
+      amount: l.amount,
+      matchedBy,
+      matchedPart,
+      suggestions,
+    });
+  }
+
+  res.json({
+    source: "invoice_pdf",
+    fileName: req.file.originalname,
+    modelUsed: extracted.modelUsed,
+    rows,
+  });
+});
+
+/*
   POST /api/stock-entries/import/commit
   Body:
     vendor          - required; the vendor already chosen for this delivery,
@@ -129,7 +297,11 @@ export const parseStockImport = asyncHandler(async (req, res) => {
                        to save a single row on its own (a one-row batch).
     remarks         - default remarks applied to every row (a row can override it)
     date            - the sheet date this batch was picked for (kept for the
-                       audit trail / approval notification only)
+                       audit trail / approval notification only; not sent for
+                       an invoice-PDF import)
+    source          - "invoice_pdf" when the rows came from an invoice PDF
+                       instead of a vendor sheet; only changes the wording of
+                       the default remarks / approval notification
     rows: [{
       rowIndex, itemDescription, quantityReceived, remarks,
       unit, price,        - optional; unit of measure and rate per unit for this
@@ -146,7 +318,9 @@ export const parseStockImport = asyncHandler(async (req, res) => {
     }]
 */
 export const commitStockImport = asyncHandler(async (req, res) => {
-  const { vendor, purchaseOrder, receivingSession, enteredBy, remarks: batchRemarks, date, rows } = req.body;
+  const { vendor, purchaseOrder, receivingSession, enteredBy, remarks: batchRemarks, date, rows, source } = req.body;
+  const fromPdf = source === "invoice_pdf";
+  const sourceLabel = fromPdf ? "vendor invoice PDF" : "vendor sheet";
 
   if (!vendor) {
     res.status(400);
@@ -259,7 +433,7 @@ export const commitStockImport = asyncHandler(async (req, res) => {
         requestRemarks:
           row.remarks ||
           batchRemarks ||
-          (date ? `Imported from vendor sheet — sheet date ${date}` : "Imported from vendor sheet"),
+          (date ? `Imported from ${sourceLabel} — sheet date ${date}` : `Imported from ${sourceLabel}`),
       });
       createdApprovalIds.push(doc._id);
     } catch (err) {
@@ -275,7 +449,7 @@ export const commitStockImport = asyncHandler(async (req, res) => {
         actorId: req.user?._id,
         title: "New part numbers need approval",
         message: `${createdApprovalIds.length} part number(s) (some possibly marked as alternates) from an
-          imported vendor sheet${date ? ` (${date})` : ""} are waiting for your approval.`.replace(/\s+/g, " "),
+          imported ${sourceLabel}${date ? ` (${date})` : ""} are waiting for your approval.`.replace(/\s+/g, " "),
         link: "/parts",
         entityType: "part",
         entityId: createdApprovalIds[0],
