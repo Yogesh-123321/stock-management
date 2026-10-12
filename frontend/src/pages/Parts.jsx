@@ -1667,6 +1667,11 @@ useEffect(() => {
         await api.delete(`/stock-entries/${entry._id}`);
       }
       toast.success(isKitIssue ? "Kit issue line reverted — stock restored" : "History entry deleted");
+      // Refresh the ledger so the stock summary above stays accurate.
+      api
+        .get(`/parts/${part._id}/history`)
+        .then(({ data: fresh }) => setData(fresh))
+        .catch(() => {});
       setData((d) => {
         if (!d) return d;
         const remainingEntries = d.entries.filter((e) => e._id !== entry._id);
@@ -1736,6 +1741,63 @@ useEffect(() => {
 
               {!loading && data && (
                 <>
+                {data.stockSummary && (
+                  <Card className="mb-4 border-emerald-500/30">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Boxes className="h-4 w-4" />
+                        Total stock — all in all
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+                        <div className="rounded border border-emerald-500/30 bg-emerald-500/5 p-2.5">
+                          <div className="text-[11px] text-muted-foreground">Expected total stock</div>
+                          <div className="font-mono-tech text-lg font-semibold">
+                            {data.stockSummary.expectedTotal}
+                            <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                              {data.stockSummary.unit}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            Main + IQC + awaiting invoice + R&amp;D
+                          </div>
+                        </div>
+                        <div className="rounded border border-border p-2.5">
+                          <div className="text-[11px] text-muted-foreground">All-in incl. issued kits</div>
+                          <div className="font-mono-tech text-lg font-semibold">
+                            {data.stockSummary.allInTotal}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            Expected total + already issued in kits
+                          </div>
+                        </div>
+                        <div className="rounded border border-border p-2.5">
+                          <div className="text-[11px] text-muted-foreground">Main stock (usable now)</div>
+                          <div className="font-mono-tech text-lg font-semibold">
+                            {data.stockSummary.mainStock}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">Cleared IQC</div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                        {[
+                          { label: "In IQC stock", value: data.stockSummary.iqcStock, hint: "Awaiting inspection" },
+                          { label: "Awaiting invoice", value: data.stockSummary.awaitingInvoice, hint: "Tax invoice not in yet" },
+                          { label: "R&D stock", value: data.stockSummary.rndStock, hint: "Set aside for R&D" },
+                          { label: "Issued in kits", value: data.stockSummary.issuedInKits, hint: "Already sent out" },
+                          { label: "Rejected (IQC)", value: data.stockSummary.rejected, hint: "Not counted in total" },
+                        ].map((c) => (
+                          <div key={c.label} className="rounded border border-border p-2.5">
+                            <div className="text-[11px] text-muted-foreground">{c.label}</div>
+                            <div className="font-mono-tech font-semibold">{c.value}</div>
+                            <div className="text-[10px] text-muted-foreground">{c.hint}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
                 <Card className="mb-4 border-purple-500/30">
   <CardHeader>
     <CardTitle className="flex items-center gap-2">
@@ -2909,6 +2971,7 @@ export default function Parts() {
   const [showNewPartRequest, setShowNewPartRequest] = useState(false);
   const [myRequestsReloadKey, setMyRequestsReloadKey] = useState(0);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [downloadingStock, setDownloadingStock] = useState(false);
   const [showCsvCustomize, setShowCsvCustomize] = useState(false);
 
   // "MISC stock" column: the header dropdown just picks which bucket the
@@ -2992,6 +3055,29 @@ export default function Parts() {
       toast.error(err.response?.data?.message || "Could not download parts");
     } finally {
       setDownloadingCsv(false);
+    }
+  };
+
+  // "Stock report" — admin only. One Excel file with the all-in stock
+  // (main + IQC + awaiting invoice + R&D + issued in kits) of every part.
+  const downloadStockReport = async () => {
+    setDownloadingStock(true);
+    try {
+      const { data } = await api.get("/parts/export/stock-summary-xlsx", { responseType: "blob" });
+      const blobUrl = URL.createObjectURL(
+        new Blob([data], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        })
+      );
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `stock-summary-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not download the stock report");
+    } finally {
+      setDownloadingStock(false);
     }
   };
 
@@ -3097,6 +3183,18 @@ export default function Parts() {
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {downloadingCsv ? "Preparing…" : "Download parts"}
+            </Button>
+          )}
+          {isApprover && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={downloadStockReport}
+              disabled={downloadingStock}
+              title="Excel report of the all-in stock (main, IQC, awaiting invoice, R&D, kits) for every part"
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              {downloadingStock ? "Preparing…" : "Stock report (Excel)"}
             </Button>
           )}
           {/* Same IQC approve/reject window the "MISC stock" column opens for

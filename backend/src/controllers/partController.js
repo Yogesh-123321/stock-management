@@ -1,5 +1,6 @@
 import asyncHandler from "express-async-handler";
 import mongoose from "mongoose";
+import ExcelJS from "exceljs";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
@@ -413,6 +414,42 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     return { ...m, balance: running };
   });
 
+  // All-in stock picture for this part: where every unit currently is,
+  // not just what's in main stock. Built from the same movements the
+  // ledger above is built from, so the two always agree.
+  //   mainStock        - cleared IQC, credited to quantityInStock
+  //   iqcStock         - tax invoice in, waiting for IQC inspection
+  //   awaitingInvoice  - received, but the tax invoice hasn't arrived yet
+  //   rndStock         - set aside for R&D (still owned, not in main stock)
+  //   expectedTotal    - mainStock + iqcStock + awaitingInvoice + rndStock
+  //                      (everything we hold or are about to hold)
+  //   issuedInKits     - already gone out through issued kits
+  //   rejected         - failed IQC; held aside, NOT part of expectedTotal
+  //   allInTotal       - expectedTotal + issuedInKits (everything that
+  //                      has ever been accounted for, minus rejects)
+  const sumQty = (list) => list.reduce((n, e) => n + (Number(e.quantity) || 0), 0);
+  const pendingReceipts = receiptMovements.filter((m) => !m.stockApplied);
+  const iqcStock = sumQty(pendingReceipts.filter((m) => m.iqcStatus === "in_iqc_stock"));
+  const rejected = sumQty(pendingReceipts.filter((m) => m.iqcStatus === "rejected"));
+  const awaitingInvoice = sumQty(
+    pendingReceipts.filter((m) => m.iqcStatus !== "in_iqc_stock" && m.iqcStatus !== "rejected")
+  );
+  const mainStock = part.quantityInStock || 0;
+  const rndStock = part.rndStock || 0;
+  const issuedInKits = sumQty(kitMovements);
+  const expectedTotal = mainStock + iqcStock + awaitingInvoice + rndStock;
+  const stockSummary = {
+    mainStock,
+    iqcStock,
+    awaitingInvoice,
+    rndStock,
+    expectedTotal,
+    issuedInKits,
+    rejected,
+    allInTotal: expectedTotal + issuedInKits,
+    unit: part.unit || "",
+  };
+
   res.json({
     part: {
       _id: part._id,
@@ -420,6 +457,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
       itemDescription: part.itemDescription,
       quantityInStock: part.quantityInStock,
     },
+    stockSummary,
     openingBalance: 0,
     closingBalance: part.quantityInStock,
     // Newest first, like a bank statement.
@@ -983,6 +1021,142 @@ export const getPartKitUsage = asyncHandler(async (req, res) => {
 
   res.json(usage);
 });
+/*
+  GET /api/parts/export/stock-summary-xlsx — ADMIN ONLY.
+  One Excel sheet with the all-in stock picture of every part (same
+  numbers as the "Total stock — all in all" card in Part history):
+    Expected total = Main + IQC + Awaiting invoice + R&D
+    All-in total   = Expected total + Issued in kits
+  Rejected-in-IQC units are listed but not counted in either total.
+  Computed with two aggregations (stock entries, kit issues) rather than
+  one history call per part, so it stays fast with thousands of parts.
+*/
+export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
+  const parts = await Part.find({})
+    .select("ttUniquePartNumber itemDescription manufacturerPartNumber unit quantityInStock rndStock")
+    .sort({ ttUniquePartNumber: 1 })
+    .lean();
+
+  // Received lines not yet credited to main stock, bucketed by IQC state.
+  const pendingAgg = await StockEntry.aggregate([
+    { $match: { stockApplied: { $ne: true } } },
+    {
+      $group: {
+        _id: {
+          part: "$part",
+          bucket: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$iqcStatus", "in_iqc_stock"] }, then: "iqc" },
+                { case: { $eq: ["$iqcStatus", "rejected"] }, then: "rejected" },
+              ],
+              default: "awaiting",
+            },
+          },
+        },
+        qty: { $sum: "$quantityReceived" },
+      },
+    },
+  ]);
+  const pending = new Map(); // partId -> { iqc, rejected, awaiting }
+  for (const r of pendingAgg) {
+    const key = String(r._id.part);
+    if (!pending.has(key)) pending.set(key, { iqc: 0, rejected: 0, awaiting: 0 });
+    pending.get(key)[r._id.bucket] = r.qty;
+  }
+
+  const kitAgg = await KitIssue.aggregate([
+    { $unwind: "$lines" },
+    { $group: { _id: "$lines.part", qty: { $sum: "$lines.qtyIssued" } } },
+  ]);
+  const kitByPart = new Map(kitAgg.map((k) => [String(k._id), k.qty]));
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stock management";
+  const ws = wb.addWorksheet("Stock summary", { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = [
+    { header: "TT part number", key: "pn", width: 20 },
+    { header: "Item description", key: "desc", width: 44 },
+    { header: "Manufacturer part no.", key: "mpn", width: 24 },
+    { header: "Unit", key: "unit", width: 8 },
+    { header: "Main stock", key: "main", width: 12 },
+    { header: "In IQC stock", key: "iqc", width: 13 },
+    { header: "Awaiting invoice", key: "awaiting", width: 16 },
+    { header: "R&D stock", key: "rnd", width: 11 },
+    { header: "Expected total stock", key: "expected", width: 20 },
+    { header: "Issued in kits", key: "kits", width: 14 },
+    { header: "All-in total (incl. kits)", key: "allin", width: 22 },
+    { header: "Rejected (IQC, not counted)", key: "rejected", width: 26 },
+  ];
+
+  parts.forEach((p, i) => {
+    const pd = pending.get(String(p._id)) || { iqc: 0, rejected: 0, awaiting: 0 };
+    const main = p.quantityInStock || 0;
+    const rnd = p.rndStock || 0;
+    const kits = kitByPart.get(String(p._id)) || 0;
+    const expected = main + pd.iqc + pd.awaiting + rnd;
+    const r = i + 2; // header is row 1
+    ws.addRow({
+      pn: p.ttUniquePartNumber || "",
+      desc: p.itemDescription || "",
+      mpn: p.manufacturerPartNumber || "",
+      unit: p.unit || "",
+      main,
+      iqc: pd.iqc,
+      awaiting: pd.awaiting,
+      rnd,
+      expected: { formula: `E${r}+F${r}+G${r}+H${r}`, result: expected },
+      kits,
+      allin: { formula: `I${r}+J${r}`, result: expected + kits },
+      rejected: pd.rejected,
+    });
+  });
+
+  // Totals row (only when there is data).
+  if (parts.length > 0) {
+    const last = parts.length + 1;
+    const totals = ws.addRow({ pn: "TOTAL" });
+    for (const col of ["E", "F", "G", "H", "I", "J", "K", "L"]) {
+      totals.getCell(col).value = { formula: `SUM(${col}2:${col}${last})` };
+    }
+    totals.font = { bold: true };
+    ws.autoFilter = { from: "A1", to: `L${last}` };
+  }
+
+  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+  ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
+  for (const col of ["E", "F", "G", "H", "I", "J", "K", "L"]) {
+    ws.getColumn(col).alignment = { horizontal: "right" };
+    ws.getColumn(col).numFmt = "#,##0.###";
+  }
+  ws.getColumn("I").font = { bold: true };
+  ws.getColumn("K").font = { bold: true };
+
+  const note = wb.addWorksheet("How to read");
+  note.columns = [{ width: 110 }];
+  [
+    "Expected total stock = Main stock + In IQC stock + Awaiting invoice + R&D stock",
+    "All-in total = Expected total stock + Issued in kits",
+    "Main stock: cleared IQC and credited to stock (usable now).",
+    "In IQC stock: tax invoice received, waiting for IQC inspection.",
+    "Awaiting invoice: material received, tax invoice not uploaded yet.",
+    "R&D stock: set aside for R&D.",
+    "Issued in kits: already sent out through issued kits.",
+    "Rejected: failed IQC; shown for reference and not counted in either total.",
+    `Generated ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
+  ].forEach((t) => note.addRow([t]));
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="stock-summary-${stamp}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
 // GET /api/parts/export/vendor-links-csv — one row per part<->vendor link
 // (the "related details" alongside the parts master itself), ADMIN ONLY.
 export const exportPartVendorLinksCsv = asyncHandler(async (req, res) => {

@@ -16,6 +16,7 @@ import {
   deletePart,
   exportPartsCsv,
   exportPartVendorLinksCsv,
+  exportStockSummaryXlsx,
   getPartsCsvFields,
 } from "../controllers/partController.js";
 import { updatePart } from "../controllers/partAdminController.js";
@@ -56,6 +57,13 @@ router.get(
   protect,
   requirePermission("part.approve"),
   exportPartVendorLinksCsv
+);
+
+router.get(
+  "/export/stock-summary-xlsx",
+  protect,
+  requirePermission("part.approve"),
+  exportStockSummaryXlsx
 );
 
 router.get("/", getParts);
