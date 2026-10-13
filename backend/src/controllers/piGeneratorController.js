@@ -189,11 +189,18 @@ export async function generatePi(req, res) {
     });
 
     if (!isAdmin) {
+      const totalQty = items.reduce((n, it) => n + (Number(it.quantity) || 0), 0);
       await createDocumentApproval({
         docType: "PI",
         docId: pi._id,
         refNo: pi.invoiceNo,
         requestedBy: req.user,
+        summary: `${pi.buyerName} — ${items.length} item(s), ${totalQty} qty`,
+        amount: totalAmount,
+        requestRemarks: [pi.specialNote, pi.paymentTerms && `Payment terms: ${pi.paymentTerms}`]
+          .filter(Boolean)
+          .join(" · "),
+        payload: { invoiceNo: pi.invoiceNo, buyerName: pi.buyerName, buyerGSTIN: gstin },
       });
     } else {
       // Admin-created PIs are approved immediately, so archive right away.

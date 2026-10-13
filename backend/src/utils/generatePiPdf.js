@@ -9,14 +9,16 @@ const LOGO_PATH = path.join(__dirname, "..", "assets", "tispl-logo.jpeg");
 
 const COMPANY = {
   name: "TECHNOTRENDZ INNOVATIVE SOLUTIONS PVT. LTD",
-  corporateOffice:
-    "Corporate Office : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004, INDIA",
-  registeredOfficeLabel: "Regis. Office",
-  registeredOffice: " : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004",
   worksAddress:
     "Second Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
 };
+
+// The registered office and the works address are the same address on every
+// document we issue — derive one from the other so they can never drift apart.
+COMPANY.corporateOffice = `Corporate Office : ${COMPANY.worksAddress}`;
+COMPANY.registeredOfficeLabel = "Regis. Office";
+COMPANY.registeredOffice = ` : ${COMPANY.worksAddress}`;
 
 const fmtDate = (d) =>
   d

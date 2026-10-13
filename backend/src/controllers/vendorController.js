@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { uploadFileToCloudinary } from "../config/cloudinary.js";
 import Vendor from "../models/Vendor.js";
+import { openPartyApproval, resolvePartyApproval } from "../utils/partyApproval.js";
 import { generateVendorFormDocx, generateAllVendorsFormDocx } from "../utils/generateVendorFormDocx.js";
 
 // Maps the multipart field name -> the vendor field that stores its URL.
@@ -193,6 +194,9 @@ export const registerVendor = asyncHandler(async (req, res) => {
     status: "pending",
   });
 
+  // Put the registration in the Approvals queue (and ping the admins).
+  await openPartyApproval({ kind: "vendor", party: vendor, actor: req.user });
+
   res.status(201).json(vendor);
 });
 
@@ -254,6 +258,7 @@ export const approveVendor = asyncHandler(async (req, res) => {
   vendor.approvedBy = approvedBy;
   vendor.approvalComment = approvalComment;
   await vendor.save();
+  await resolvePartyApproval({ kind: "vendor", party: vendor, approved: true, actor: req.user, comment: approvalComment });
   res.json(vendor);
 });
 
@@ -269,6 +274,7 @@ export const rejectVendor = asyncHandler(async (req, res) => {
   vendor.approvedBy = approvedBy;
   vendor.approvalComment = approvalComment;
   await vendor.save();
+  await resolvePartyApproval({ kind: "vendor", party: vendor, approved: false, actor: req.user, comment: approvalComment });
   res.json(vendor);
 });
 

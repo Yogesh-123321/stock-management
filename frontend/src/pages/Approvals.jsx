@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { ShieldCheck, ShieldX, Clock, RefreshCw, Eye } from "lucide-react";
+import { ShieldCheck, ShieldX, Clock, RefreshCw, Eye, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,16 @@ const STATUS_TONE = {
 const fmtAmount = (n) =>
   n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
+// How each sortable column turns a row into a comparable value.
+const SORT_VALUE = {
+  type: (r) => APPROVAL_LABEL[r.entityType] || r.entityType || "",
+  document: (r) => String(r.title || "").toLowerCase(),
+  raisedBy: (r) => String(r.requestedBy?.name || "").toLowerCase(),
+  date: (r) => new Date(r.createdAt).getTime() || 0,
+  amount: (r) => (r.amount == null ? null : Number(r.amount)),
+  status: (r) => r.status || "",
+};
+
 export default function Approvals() {
   const { user, can } = useAuth();
   const [status, setStatus] = useState("pending");
@@ -59,6 +69,51 @@ export default function Approvals() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [previewRow, setPreviewRow] = useState(null);
+  // Newest first by default; click a column heading to sort by it.
+  const [sort, setSort] = useState({ key: "date", dir: "desc" });
+
+  const toggleSort = (key) =>
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "date" || key === "amount" ? "desc" : "asc" }
+    );
+
+  const sortedItems = useMemo(() => {
+    const get = SORT_VALUE[sort.key] || SORT_VALUE.date;
+    const factor = sort.dir === "asc" ? 1 : -1;
+    return [...items].sort((a, b) => {
+      const x = get(a);
+      const y = get(b);
+      // Rows with no value (e.g. no amount) always sink to the bottom.
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      if (x < y) return -1 * factor;
+      if (x > y) return 1 * factor;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+  }, [items, sort]);
+
+  const SortHead = ({ k, children, className }) => (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => toggleSort(k)}
+        className={cn(
+          "inline-flex items-center gap-1 font-medium hover:text-foreground",
+          className?.includes("text-right") && "flex-row-reverse"
+        )}
+      >
+        {children}
+        {sort.key === k ? (
+          sort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-40" />
+        )}
+      </button>
+    </TableHead>
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,21 +217,22 @@ export default function Approvals() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[130px]">Type</TableHead>
-                <TableHead>Document</TableHead>
-                <TableHead className="w-[150px]">Raised by</TableHead>
-                <TableHead className="w-[110px] text-right">Amount</TableHead>
-                <TableHead className="w-[110px]">Status</TableHead>
+                <SortHead k="type" className="w-[130px]">Type</SortHead>
+                <SortHead k="document">Document</SortHead>
+                <SortHead k="raisedBy" className="w-[130px]">Raised by</SortHead>
+                <SortHead k="date" className="w-[130px]">Date</SortHead>
+                <SortHead k="amount" className="w-[120px] text-right">Amount (₹)</SortHead>
+                <SortHead k="status" className="w-[110px]">Status</SortHead>
                 <TableHead className="w-[300px]">Decision</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 && (
-                <TableEmpty colSpan={6}>
+                <TableEmpty colSpan={7}>
                   {loading ? "Loading…" : "Nothing waiting here."}
                 </TableEmpty>
               )}
-              {items.map((row) => (
+              {sortedItems.map((row) => (
                 <TableRow
                   key={row._id}
                   className="cursor-pointer"
@@ -190,19 +246,32 @@ export default function Approvals() {
                       <p className="font-medium">{row.title}</p>
                       <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Click to preview" />
                     </div>
-                    {row.summary && (
-                      <p className="text-[11px] text-muted-foreground">{row.summary}</p>
-                    )}
-                    {row.requestRemarks && (
-                      <p className="text-[11px] italic text-muted-foreground">
-                        “{row.requestRemarks}”
+                    {/* PO / PI: just the company on the other side (amount has its own
+                        column). Vendor / buyer registrations keep their short summary. */}
+                    {row.details?.party ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        {row.entityType === "pi" ? "To" : "From"}: {row.details.party}
                       </p>
+                    ) : (
+                      row.summary && (
+                        <p className="text-[11px] text-muted-foreground">{row.summary}</p>
+                      )
                     )}
                   </TableCell>
                   <TableCell className="text-xs">
                     {row.requestedBy?.name || "—"}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {new Date(row.createdAt).toLocaleDateString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}
                     <span className="block text-[10px] text-muted-foreground">
-                      {new Date(row.createdAt).toLocaleString("en-IN")}
+                      {new Date(row.createdAt).toLocaleTimeString("en-IN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{fmtAmount(row.amount)}</TableCell>
@@ -250,10 +319,16 @@ export default function Approvals() {
                       <span className="text-[11px] text-muted-foreground">
                         {row.status === "pending"
                           ? "Waiting for an admin"
-                          : `${row.reviewedBy?.name || "Admin"}${
-                              row.reviewRemarks ? ` — ${row.reviewRemarks}` : ""
+                          : `${row.status === "approved" ? "Approved" : "Rejected"} by ${
+                              row.reviewedBy?.name || "Admin"
                             }`}
                       </span>
+                    )}
+                    {/* Only the remarks typed at the time of approving / rejecting. */}
+                    {row.status !== "pending" && row.reviewRemarks && (
+                      <p className="mt-1 text-[11px] italic text-muted-foreground">
+                        Remarks: {row.reviewRemarks}
+                      </p>
                     )}
                   </TableCell>
                 </TableRow>

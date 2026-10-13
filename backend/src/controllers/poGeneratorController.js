@@ -333,6 +333,14 @@ export const createPurchaseOrderGen = async (req, res) => {
     title: `PO ${voucherNo}`,
     summary: `${doc.supplierName} — ${totals.items.length} item(s), ${totals.totalQuantity} qty`,
     amount: totals.totalAmount,
+    requestRemarks: [
+      ...totals.items
+        .filter((it) => it.additionalInfo)
+        .map((it) => `${it.partNo || it.description}: ${it.additionalInfo}`),
+      doc.paymentTerms && `Payment terms: ${doc.paymentTerms}`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     payload: { voucherNo, supplierName: doc.supplierName },
     user: req.user,
   });

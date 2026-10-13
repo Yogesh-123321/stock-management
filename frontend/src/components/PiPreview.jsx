@@ -30,14 +30,14 @@ const taxLabel = (pi) => {
 
 const company = {
   name: "TECHNOTRENDZ INNOVATIVE SOLUTIONS PVT. LTD",
-  corporateOffice:
-    "Corporate Office : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004, INDIA",
-  registeredOffice:
-    "Regis. Office : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004",
   worksAddress:
     "Second Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
 };
+// The registered office and the works address are the same address on every
+// document we issue — derive one from the other so they can never drift apart.
+company.corporateOffice = `Corporate Office : ${company.worksAddress}`;
+company.registeredOffice = `Regis. Office : ${company.worksAddress}`;
 
 function BuyerDetails({ pi }) {
   return (
@@ -83,7 +83,7 @@ export default function PiPreview({ pi }) {
       <div className="border border-black">
         <header className="relative flex h-[92px] items-center border-b border-black px-3">
           <img src={logo} alt="Technotrendz Innovative Solutions" className="h-[54px] w-[54px] object-contain" />
-          <p className="ml-auto max-w-[455px] text-right text-[8px] font-bold">
+          <p className="ml-auto whitespace-nowrap pl-3 text-right text-[8px] font-bold">
             {company.corporateOffice}
           </p>
         </header>

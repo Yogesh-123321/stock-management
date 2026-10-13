@@ -7,9 +7,10 @@ import PIStep from "@/pages/receive/PIStep";
 import StockEntryStep from "@/pages/receive/StockEntryStep";
 import TaxInvoiceStep from "@/pages/receive/TaxInvoiceStep";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import { CheckCircle2, Clock, PauseCircle, Play, Trash2, Plus } from "lucide-react";
+import { CheckCircle2, Clock, MessageSquareText, PauseCircle, Play, Trash2, Plus } from "lucide-react";
 
 const STEPS = ["Vendor", "PO", "PI", "Stock entry", "Tax invoice"];
 const STEP_LABEL = { 1: "Vendor", 2: "Purchase order", 3: "Proforma invoice", 4: "Stock entry", 5: "Tax invoice" };
@@ -46,6 +47,9 @@ export default function ReceiveMaterial() {
   const [done, setDone] = useState(false);
   const [savedAndExited, setSavedAndExited] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Free-text remarks for this delivery, saved with "Save & exit" and shown
+  // on the saved delivery in the list.
+  const [notes, setNotes] = useState("");
 
   // Whichever of PO/PI anchors this delivery for stock entry + tax invoice.
   const primaryDoc = purchaseOrderDoc || proformaInvoiceDoc;
@@ -81,6 +85,7 @@ export default function ReceiveMaterial() {
     setPurchaseOrderDoc(null);
     setProformaInvoiceDoc(null);
     setStockEntryDone(false);
+    setNotes("");
     setDone(false);
     setSavedAndExited(false);
   };
@@ -115,7 +120,7 @@ export default function ReceiveMaterial() {
 
   const handleSaveAndExit = async () => {
     setSaving(true);
-    await persist({ currentStep: step, status: "in_progress" });
+    await persist({ currentStep: step, status: "in_progress", notes: notes.trim() });
     setSaving(false);
     setSavedAndExited(true);
     toast.success(`Saved at “${STEP_LABEL[step]}” — you can pick this up any day`);
@@ -129,6 +134,7 @@ export default function ReceiveMaterial() {
     setProformaInvoiceDoc(s.proformaInvoiceDoc || null);
     setStockEntryDone(!!s.stockEntryDone);
     setStockQuantity(s.stockQuantity || 0);
+    setNotes(s.notes || "");
     setStep(Math.min(s.currentStep || 2, 5));
     setDone(false);
     setSavedAndExited(false);
@@ -220,6 +226,12 @@ export default function ReceiveMaterial() {
                           {s.proformaInvoiceDoc ? `PI ${s.proformaInvoiceDoc.documentNumber || "attached"}` : "No PI"} ·{" "}
                           {s.stockEntryDone ? "Stock entered" : "Stock pending"}
                         </p>
+                        {s.notes && (
+                          <p className="mt-1.5 flex items-start gap-1.5 rounded bg-muted/50 px-2 py-1 text-xs text-foreground/80">
+                            <MessageSquareText className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                            <span className="whitespace-pre-wrap break-words">{s.notes}</span>
+                          </p>
+                        )}
                       </div>
                       <div className="flex gap-2 shrink-0">
                         <Button size="sm" onClick={() => resumeSession(s)}>
@@ -245,6 +257,12 @@ export default function ReceiveMaterial() {
             This delivery for {vendor?.companyName} is parked at “{STEP_LABEL[step]}”. It will be waiting under
             “Deliveries in progress” whenever the next document arrives.
           </p>
+          {notes.trim() && (
+            <p className="mx-auto max-w-md whitespace-pre-wrap break-words rounded bg-muted/50 px-3 py-2 text-left text-xs text-foreground/80">
+              <span className="font-medium">Remarks: </span>
+              {notes.trim()}
+            </p>
+          )}
           <Button onClick={backToList}>Back to deliveries</Button>
         </div>
       ) : done ? (
@@ -334,7 +352,22 @@ export default function ReceiveMaterial() {
 
           {/* Save & exit is available on every step of the wizard. Work already
               completed on earlier steps is kept; the delivery resumes here. */}
-          <div className="mt-4 flex items-center justify-between gap-4 rounded-md border border-dashed border-border p-4">
+          <div className="mt-4 space-y-3 rounded-md border border-dashed border-border p-4">
+            <div>
+              <label htmlFor="delivery-remarks" className="mb-1 block text-xs font-medium">
+                Remarks <span className="font-normal text-muted-foreground">(optional — saved with “Save &amp; exit”)</span>
+              </label>
+              <Textarea
+                id="delivery-remarks"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                disabled={!sessionId}
+                placeholder="e.g. 2 boxes short, waiting for the tax invoice from accounts, packing damaged…"
+              />
+            </div>
+          <div className="flex items-center justify-between gap-4">
             <p className="text-xs text-muted-foreground">
               {sessionId
                 ? `Documents can arrive on different days — park this delivery at “${STEP_LABEL[step]}” and continue later.`
@@ -349,6 +382,7 @@ export default function ReceiveMaterial() {
                 {saving ? "Saving…" : "Save & exit"}
               </Button>
             </div>
+          </div>
           </div>
         </>
       )}

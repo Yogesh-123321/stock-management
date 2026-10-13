@@ -20,6 +20,7 @@ export async function requestDocumentApproval({
   summary = "",
   amount = null,
   payload = {},
+  requestRemarks = "",
   user,
 }) {
   const meta = META[entityType];
@@ -36,6 +37,7 @@ export async function requestDocumentApproval({
     summary,
     amount: amount == null ? null : Number(amount),
     payload,
+    requestRemarks,
     requestedBy: user?._id || null,
   });
 
@@ -65,6 +67,7 @@ export async function createDocumentApproval({
   summary = "",
   amount = null,
   payload = {},
+  requestRemarks = "",
 }) {
   const entityType = String(docType || "").toLowerCase();
   const label = entityType === "po" ? "PO" : entityType === "pi" ? "PI" : docType;
@@ -76,6 +79,7 @@ export async function createDocumentApproval({
     summary,
     amount,
     payload: { ...payload, refNo },
+    requestRemarks,
     user: requestedBy,
   });
 }

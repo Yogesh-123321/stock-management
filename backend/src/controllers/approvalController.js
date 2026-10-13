@@ -3,7 +3,9 @@ import ApprovalRequest from "../models/ApprovalRequest.js";
 import { notifyApprovers, notifyRequester } from "../utils/notify.js";
 import { effectivePermissions } from "../config/permissions.js";
 import { mirrorGeneratedPoToReceiving } from "./poGeneratorController.js";
-import { applyPartyDecision } from "../utils/partyApproval.js";
+import { applyPartyDecision, backfillPartyApprovals } from "../utils/partyApproval.js";
+import PurchaseOrderGen from "../models/PurchaseOrderGen.js";
+import ProformaInvoiceGen from "../models/ProformaInvoiceGen.js";
 
 const ENTITY = {
   po: { label: "Purchase order", permission: "po.approve", model: "PurchaseOrderGen", link: "/approvals" },
@@ -92,9 +94,68 @@ export const createApproval = async (req, res) => {
   }
 };
 
+const sumQty = (items = []) => items.reduce((n, it) => n + (Number(it.quantity) || 0), 0);
+
+/**
+ * Fill in what the approvals table needs straight from the PO / PI being
+ * approved — amount, a one-line summary, the remarks and a few headline
+ * numbers. Requests raised before these were captured at request time (the
+ * PI one never carried an amount or remarks) get them too, because the
+ * source document is always the authority.
+ */
+async function enrichRows(rows) {
+  const poIds = rows.filter((r) => r.entityType === "po").map((r) => r.entityId);
+  const piIds = rows.filter((r) => r.entityType === "pi").map((r) => r.entityId);
+  const [pos, pis] = await Promise.all([
+    poIds.length ? PurchaseOrderGen.find({ _id: { $in: poIds } }).lean() : [],
+    piIds.length ? ProformaInvoiceGen.find({ _id: { $in: piIds } }).lean() : [],
+  ]);
+  const poMap = new Map(pos.map((d) => [String(d._id), d]));
+  const piMap = new Map(pis.map((d) => [String(d._id), d]));
+
+  return rows.map((row) => {
+    const out = row.toObject();
+    const src = (row.entityType === "po" ? poMap : row.entityType === "pi" ? piMap : null)?.get(
+      String(row.entityId)
+    );
+    if (!src) return out;
+
+    const qty = sumQty(src.items);
+    const party = row.entityType === "po" ? src.supplierName : src.buyerName;
+    const lineRemarks =
+      row.entityType === "po"
+        ? (src.items || [])
+            .filter((it) => it.additionalInfo)
+            .map((it) => `${it.partNo || it.description}: ${it.additionalInfo}`)
+        : [];
+    const remarks = [
+      ...(row.entityType === "pi" ? [src.specialNote] : []),
+      ...lineRemarks,
+      src.paymentTerms && `Payment terms: ${src.paymentTerms}`,
+    ].filter(Boolean);
+
+    out.amount = Number(out.amount) > 0 ? out.amount : src.totalAmount ?? null;
+    out.summary = out.summary || `${party || "—"} — ${(src.items || []).length} item(s), ${qty} qty`;
+    out.requestRemarks = out.requestRemarks || remarks.join(" · ");
+    out.details = {
+      party: party || "",
+      itemCount: (src.items || []).length,
+      totalQty: qty,
+      subTotal: src.subTotal ?? null,
+      taxAmount: src.taxAmount ?? null,
+      totalAmount: src.totalAmount ?? null,
+    };
+    return out;
+  });
+}
+
 /** GET /api/approvals?status=pending&entityType=po&scope=all|mine */
 export const listApprovals = async (req, res) => {
   try {
+    // Vendors / buyers registered before the approval screen covered them
+    // get an approval row (once per server start), so they show up here.
+    await backfillPartyApprovals();
+
     const { status = "pending", entityType, scope } = req.query;
     const filter = {};
     if (status && status !== "all") {
@@ -116,13 +177,13 @@ export const listApprovals = async (req, res) => {
       filter.$or = [{ entityType: { $in: approverOf } }, { requestedBy: req.user._id }];
     }
 
-    const items = await ApprovalRequest.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(200)
+    const rows = await ApprovalRequest.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(500)
       .populate("requestedBy", "name username")
       .populate("reviewedBy", "name username");
 
-    res.json({ items, canApprove: approverOf });
+    res.json({ items: await enrichRows(rows), canApprove: approverOf });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

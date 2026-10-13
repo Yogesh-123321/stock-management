@@ -9,12 +9,14 @@ const LOGO_PATH = path.join(__dirname, "..", "assets", "tispl-logo.jpeg");
 
 const COMPANY = {
   name: "TECHNOTRENDZ INNOVATIVE SOLUTIONS PVT. LTD",
-  corporateOffice: "Corporate Office : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004, INDIA",
-  registeredOffice: "Regis. Office : Plot No- 43, Ground Floor, Sector-58, Faridabad, Haryana-121004",
   worksAddress:
     "Works Address: \nSecond Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
 };
+// The registered office and the works address are the same address on every
+// document we issue — derive one from the other so they can never drift apart.
+COMPANY.corporateOffice = `Corporate Office : ${COMPANY.worksAddress.replace(/^Works Address:\s*/, "")}`;
+COMPANY.registeredOffice = `Regis. Office : ${COMPANY.worksAddress.replace(/^Works Address:\s*/, "")}`;
 
 const BORDER = { style: "thin", color: { argb: "FF000000" } };
 const BOX = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
@@ -140,8 +142,9 @@ export async function generatePiWorkbook(pi) {
   // --- Header box: logo + corporate office address ---------------------
   ws.mergeCells(`A${r}:L${r + 3}`);
   style(ws.getCell(`A${r}`), {
-    font: { size: 11, bold: true },
-    align: { horizontal: "right", vertical: "bottom", wrapText: true },
+    font: { size: 9, bold: true },
+    // One single line: the full address must not wrap onto a second line.
+    align: { horizontal: "right", vertical: "bottom", wrapText: false },
   });
   ws.getCell(`A${r}`).value = COMPANY.corporateOffice;
   ws.getRow(r).height = 20;

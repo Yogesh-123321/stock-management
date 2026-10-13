@@ -49,6 +49,117 @@ const PARTY_DOCS = [
   ["MSME certificate", "msmeDocumentUrl"],
 ];
 
+const money = (n) =>
+  n == null ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const day = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
+
+/**
+ * Plain-text summary of a PO / PI shown above the printable preview, so the
+ * approver can read who it is for, every line, the amounts and the remarks
+ * without scanning the formatted sheet.
+ */
+function DocSummary({ doc, type }) {
+  const isPo = type === "po";
+  const items = doc.items || [];
+  const party = isPo
+    ? [doc.supplierName, doc.supplierGSTIN && `GSTIN ${doc.supplierGSTIN}`]
+    : [doc.buyerName, doc.buyerGSTIN && `GSTIN ${doc.buyerGSTIN}`, doc.buyerContact, doc.buyerEmail];
+  const remarks = [
+    !isPo && doc.specialNote && ["Special note", doc.specialNote],
+    doc.paymentTerms && ["Payment terms", doc.paymentTerms],
+    isPo && doc.termsOfDelivery && ["Terms of delivery", doc.termsOfDelivery],
+    isPo && doc.referenceNo && ["Reference no.", doc.referenceNo],
+    !isPo && doc.bankDetails && ["Bank details", doc.bankDetails],
+  ].filter(Boolean);
+
+  return (
+    <div className="mb-4 space-y-3 rounded-md bg-card p-4 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            {isPo ? "Supplier" : "Buyer"}
+          </p>
+          <p className="font-medium">{party.filter(Boolean).join(" · ") || "—"}</p>
+          {(isPo ? doc.supplierAddress : doc.buyerAddress) && (
+            <p className="whitespace-pre-line text-xs text-muted-foreground">
+              {isPo ? doc.supplierAddress : doc.buyerAddress}
+            </p>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            {isPo ? "Voucher no." : "Invoice no."}
+          </p>
+          <p className="font-medium">{isPo ? doc.voucherNo : doc.invoiceNo}</p>
+          <p className="text-xs text-muted-foreground">{day(isPo ? doc.voucherDate : doc.invoiceDate)}</p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border text-left text-muted-foreground">
+              <th className="py-1 pr-2 font-medium">#</th>
+              <th className="py-1 pr-2 font-medium">Description</th>
+              <th className="py-1 pr-2 font-medium">HSN/SAC</th>
+              <th className="py-1 pr-2 text-right font-medium">Qty</th>
+              <th className="py-1 pr-2 text-right font-medium">Rate</th>
+              <th className="py-1 text-right font-medium">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => (
+              <tr key={i} className="border-b border-border/50 align-top">
+                <td className="py-1 pr-2">{i + 1}</td>
+                <td className="py-1 pr-2">
+                  {it.description}
+                  {isPo && it.partNo && (
+                    <span className="block text-[10px] text-muted-foreground">Part no. {it.partNo}</span>
+                  )}
+                  {isPo && it.additionalInfo && (
+                    <span className="block text-[10px] italic text-muted-foreground">
+                      Remarks: {it.additionalInfo}
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-2">{it.hsnSac || "—"}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {it.quantity}
+                  {isPo && it.unit ? ` ${it.unit}` : ""}
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{money(it.rate)}</td>
+                <td className="py-1 text-right tabular-nums">{money(it.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="ml-auto w-full max-w-[260px] space-y-0.5 text-xs">
+        <div className="flex justify-between"><span className="text-muted-foreground">Sub-total</span><span className="tabular-nums">₹{money(doc.subTotal)}</span></div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Tax{doc.taxType && doc.taxType !== "NONE" ? ` (${doc.taxType.replace("_", "+")} @ ${doc.taxRate}%)` : ""}</span>
+          <span className="tabular-nums">₹{money(doc.taxAmount)}</span>
+        </div>
+        <div className="flex justify-between border-t border-border pt-1 text-sm font-semibold">
+          <span>Total</span><span className="tabular-nums">₹{money(doc.totalAmount)}</span>
+        </div>
+      </div>
+
+      {remarks.length > 0 && (
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 border-t border-border pt-3 sm:grid-cols-2">
+          {remarks.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+              <dd className="whitespace-pre-line break-words">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 function PartyDetails({ party, type }) {
   const docs = PARTY_DOCS.filter(([, key]) => party[key]);
   return (
@@ -166,6 +277,9 @@ export default function ApprovalPreviewDialog({
             <p className="py-16 text-center text-sm text-destructive">{error}</p>
           )}
 
+          {!loading && !error && doc && (type === "po" || type === "pi") && (
+            <DocSummary doc={doc} type={type} />
+          )}
           {!loading && !error && doc && type === "po" && <PoPreview po={doc} />}
           {!loading && !error && doc && type === "pi" && <PiPreview pi={doc} />}
           {!loading && !error && doc && (type === "vendor" || type === "buyer") && (
