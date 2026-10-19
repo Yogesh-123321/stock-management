@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { RefreshCw, Banknote, Eye, Search, Wallet } from "lucide-react";
+import { RefreshCw, Banknote, Eye, Search, Wallet, FileBarChart } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -33,6 +33,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import InvoicePreviewDialog from "@/components/InvoicePreviewDialog";
+import BillingReport from "@/components/BillingReport";
 
 // Keep in step with PAYMENT_METHODS in backend/src/models/TaxInvoice.js.
 const PAYMENT_METHODS = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque", "Card", "Other", "Cash purchase"];
@@ -44,6 +45,8 @@ const TABS = [
   { key: "all", label: "All" },
 ];
 
+const inr = (n) =>
+  `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const todayInput = () => new Date().toISOString().slice(0, 10);
 const errMsg = (err, fallback) => err?.response?.data?.message || fallback;
@@ -106,6 +109,11 @@ function PayDialog({ invoice, onClose, onPaid }) {
             {invoice?.vendor?.companyName || "Vendor"} · invoice {invoice?.invoiceNumber || "—"}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex items-center justify-between rounded-md border border-border bg-secondary/50 px-3 py-2">
+          <span className="text-xs text-muted-foreground">Amount to pay</span>
+          <span className="text-base font-semibold tabular-nums">{inr(invoice?.amount)}</span>
+        </div>
 
         <form onSubmit={submit} className="space-y-3">
           <div className="space-y-1">
@@ -213,6 +221,14 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview }) {
                 Paid
               </span>
             </DetailRow>
+            <DetailRow label="Amount paid">
+              <span className="font-semibold tabular-nums">{inr(invoice.amount)}</span>
+              {invoice.gstTotal > 0 && (
+                <span className="block text-[11px] text-muted-foreground">
+                  Taxable {inr(invoice.paymentAmount)} + GST {inr(invoice.gstTotal)}
+                </span>
+              )}
+            </DetailRow>
             <DetailRow label="Payment method">{payment?.method || "—"}</DetailRow>
             <DetailRow label="UTR number">
               {cash ? (
@@ -257,10 +273,16 @@ export default function Payments() {
   const { can } = useAuth();
   const allowed = can("payment.pay");
 
+  const [view, setView] = useState("invoices"); // "invoices" | "report"
   const [tab, setTab] = useState("unpaid");
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([]);
   const [counts, setCounts] = useState({ unpaid: 0, paid: 0, all: 0 });
+  const [amounts, setAmounts] = useState({ unpaid: 0, paid: 0, all: 0 });
+  const [listedTotal, setListedTotal] = useState(0);
+  const [amountsPending, setAmountsPending] = useState(0);
+  const [backfill, setBackfill] = useState(null);
+  const [retrying, setRetrying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [payInvoice, setPayInvoice] = useState(null);
   const [previewInvoice, setPreviewInvoice] = useState(null);
@@ -273,6 +295,10 @@ export default function Payments() {
       const { data } = await api.get("/billing", { params: { status: tab, search: search.trim() } });
       setItems(data.items || []);
       setCounts(data.counts || { unpaid: 0, paid: 0, all: 0 });
+      setAmounts(data.amounts || { unpaid: 0, paid: 0, all: 0 });
+      setListedTotal(data.listedTotal || 0);
+      setAmountsPending(data.amountsPending || 0);
+      setBackfill(data.backfill || null);
     } catch (err) {
       toast.error(errMsg(err, "Could not load invoices"));
     } finally {
@@ -285,6 +311,27 @@ export default function Payments() {
     const id = setTimeout(load, 250);
     return () => clearTimeout(id);
   }, [load]);
+
+  // While ₹0 invoices are being read from their PDFs in the background, quietly
+  // re-load every 20s so the amounts appear without pressing Refresh.
+  useEffect(() => {
+    if (!allowed || view !== "invoices" || amountsPending <= 0) return undefined;
+    const id = setTimeout(load, 20000);
+    return () => clearTimeout(id);
+  }, [allowed, view, amountsPending, load]);
+
+  const retryBackfill = async () => {
+    setRetrying(true);
+    try {
+      await api.post("/billing/backfill-amounts");
+      toast.success("Reading started again");
+      load();
+    } catch (err) {
+      toast.error(errMsg(err, "Could not restart the reading"));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   if (!allowed) {
     return (
@@ -313,12 +360,54 @@ export default function Payments() {
               details.
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={view === "report" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setView(view === "report" ? "invoices" : "report")}
+            >
+              <FileBarChart className="mr-1.5 h-3.5 w-3.5" />
+              {view === "report" ? "Back to invoices" : "Custom report"}
+            </Button>
+            {view === "invoices" && (
+              <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+                <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
+              </Button>
+            )}
+          </div>
         </CardHeader>
 
+        {view === "invoices" && (
         <CardContent className="space-y-3">
+          {amountsPending > 0 && (
+            <div className="space-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p>
+                {amountsPending} invoice{amountsPending === 1 ? "" : "s"} still show ₹0.00. Their
+                amount is read from the PDF once and saved.
+                {backfill?.running && !backfill?.paused
+                  ? ` Reading now… ${backfill.read} done so far (${backfill.saved} with an amount).`
+                  : ""}
+              </p>
+              {(backfill?.paused || backfill?.lastError || backfill?.failedCount > 0) && (
+                <p>
+                  {backfill.paused ? "Reading is paused: " : "Last problem: "}
+                  <span className="font-medium">{backfill.lastError || "see the server log"}</span>
+                  {backfill.failedCount > 0 && ` · ${backfill.failedCount} file(s) could not be read`}
+                </p>
+              )}
+              {!backfill?.running && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={retryBackfill}
+                  disabled={retrying}
+                >
+                  {retrying ? "Starting…" : "Read amounts now"}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-1 rounded-md bg-secondary p-0.5">
               {TABS.map((t) => (
@@ -335,7 +424,7 @@ export default function Payments() {
                 >
                   {t.label}
                   <span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
-                    {counts[t.key] ?? 0}
+                    {counts[t.key] ?? 0} · {inr(amounts[t.key])}
                   </span>
                 </button>
               ))}
@@ -358,13 +447,14 @@ export default function Payments() {
                 <TableHead className="w-[170px]">Invoice</TableHead>
                 <TableHead className="w-[150px]">PO / PI</TableHead>
                 <TableHead className="w-[110px]">Status</TableHead>
+                <TableHead className="w-[150px] text-right">Amount</TableHead>
                 <TableHead className="w-[230px]">Payment details</TableHead>
                 <TableHead className="w-[150px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 && (
-                <TableEmpty colSpan={6}>
+                <TableEmpty colSpan={7}>
                   {loading
                     ? "Loading…"
                     : tab === "unpaid"
@@ -431,6 +521,14 @@ export default function Payments() {
                         {paid ? "Paid" : "Unpaid"}
                       </span>
                     </TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">
+                      <p className="font-semibold">{inr(row.amount)}</p>
+                      {row.gstTotal > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          incl. GST {inr(row.gstTotal)}
+                        </p>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs">
                       {paid ? (
                         <>
@@ -484,10 +582,22 @@ export default function Payments() {
                   </TableRow>
                 );
               })}
+              {items.length > 0 && (
+                <TableRow className="bg-secondary/60 font-semibold hover:bg-secondary/60">
+                  <TableCell colSpan={4} className="text-right text-xs">
+                    Total ({items.length} shown)
+                  </TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">{inr(listedTotal)}</TableCell>
+                  <TableCell colSpan={2} />
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
+        )}
       </Card>
+
+      {view === "report" && <BillingReport />}
 
       <InvoicePreviewDialog
         invoice={previewInvoice}

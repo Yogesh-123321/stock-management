@@ -77,6 +77,12 @@ const taxInvoiceSchema = new mongoose.Schema(
     // is entered it defaults to totalBill.
     grandTotal: { type: Number, min: 0, default: null },
 
+    // Set once the amounts were read off the PDF by the billing back-fill (see
+    // utils/backfillInvoiceAmounts.js). Only invoices that had a 0 / empty amount
+    // are ever read, and only once — this marker stops a second attempt.
+    amountExtractedAt: { type: Date, default: null },
+    amountExtractionModel: { type: String, default: null },
+
     // Billing: every tax invoice uploaded at stock entry lands in the Billing
     // page as UNPAID and is marked paid there. Invoices saved before this
     // field existed have no payment.status at all — treat "not paid" as unpaid.
