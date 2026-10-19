@@ -12,6 +12,17 @@ const COMPANY = {
   worksAddress:
     "Works Address: \nSecond Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
+  udyam: "MSME Udyam Certificate No.: UDYAM-HR-03-0164580",
+};
+
+// Statutory MSME payment-term line printed on every PI under the Special Note.
+const MSME_NOTE = "Payment within 45 days as per MSME act";
+
+// Keeps whatever note the user typed and always adds the MSME line (once).
+const buildSpecialNote = (note) => {
+  const base = String(note || "").trim();
+  if (/45\s*days.*msme|msme.*45\s*days/i.test(base)) return base;
+  return base ? `${base}\n${MSME_NOTE}` : MSME_NOTE;
 };
 // The registered office and the works address are the same address on every
 // document we issue — derive one from the other so they can never drift apart.
@@ -189,10 +200,10 @@ export async function generatePiWorkbook(pi) {
   const rowB = r;
   const rowC = r + 1;
 
-  const specialNoteText = `Special Note :\n${hardWrap(pi.specialNote || "", HJ, 10.5)}`;
+  const specialNoteText = `Special Note :\n${hardWrap(buildSpecialNote(pi.specialNote), HJ, 10.5)}`;
   const paymentTermsText = `Mode/Terms of Payment :\n${hardWrap(pi.paymentTerms || "", KL, 10.5)}`;
   const registeredOfficeText = hardWrap(COMPANY.registeredOffice, AG, 11);
-  const worksAddressText = `${hardWrap(COMPANY.worksAddress, AG, 11)}\n${COMPANY.gstin}`;
+  const worksAddressText = `${hardWrap(COMPANY.worksAddress, AG, 11)}\n${COMPANY.gstin}\n${COMPANY.udyam}`;
 
   const regisLines = countLines(registeredOfficeText);
   const worksLines = countLines(worksAddressText);

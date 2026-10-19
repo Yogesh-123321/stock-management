@@ -12,6 +12,17 @@ const COMPANY = {
   worksAddress:
     "Second Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
+  udyam: "MSME Udyam Certificate No.: UDYAM-HR-03-0164580",
+};
+
+// Statutory MSME payment-term line printed on every PI under the Special Note.
+const MSME_NOTE = "Payment within 45 days as per MSME act";
+
+// Keeps whatever note the user typed and always adds the MSME line (once).
+const buildSpecialNote = (note) => {
+  const base = String(note || "").trim();
+  if (/45\s*days.*msme|msme.*45\s*days/i.test(base)) return base;
+  return base ? `${base}\n${MSME_NOTE}` : MSME_NOTE;
 };
 
 // The registered office and the works address are the same address on every
@@ -78,7 +89,7 @@ export function generatePiPdf(pi) {
     const H_HEADER = 60;
     const H_TITLE = 18;
     const H_INVOICE = 30;
-    const H_NOTES = 85;
+    const H_NOTES = 95;
     const H_BUYER = 95;
     const H_THEAD = 14;
     const H_TOTAL = 18;
@@ -159,9 +170,10 @@ export function generatePiPdf(pi) {
     put("Works Address:", bandLeft, y + 26, leftW, { size: 8 });
     put(COMPANY.worksAddress, bandLeft, y + 35, leftW, { size: 8 });
     put(COMPANY.gstin, bandLeft, y + 62, leftW, { size: 8 });
+    put(COMPANY.udyam, bandLeft, y + 74, leftW, { size: 8 });
 
     put("Special  Note :", bandMid, y, bandRight - bandMid, { size: 7 });
-    put(pi.specialNote || "", bandMid, y + 8, bandRight - bandMid, { size: 5.5, bold: false });
+    put(buildSpecialNote(pi.specialNote), bandMid, y + 8, bandRight - bandMid, { size: 5.5, bold: false });
 
     put("Mode/Terms of Payment :", bandRight, y, xEnd - bandRight, { size: 7.5 });
     put(pi.paymentTerms || "", bandRight, y + 9, xEnd - bandRight, { size: 7.5 });

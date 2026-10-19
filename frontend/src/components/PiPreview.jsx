@@ -33,6 +33,17 @@ const company = {
   worksAddress:
     "Second Floor, Plot No-101 (HUDA), Sector-59, HSIIDC Industrial Estate, Faridabad-121004, Haryana, India",
   gstin: "GSTIN/UIN: 06AANCT1097L1ZS",
+  udyam: "MSME Udyam Certificate No.: UDYAM-HR-03-0164580",
+};
+
+// Statutory MSME payment-term line, shown under the Special Note on every PI
+// (including older ones, since it is added at render time, not stored).
+const MSME_NOTE = "Payment within 45 days as per MSME act";
+
+const buildSpecialNote = (note) => {
+  const base = String(note || "").trim();
+  if (/45\s*days.*msme|msme.*45\s*days/i.test(base)) return base;
+  return base ? `${base}\n${MSME_NOTE}` : MSME_NOTE;
 };
 // The registered office and the works address are the same address on every
 // document we issue — derive one from the other so they can never drift apart.
@@ -106,6 +117,8 @@ export default function PiPreview({ pi }) {
               {company.worksAddress}
               <br />
               <strong>{company.gstin}</strong>
+              <br />
+              <strong>{company.udyam}</strong>
             </div>
             <div className="h-[119px] px-1 py-1.5">
               <BuyerDetails pi={pi} />
@@ -121,7 +134,7 @@ export default function PiPreview({ pi }) {
             <div className="h-[125px] border-b border-black px-1 py-2">
               <strong>Special Note :</strong>
               <br />
-              {pi.specialNote}
+              <span className="whitespace-pre-line">{buildSpecialNote(pi.specialNote)}</span>
             </div>
             <div className="h-[119px]" />
           </div>
