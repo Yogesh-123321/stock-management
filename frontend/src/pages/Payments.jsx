@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import InvoicePreviewDialog from "@/components/InvoicePreviewDialog";
 import BillingReport from "@/components/BillingReport";
+import { SortableHead, useSort } from "@/components/SortableHead";
 
 // Keep in step with PAYMENT_METHODS in backend/src/models/TaxInvoice.js.
 const PAYMENT_METHODS = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque", "Card", "Other", "Cash purchase"];
@@ -273,6 +274,7 @@ export default function Payments() {
   const { can } = useAuth();
   const allowed = can("payment.pay");
 
+  const { sort, toggle, apply } = useSort();
   const [view, setView] = useState("invoices"); // "invoices" | "report"
   const [tab, setTab] = useState("unpaid");
   const [search, setSearch] = useState("");
@@ -332,6 +334,20 @@ export default function Payments() {
       setRetrying(false);
     }
   };
+
+  // Sorting is done on the rows already loaded (up to 500), so it is instant
+  // and the same in the Unpaid, Paid and All tabs.
+  const sortedItems = apply(items, {
+    vendor: (r) => r.vendor?.companyName,
+    invoiceDate: (r) => {
+      const d = new Date(r.invoiceDate || r.createdAt);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    },
+    po: (r) => r.purchaseOrder?.documentNumber,
+    status: (r) => (isPaid(r) ? "Paid" : "Unpaid"),
+    amount: (r) => Number(r.amount) || 0,
+    paymentDate: (r) => (r.payment?.paymentDate ? new Date(r.payment.paymentDate).getTime() : null),
+  });
 
   if (!allowed) {
     return (
@@ -443,12 +459,12 @@ export default function Payments() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Vendor</TableHead>
-                <TableHead className="w-[170px]">Invoice</TableHead>
-                <TableHead className="w-[150px]">PO / PI</TableHead>
-                <TableHead className="w-[110px]">Status</TableHead>
-                <TableHead className="w-[150px] text-right">Amount</TableHead>
-                <TableHead className="w-[230px]">Payment details</TableHead>
+                <SortableHead label="Vendor" sortKey="vendor" sort={sort} onSort={toggle} />
+                <SortableHead label="Invoice" sortKey="invoiceDate" sort={sort} onSort={toggle} className="w-[170px]" />
+                <SortableHead label="PO / PI" sortKey="po" sort={sort} onSort={toggle} className="w-[150px]" />
+                <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="w-[110px]" />
+                <SortableHead label="Amount" sortKey="amount" sort={sort} onSort={toggle} align="right" className="w-[150px]" />
+                <SortableHead label="Payment details" sortKey="paymentDate" sort={sort} onSort={toggle} className="w-[230px]" />
                 <TableHead className="w-[150px]" />
               </TableRow>
             </TableHeader>
@@ -462,7 +478,7 @@ export default function Payments() {
                     : "No invoices here."}
                 </TableEmpty>
               )}
-              {items.map((row) => {
+              {sortedItems.map((row) => {
                 const paid = isPaid(row);
                 const cash = row.payment?.method === CASH_METHOD;
                 return (

@@ -4,6 +4,7 @@ import { Download, FileBarChart, RefreshCw, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -68,6 +69,8 @@ export default function BillingReport() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const detailSort = useSort();
+  const groupSort = useSort();
 
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
 
@@ -119,8 +122,23 @@ export default function BillingReport() {
   };
 
   const s = data?.summary;
-  const rows = data?.rows || [];
-  const groups = data?.groups || [];
+  const rows = detailSort.apply(data?.rows || [], {
+    vendor: (r) => r.vendor,
+    invoiceDate: (r) => (r.invoiceDate ? new Date(r.invoiceDate).getTime() : null),
+    po: (r) => r.poNumber,
+    status: (r) => r.status,
+    taxable: (r) => r.taxable,
+    gst: (r) => r.gst,
+    amount: (r) => r.amount,
+    paymentDate: (r) => (r.paymentDate ? new Date(r.paymentDate).getTime() : null),
+  });
+  const groups = groupSort.apply(data?.groups || [], {
+    key: (g) => g.key,
+    count: (g) => g.count,
+    amount: (g) => g.amount,
+    paidAmount: (g) => g.paidAmount,
+    unpaidAmount: (g) => g.unpaidAmount,
+  });
 
   return (
     <Card>
@@ -256,11 +274,11 @@ export default function BillingReport() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{GROUP_LABEL[data.groupBy]}</TableHead>
-                <TableHead className="w-[90px] text-right">Invoices</TableHead>
-                <TableHead className="w-[150px] text-right">Total</TableHead>
-                <TableHead className="w-[150px] text-right">Paid</TableHead>
-                <TableHead className="w-[150px] text-right">Unpaid</TableHead>
+                <SortableHead label={GROUP_LABEL[data.groupBy]} sortKey="key" sort={groupSort.sort} onSort={groupSort.toggle} />
+                <SortableHead label="Invoices" sortKey="count" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[90px]" />
+                <SortableHead label="Total" sortKey="amount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
+                <SortableHead label="Paid" sortKey="paidAmount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
+                <SortableHead label="Unpaid" sortKey="unpaidAmount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -285,14 +303,14 @@ export default function BillingReport() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Vendor</TableHead>
-              <TableHead className="w-[150px]">Invoice</TableHead>
-              <TableHead className="w-[110px]">PO / PI</TableHead>
-              <TableHead className="w-[90px]">Status</TableHead>
-              <TableHead className="w-[130px] text-right">Taxable</TableHead>
-              <TableHead className="w-[110px] text-right">GST</TableHead>
-              <TableHead className="w-[140px] text-right">Amount</TableHead>
-              <TableHead className="w-[190px]">Payment</TableHead>
+              <SortableHead label="Vendor" sortKey="vendor" sort={detailSort.sort} onSort={detailSort.toggle} />
+              <SortableHead label="Invoice" sortKey="invoiceDate" sort={detailSort.sort} onSort={detailSort.toggle} className="w-[150px]" />
+              <SortableHead label="PO / PI" sortKey="po" sort={detailSort.sort} onSort={detailSort.toggle} className="w-[110px]" />
+              <SortableHead label="Status" sortKey="status" sort={detailSort.sort} onSort={detailSort.toggle} className="w-[90px]" />
+              <SortableHead label="Taxable" sortKey="taxable" sort={detailSort.sort} onSort={detailSort.toggle} align="right" className="w-[130px]" />
+              <SortableHead label="GST" sortKey="gst" sort={detailSort.sort} onSort={detailSort.toggle} align="right" className="w-[110px]" />
+              <SortableHead label="Amount" sortKey="amount" sort={detailSort.sort} onSort={detailSort.toggle} align="right" className="w-[140px]" />
+              <SortableHead label="Payment" sortKey="paymentDate" sort={detailSort.sort} onSort={detailSort.toggle} className="w-[190px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
