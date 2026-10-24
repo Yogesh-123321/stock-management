@@ -6,6 +6,7 @@ import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
 import KitTemplate from "../models/KitTemplate.js";
 import User from "../models/User.js";
+import Vendor from "../models/Vendor.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
 import { getEmbeddings, cosineSimilarity, EmbeddingError } from "../utils/embeddings.js";
 import { notifyUsers } from "../utils/notify.js";
@@ -1153,6 +1154,674 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   );
   res.setHeader("Content-Disposition", `attachment; filename="stock-summary-${stamp}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+/*
+  Custom stock reports: `parts` is a comma-separated list of Part ids picked in
+  the dialog's part dropdown. Resolved to TT part numbers once, so every
+  movement (kit lines may have no Part ref) can be matched by part number.
+  Empty set = no part filter.
+*/
+async function resolvePartSet(raw) {
+  const ids = String(raw || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => mongoose.Types.ObjectId.isValid(x));
+  if (ids.length === 0) return new Set();
+  const found = await Part.find({ _id: { $in: ids } }).select("ttUniquePartNumber").lean();
+  return new Set(found.map((p) => p.ttUniquePartNumber));
+}
+
+/*
+  GET /api/parts/export/issued-stock-options — ADMIN ONLY.
+  Feeds the "Custom stock report" dialog: the vendors that have actually been
+  issued stock through issued kits, and the people that have actually been
+  issued R&D stock. Derived from the issue records themselves, so the pickers
+  never list someone with nothing to report.
+*/
+export const getIssuedStockReportOptions = asyncHandler(async (req, res) => {
+  const kitVendorIds = await KitIssue.distinct("vendor", { status: "issued", vendor: { $ne: null } });
+  const receivedVendorIds = await StockEntry.distinct("vendor", { vendor: { $ne: null } });
+  const vendorIds = [...new Set([...kitVendorIds, ...receivedVendorIds].map((id) => String(id)))];
+  const vendors = await Vendor.find({ _id: { $in: vendorIds } })
+    .select("companyName")
+    .sort({ companyName: 1 })
+    .lean();
+
+  const rndAgg = await Part.aggregate([
+    { $unwind: "$rndIssues" },
+    {
+      $group: {
+        _id: { person: "$rndIssues.person", name: "$rndIssues.personName" },
+      },
+    },
+  ]);
+  const seen = new Map();
+  for (const r of rndAgg) {
+    const key = r._id.person ? String(r._id.person) : `name:${r._id.name}`;
+    if (!seen.has(key)) seen.set(key, { _id: key, name: r._id.name });
+  }
+  const people = [...seen.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  res.json({
+    vendors: vendors.map((v) => ({ _id: String(v._id), name: v.companyName })),
+    people,
+  });
+});
+
+/*
+  GET /api/parts/export/stock-movement-xlsx — ADMIN ONLY.
+  Complete stock history ("who gave us what, when, and where did it go"):
+  every movement of every part on one chronological ledger —
+    received      material booked in from a vendor (PO/PI, tax invoice, batch)
+    iqc_approved  inspected OK -> credited to main stock
+    iqc_rejected  failed IQC -> held aside, never counted (with the reason)
+    rnd_issued    issued to an R&D person
+    kit_issued    issued to a vendor in a kit (with the FIFO batch(es) used)
+  Query: types=received,iqc_approved,... (default all) · vendor=<id> ·
+  person=<userId | name:..> · from/to=YYYY-MM-DD · search=<text>.
+  A vendor filter keeps that vendor's receipts and kit issues; a person filter
+  keeps that person's R&D issues; with both set, the two are combined.
+  Extra sheets: "Receipts (lot trace)" — one row per received line with its
+  current status and the kits that drew from its batch — and a part-wise
+  summary of the same (filtered) movements.
+*/
+const MOVEMENT_TYPES = {
+  received: { label: "Received from vendor", effect: "Incoming (booked in)" },
+  iqc_approved: { label: "IQC approved → main stock", effect: "Credited to main stock" },
+  iqc_rejected: { label: "IQC rejected", effect: "Held aside (not counted)" },
+  rnd_issued: { label: "Issued to R&D", effect: "Out — to R&D person" },
+  kit_issued: { label: "Issued in kit to vendor", effect: "Out — kit to vendor" },
+};
+const IQC_STATUS_LABEL = {
+  awaiting_invoice: "Awaiting tax invoice",
+  in_iqc_stock: "In IQC stock (awaiting inspection)",
+  accepted: "Accepted — in main stock",
+  rejected: "Rejected in IQC",
+};
+
+export const exportStockMovementXlsx = asyncHandler(async (req, res) => {
+  const wanted = new Set(
+    String(req.query.types || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => MOVEMENT_TYPES[t])
+  );
+  if (wanted.size === 0) Object.keys(MOVEMENT_TYPES).forEach((t) => wanted.add(t));
+
+  const vendorId = req.query.vendor ? String(req.query.vendor) : "";
+  const personKey = req.query.person ? String(req.query.person) : "";
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const partSet = await resolvePartSet(req.query.parts);
+  let fromDate = null;
+  let toDate = null;
+  if (req.query.from) {
+    const d = new Date(`${req.query.from}T00:00:00.000`);
+    if (!Number.isNaN(d.getTime())) fromDate = d;
+  }
+  if (req.query.to) {
+    const d = new Date(`${req.query.to}T23:59:59.999`);
+    if (!Number.isNaN(d.getTime())) toDate = d;
+  }
+  const inRange = (dt) => {
+    if (!fromDate && !toDate) return true;
+    if (!dt) return false;
+    const t = new Date(dt).getTime();
+    if (fromDate && t < fromDate.getTime()) return false;
+    if (toDate && t > toDate.getTime()) return false;
+    return true;
+  };
+  const matchesSearch = (pn, desc) =>
+    (partSet.size === 0 || partSet.has(pn)) &&
+    (!search || `${pn || ""} ${desc || ""}`.toLowerCase().includes(search));
+  const fmt = (dt) => (dt ? new Date(dt).toISOString().slice(0, 16).replace("T", " ") : "");
+
+  // Vendor / person filter semantics (see header comment).
+  const hasVendorFilter = !!vendorId;
+  const hasPersonFilter = !!personKey;
+  const vendorOk = (id) => !hasVendorFilter || String(id || "") === vendorId;
+  const personOk = (key) => !hasPersonFilter || key === personKey;
+  const vendorEventsAllowed = hasVendorFilter || !hasPersonFilter;
+  const rndEventsAllowed = hasPersonFilter || !hasVendorFilter;
+
+  const events = []; // normalized ledger rows
+  const lots = []; // one row per received stock line
+
+  // ---- Receipts, IQC outcomes, kit batch usage lookup ----
+  const kitIssues = await KitIssue.find({ status: "issued" })
+    .populate("vendor", "companyName")
+    .sort({ createdAt: 1 })
+    .lean();
+  const batchUse = new Map(); // `${partId|pn}|${batch}` -> ["Kit 1 → Vendor: 5", ...]
+  for (const iss of kitIssues) {
+    for (const line of iss.lines || []) {
+      if (!(line.qtyIssued > 0)) continue;
+      const pnKey = line.ttUniquePartNumber || String(line.part || "");
+      for (const b of line.batchBreakdown || []) {
+        if (!(b.quantity > 0)) continue;
+        const k = `${pnKey}|${b.batchCode || ""}`;
+        if (!batchUse.has(k)) batchUse.set(k, []);
+        batchUse
+          .get(k)
+          .push(`${iss.issueCode || iss.kitName} → ${iss.vendor?.companyName || "—"}: ${b.quantity}`);
+      }
+    }
+  }
+
+  const stockEntries = await StockEntry.find({})
+    .populate("vendor", "companyName")
+    .populate("purchaseOrder", "documentType documentNumber")
+    .populate("appliedVia", "invoiceNumber")
+    .populate("part", "ttUniquePartNumber itemDescription unit")
+    .sort({ createdAt: 1 })
+    .lean();
+
+  if (vendorEventsAllowed) {
+    for (const e of stockEntries) {
+      const pn = e.part?.ttUniquePartNumber || "";
+      const desc = e.part?.itemDescription || "";
+      if (!matchesSearch(pn, desc)) continue;
+      if (!vendorOk(e.vendor?._id)) continue;
+
+      const vName = e.vendor?.companyName || "—";
+      const poRef = e.purchaseOrder
+        ? `${e.purchaseOrder.documentType || "PO/PI"} ${e.purchaseOrder.documentNumber || ""}`.trim()
+        : "";
+      const invRef = e.appliedVia?.invoiceNumber ? `Tax invoice ${e.appliedVia.invoiceNumber}` : "";
+      const docRef = [poRef, invRef].filter(Boolean).join(" · ");
+      const rep = e.iqcReport || {};
+      const iqcDate = rep.inspectedAt || e.appliedAt || e.updatedAt;
+
+      if (wanted.has("received") && inRange(e.createdAt)) {
+        events.push({
+          date: e.createdAt, type: "received", pn, desc, unit: e.unit || e.part?.unit || "",
+          party: vName, ref: docRef, batch: e.batchCode || "", qty: e.quantityReceived,
+          status: IQC_STATUS_LABEL[e.iqcStatus] || "", by: e.enteredBy || "", note: e.remarks || "",
+        });
+      }
+      if (e.iqcStatus === "accepted" && wanted.has("iqc_approved") && inRange(iqcDate)) {
+        events.push({
+          date: iqcDate, type: "iqc_approved", pn, desc, unit: e.unit || e.part?.unit || "",
+          party: vName, ref: docRef, batch: e.batchCode || "", qty: e.quantityReceived,
+          status: IQC_STATUS_LABEL.accepted, by: rep.inspectedBy || "",
+          note:
+            rep.originalQuantity != null && rep.originalQuantity !== e.quantityReceived
+              ? `Approved ${e.quantityReceived} of ${rep.originalQuantity} received`
+              : "",
+        });
+      }
+      if (e.iqcStatus === "rejected" && wanted.has("iqc_rejected") && inRange(iqcDate)) {
+        events.push({
+          date: iqcDate, type: "iqc_rejected", pn, desc, unit: e.unit || e.part?.unit || "",
+          party: vName, ref: docRef, batch: e.batchCode || "", qty: e.quantityReceived,
+          status: IQC_STATUS_LABEL.rejected, by: rep.inspectedBy || "",
+          note: rep.rejectionReason ? `Reason: ${rep.rejectionReason}` : "",
+        });
+      }
+
+      if (inRange(e.createdAt) || inRange(iqcDate)) {
+        lots.push({
+          date: e.createdAt, vendor: vName, po: poRef, invoice: e.appliedVia?.invoiceNumber || "",
+          batch: e.batchCode || "", pn, desc, qty: e.quantityReceived,
+          unit: e.unit || e.part?.unit || "", rate: e.price ?? "",
+          status: IQC_STATUS_LABEL[e.iqcStatus] || "",
+          iqcBy: rep.inspectedBy || "", iqcAt: e.iqcStatus === "accepted" || e.iqcStatus === "rejected" ? iqcDate : null,
+          reason: rep.rejectionReason || "", enteredBy: e.enteredBy || "",
+          kits: (batchUse.get(`${pn}|${e.batchCode || ""}`) || []).join("; "),
+        });
+      }
+    }
+  }
+
+  // ---- Kits issued to vendors ----
+  if (vendorEventsAllowed && wanted.has("kit_issued")) {
+    for (const iss of kitIssues) {
+      if (!inRange(iss.createdAt)) continue;
+      if (!vendorOk(iss.vendor?._id)) continue;
+      for (const line of iss.lines || []) {
+        if (!(line.qtyIssued > 0)) continue;
+        if (!matchesSearch(line.ttUniquePartNumber, line.itemDescription)) continue;
+        events.push({
+          date: iss.createdAt, type: "kit_issued", pn: line.ttUniquePartNumber || "",
+          desc: line.itemDescription || "", unit: "", party: iss.vendor?.companyName || "—",
+          ref: `Kit issue ${iss.issueCode || iss.kitName}`,
+          batch: (line.batchBreakdown || [])
+            .filter((b) => b.quantity > 0)
+            .map((b) => `${b.batchCode || "no batch"}: ${b.quantity}`)
+            .join(", "),
+          qty: line.qtyIssued, status: line.qtyShort > 0 ? `Short by ${line.qtyShort}` : "",
+          by: iss.issuedBy || "", note: iss.remarks || "",
+        });
+      }
+    }
+  }
+
+  // ---- R&D issues ----
+  if (rndEventsAllowed && wanted.has("rnd_issued")) {
+    const rndParts = await Part.find({ "rndIssues.0": { $exists: true } })
+      .select("ttUniquePartNumber itemDescription unit rndIssues")
+      .lean();
+    for (const p of rndParts) {
+      if (!matchesSearch(p.ttUniquePartNumber, p.itemDescription)) continue;
+      for (const r of p.rndIssues || []) {
+        const key = r.person ? String(r.person) : `name:${r.personName}`;
+        if (!personOk(key)) continue;
+        if (!inRange(r.date)) continue;
+        events.push({
+          date: r.date, type: "rnd_issued", pn: p.ttUniquePartNumber, desc: p.itemDescription,
+          unit: p.unit || "", party: r.personName || "", ref: "R&D issue", batch: "",
+          qty: r.quantity, status: "", by: r.issuedBy || "", note: r.remarks || "",
+        });
+      }
+    }
+  }
+
+  events.sort((a, b) => new Date(a.date) - new Date(b.date));
+  lots.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // ---------------- workbook ----------------
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stock management";
+  const head = (ws) => {
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
+  };
+  const FILL = {
+    received: "FFEAF2FB", iqc_approved: "FFE6F4EA", iqc_rejected: "FFFCE8E6",
+    rnd_issued: "FFFFF4E0", kit_issued: "FFF1E8FA",
+  };
+
+  const led = wb.addWorksheet("Stock movement", { views: [{ state: "frozen", ySplit: 1 }] });
+  led.columns = [
+    { header: "Date", key: "date", width: 17 },
+    { header: "TT part number", key: "pn", width: 20 },
+    { header: "Item description", key: "desc", width: 40 },
+    { header: "Movement", key: "move", width: 28 },
+    { header: "Vendor / Person", key: "party", width: 28 },
+    { header: "Document / reference", key: "ref", width: 34 },
+    { header: "Batch (WW/YY)", key: "batch", width: 18 },
+    { header: "Qty", key: "qty", width: 10 },
+    { header: "Unit", key: "unit", width: 7 },
+    { header: "Effect on stock", key: "effect", width: 26 },
+    { header: "Status", key: "status", width: 30 },
+    { header: "Done by", key: "by", width: 18 },
+    { header: "Remarks / reason", key: "note", width: 36 },
+  ];
+  for (const ev of events) {
+    const row = led.addRow({
+      date: fmt(ev.date), pn: ev.pn, desc: ev.desc, move: MOVEMENT_TYPES[ev.type].label,
+      party: ev.party, ref: ev.ref, batch: ev.batch, qty: ev.qty, unit: ev.unit,
+      effect: MOVEMENT_TYPES[ev.type].effect, status: ev.status, by: ev.by, note: ev.note,
+    });
+    row.getCell("move").fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL[ev.type] } };
+  }
+  head(led);
+  led.getColumn("qty").alignment = { horizontal: "right" };
+  if (events.length > 0) led.autoFilter = { from: "A1", to: `M${events.length + 1}` };
+
+  const lot = wb.addWorksheet("Receipts (lot trace)", { views: [{ state: "frozen", ySplit: 1 }] });
+  lot.columns = [
+    { header: "Received on", key: "date", width: 17 },
+    { header: "Received from (vendor)", key: "vendor", width: 28 },
+    { header: "PO / PI", key: "po", width: 20 },
+    { header: "Tax invoice no.", key: "invoice", width: 18 },
+    { header: "Batch (WW/YY)", key: "batch", width: 14 },
+    { header: "TT part number", key: "pn", width: 20 },
+    { header: "Item description", key: "desc", width: 40 },
+    { header: "Qty", key: "qty", width: 10 },
+    { header: "Unit", key: "unit", width: 7 },
+    { header: "Rate", key: "rate", width: 10 },
+    { header: "Current status", key: "status", width: 32 },
+    { header: "IQC by", key: "iqcBy", width: 16 },
+    { header: "IQC date", key: "iqcAt", width: 17 },
+    { header: "Rejection reason", key: "reason", width: 30 },
+    { header: "Entered by", key: "enteredBy", width: 16 },
+    { header: "Kits issued from this part + batch", key: "kits", width: 50 },
+  ];
+  for (const l of lots) lot.addRow({ ...l, date: fmt(l.date), iqcAt: fmt(l.iqcAt) });
+  head(lot);
+  lot.getColumn("qty").alignment = { horizontal: "right" };
+  if (lots.length > 0) lot.autoFilter = { from: "A1", to: `P${lots.length + 1}` };
+
+  // Part-wise summary of the (filtered) movements.
+  const byPart = new Map();
+  const bucket = (ev) => {
+    if (!byPart.has(ev.pn)) {
+      byPart.set(ev.pn, {
+        pn: ev.pn, desc: ev.desc, received: 0, approved: 0, rejected: 0, rnd: 0, kits: 0,
+        from: new Set(), kitTo: new Set(), rndTo: new Set(),
+      });
+    }
+    return byPart.get(ev.pn);
+  };
+  for (const ev of events) {
+    const b = bucket(ev);
+    if (ev.type === "received") { b.received += ev.qty; b.from.add(ev.party); }
+    if (ev.type === "iqc_approved") b.approved += ev.qty;
+    if (ev.type === "iqc_rejected") b.rejected += ev.qty;
+    if (ev.type === "rnd_issued") { b.rnd += ev.qty; b.rndTo.add(ev.party); }
+    if (ev.type === "kit_issued") { b.kits += ev.qty; b.kitTo.add(ev.party); }
+  }
+  const sum = wb.addWorksheet("Part-wise summary", { views: [{ state: "frozen", ySplit: 1 }] });
+  sum.columns = [
+    { header: "TT part number", key: "pn", width: 20 },
+    { header: "Item description", key: "desc", width: 40 },
+    { header: "Received", key: "received", width: 11 },
+    { header: "IQC approved", key: "approved", width: 13 },
+    { header: "IQC rejected", key: "rejected", width: 13 },
+    { header: "Issued to R&D", key: "rnd", width: 14 },
+    { header: "Issued in kits", key: "kits", width: 14 },
+    { header: "Received from", key: "from", width: 36 },
+    { header: "Kits issued to", key: "kitTo", width: 36 },
+    { header: "R&D issued to", key: "rndTo", width: 30 },
+  ];
+  [...byPart.values()]
+    .sort((a, b) => a.pn.localeCompare(b.pn))
+    .forEach((b) =>
+      sum.addRow({ ...b, from: [...b.from].join(", "), kitTo: [...b.kitTo].join(", "), rndTo: [...b.rndTo].join(", ") })
+    );
+  head(sum);
+  for (const c of ["C", "D", "E", "F", "G"]) sum.getColumn(c).alignment = { horizontal: "right" };
+  if (byPart.size > 0) {
+    const last = byPart.size + 1;
+    const t = sum.addRow({ pn: "TOTAL" });
+    for (const c of ["C", "D", "E", "F", "G"]) t.getCell(c).value = { formula: `SUM(${c}2:${c}${last})` };
+    t.font = { bold: true };
+    sum.autoFilter = { from: "A1", to: `J${last}` };
+  }
+
+  const note = wb.addWorksheet("Report filters");
+  note.columns = [{ width: 26 }, { width: 80 }];
+  [
+    ["Report", "Complete stock movement history"],
+    ["Movements included", [...wanted].map((t) => MOVEMENT_TYPES[t].label).join(", ")],
+    ["Vendor filter", vendorId ? "Selected vendor (receipts from them + kits issued to them)" : "All vendors"],
+    ["R&D person filter", personKey ? "Selected person (R&D issues to them)" : "Everyone"],
+    ["From", req.query.from || "Beginning"],
+    ["To", req.query.to || "Today"],
+    ["Part filter", partSet.size ? [...partSet].join(", ") : search || "All parts"],
+    ["Movement rows", events.length],
+    ["How to read", "Received = booked in from a vendor (pending IQC). IQC approved = credited to main stock. IQC rejected = held aside, not counted. R&D / Kit rows = stock that left main stock."],
+    ["Batch / kits column", "Kit issues draw FIFO from batches (WW/YY of the tax invoice). The lot-trace sheet lists, per part + batch, which kit issues (and which vendor) took stock from it; if two receipts of one part share a batch code, both rows show the combined list."],
+    ["Generated", `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`],
+  ].forEach((r) => note.addRow(r));
+  note.getColumn(1).font = { bold: true };
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="stock-movement-${stamp}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+/*
+  GET /api/parts/export/issued-stock-xlsx — ADMIN ONLY.
+  Custom stock report: where stock has gone OUT to.
+    scope=vendor | rnd | both   (default both)
+    vendor=<vendorId>           only that vendor (kit issues)
+    person=<userId | name:..>   only that R&D person
+    from=YYYY-MM-DD&to=YYYY-MM-DD   issue date range (inclusive)
+    search=<text>               part number / description contains text
+  Vendor side comes from issued kits (every kit edit only ever adds its own
+  extra quantity, so summing all issued documents gives the true total).
+  R&D side comes from each part's rndIssues ledger. Each side gets a
+  line-by-line sheet plus a per-party / per-part summary sheet.
+*/
+export const exportIssuedStockXlsx = asyncHandler(async (req, res) => {
+  const scope = ["vendor", "rnd", "both"].includes(req.query.scope) ? req.query.scope : "both";
+  const vendorId = req.query.vendor ? String(req.query.vendor) : "";
+  const personKey = req.query.person ? String(req.query.person) : "";
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const partSet = await resolvePartSet(req.query.parts);
+
+  let fromDate = null;
+  let toDate = null;
+  if (req.query.from) {
+    const d = new Date(`${req.query.from}T00:00:00.000`);
+    if (!Number.isNaN(d.getTime())) fromDate = d;
+  }
+  if (req.query.to) {
+    const d = new Date(`${req.query.to}T23:59:59.999`);
+    if (!Number.isNaN(d.getTime())) toDate = d;
+  }
+  const inRange = (dt) => {
+    const t = new Date(dt).getTime();
+    if (fromDate && t < fromDate.getTime()) return false;
+    if (toDate && t > toDate.getTime()) return false;
+    return true;
+  };
+  const matchesSearch = (pn, desc) =>
+    (partSet.size === 0 || partSet.has(pn)) &&
+    (!search || `${pn || ""} ${desc || ""}`.toLowerCase().includes(search));
+  const fmtDate = (dt) => new Date(dt).toISOString().slice(0, 16).replace("T", " ");
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stock management";
+
+  const styleHeader = (ws) => {
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
+  };
+
+  let vendorLineCount = 0;
+  let rndLineCount = 0;
+  let vendorLabel = "All vendors";
+  let personLabel = "Everyone";
+
+  // ---------------- Issued to vendors (kits) ----------------
+  if (scope === "vendor" || scope === "both") {
+    const filter = { status: "issued", vendor: { $ne: null } };
+    if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) filter.vendor = vendorId;
+    if (fromDate || toDate) {
+      filter.createdAt = {};
+      if (fromDate) filter.createdAt.$gte = fromDate;
+      if (toDate) filter.createdAt.$lte = toDate;
+    }
+    const issues = await KitIssue.find(filter)
+      .populate("vendor", "companyName")
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const detail = wb.addWorksheet("Issued to vendors", { views: [{ state: "frozen", ySplit: 1 }] });
+    detail.columns = [
+      { header: "Date", key: "date", width: 17 },
+      { header: "Vendor", key: "vendor", width: 30 },
+      { header: "Issue code", key: "code", width: 14 },
+      { header: "Kit", key: "kit", width: 26 },
+      { header: "TT part number", key: "pn", width: 20 },
+      { header: "Item description", key: "desc", width: 44 },
+      { header: "Qty issued", key: "qty", width: 12 },
+      { header: "Qty short", key: "short", width: 11 },
+      { header: "Batches (FIFO)", key: "batches", width: 26 },
+      { header: "Issued by", key: "by", width: 18 },
+      { header: "Remarks", key: "remarks", width: 30 },
+    ];
+
+    const summary = new Map(); // vendor|pn -> row
+    for (const iss of issues) {
+      const vName = iss.vendor?.companyName || "—";
+      for (const line of iss.lines || []) {
+        if (!(line.qtyIssued > 0)) continue;
+        if (!matchesSearch(line.ttUniquePartNumber, line.itemDescription)) continue;
+        vendorLineCount += 1;
+        detail.addRow({
+          date: fmtDate(iss.createdAt),
+          vendor: vName,
+          code: iss.issueCode || "",
+          kit: iss.kitName || "",
+          pn: line.ttUniquePartNumber || "",
+          desc: line.itemDescription || "",
+          qty: line.qtyIssued,
+          short: line.qtyShort || 0,
+          batches: (line.batchBreakdown || [])
+            .map((b) => `${b.batchCode || "no batch"}: ${b.quantity}`)
+            .join(", "),
+          by: iss.issuedBy || "",
+          remarks: iss.remarks || "",
+        });
+        const key = `${vName}|${line.ttUniquePartNumber}`;
+        if (!summary.has(key)) {
+          summary.set(key, {
+            vendor: vName,
+            pn: line.ttUniquePartNumber || "",
+            desc: line.itemDescription || "",
+            qty: 0,
+            issues: new Set(),
+          });
+        }
+        const row = summary.get(key);
+        row.qty += line.qtyIssued;
+        row.issues.add(String(iss._id));
+      }
+    }
+    styleHeader(detail);
+    detail.getColumn("qty").alignment = { horizontal: "right" };
+    detail.getColumn("short").alignment = { horizontal: "right" };
+    if (vendorLineCount > 0) detail.autoFilter = { from: "A1", to: `K${vendorLineCount + 1}` };
+
+    const sum = wb.addWorksheet("Vendor summary", { views: [{ state: "frozen", ySplit: 1 }] });
+    sum.columns = [
+      { header: "Vendor", key: "vendor", width: 30 },
+      { header: "TT part number", key: "pn", width: 20 },
+      { header: "Item description", key: "desc", width: 44 },
+      { header: "Total qty issued", key: "qty", width: 16 },
+      { header: "No. of kit issues", key: "n", width: 16 },
+    ];
+    [...summary.values()]
+      .sort((a, b) => a.vendor.localeCompare(b.vendor) || a.pn.localeCompare(b.pn))
+      .forEach((r) => sum.addRow({ vendor: r.vendor, pn: r.pn, desc: r.desc, qty: r.qty, n: r.issues.size }));
+    styleHeader(sum);
+    sum.getColumn("qty").alignment = { horizontal: "right" };
+    sum.getColumn("n").alignment = { horizontal: "right" };
+    if (summary.size > 0) {
+      const last = summary.size + 1;
+      const t = sum.addRow({ vendor: "TOTAL" });
+      t.getCell("D").value = { formula: `SUM(D2:D${last})` };
+      t.font = { bold: true };
+      sum.autoFilter = { from: "A1", to: `E${last}` };
+    }
+    if (vendorId) {
+      const v = issues.find((i) => i.vendor)?.vendor;
+      vendorLabel = v?.companyName || vendorId;
+    }
+  }
+
+  // ---------------- Issued to R&D (people) ----------------
+  if (scope === "rnd" || scope === "both") {
+    const parts = await Part.find({ "rndIssues.0": { $exists: true } })
+      .select("ttUniquePartNumber itemDescription unit rndStock rndIssues")
+      .sort({ ttUniquePartNumber: 1 })
+      .lean();
+
+    const detail = wb.addWorksheet("Issued to R&D", { views: [{ state: "frozen", ySplit: 1 }] });
+    detail.columns = [
+      { header: "Date", key: "date", width: 17 },
+      { header: "Issued to (person)", key: "person", width: 26 },
+      { header: "TT part number", key: "pn", width: 20 },
+      { header: "Item description", key: "desc", width: 44 },
+      { header: "Unit", key: "unit", width: 8 },
+      { header: "Qty issued", key: "qty", width: 12 },
+      { header: "Issued by", key: "by", width: 18 },
+      { header: "Remarks", key: "remarks", width: 30 },
+    ];
+
+    const rows = [];
+    for (const p of parts) {
+      if (!matchesSearch(p.ttUniquePartNumber, p.itemDescription)) continue;
+      for (const iss of p.rndIssues || []) {
+        const key = iss.person ? String(iss.person) : `name:${iss.personName}`;
+        if (personKey && key !== personKey) continue;
+        if ((fromDate || toDate) && !inRange(iss.date)) continue;
+        rows.push({ p, iss, key });
+      }
+    }
+    rows.sort((a, b) => new Date(a.iss.date) - new Date(b.iss.date));
+
+    const summary = new Map(); // person|pn -> row
+    for (const { p, iss, key } of rows) {
+      rndLineCount += 1;
+      detail.addRow({
+        date: fmtDate(iss.date),
+        person: iss.personName || "",
+        pn: p.ttUniquePartNumber || "",
+        desc: p.itemDescription || "",
+        unit: p.unit || "",
+        qty: iss.quantity,
+        by: iss.issuedBy || "",
+        remarks: iss.remarks || "",
+      });
+      const sk = `${key}|${p.ttUniquePartNumber}`;
+      if (!summary.has(sk)) {
+        summary.set(sk, {
+          person: iss.personName || "",
+          pn: p.ttUniquePartNumber || "",
+          desc: p.itemDescription || "",
+          unit: p.unit || "",
+          qty: 0,
+          n: 0,
+        });
+      }
+      const r = summary.get(sk);
+      r.qty += iss.quantity;
+      r.n += 1;
+      if (personKey) personLabel = iss.personName || personKey;
+    }
+    styleHeader(detail);
+    detail.getColumn("qty").alignment = { horizontal: "right" };
+    if (rndLineCount > 0) detail.autoFilter = { from: "A1", to: `H${rndLineCount + 1}` };
+
+    const sum = wb.addWorksheet("R&D summary", { views: [{ state: "frozen", ySplit: 1 }] });
+    sum.columns = [
+      { header: "Person", key: "person", width: 26 },
+      { header: "TT part number", key: "pn", width: 20 },
+      { header: "Item description", key: "desc", width: 44 },
+      { header: "Unit", key: "unit", width: 8 },
+      { header: "Total qty issued", key: "qty", width: 16 },
+      { header: "No. of issues", key: "n", width: 14 },
+    ];
+    [...summary.values()]
+      .sort((a, b) => a.person.localeCompare(b.person) || a.pn.localeCompare(b.pn))
+      .forEach((r) => sum.addRow(r));
+    styleHeader(sum);
+    sum.getColumn("qty").alignment = { horizontal: "right" };
+    sum.getColumn("n").alignment = { horizontal: "right" };
+    if (summary.size > 0) {
+      const last = summary.size + 1;
+      const t = sum.addRow({ person: "TOTAL" });
+      t.getCell("E").value = { formula: `SUM(E2:E${last})` };
+      t.font = { bold: true };
+      sum.autoFilter = { from: "A1", to: `F${last}` };
+    }
+  }
+
+  // ---------------- Filters used ----------------
+  const note = wb.addWorksheet("Report filters");
+  note.columns = [{ width: 28 }, { width: 60 }];
+  [
+    ["Report", "Custom stock report — issued to vendors / R&D"],
+    ["Scope", scope === "both" ? "Vendors and R&D" : scope === "vendor" ? "Vendors only" : "R&D only"],
+    ["Vendor", scope === "rnd" ? "n/a" : vendorLabel],
+    ["R&D person", scope === "vendor" ? "n/a" : personLabel],
+    ["From", req.query.from || "Beginning"],
+    ["To", req.query.to || "Today"],
+    ["Part filter", partSet.size ? [...partSet].join(", ") : search || "All parts"],
+    ["Vendor lines", scope === "rnd" ? "n/a" : vendorLineCount],
+    ["R&D lines", scope === "vendor" ? "n/a" : rndLineCount],
+    ["Note", "Vendor figures come from issued kits (quantity actually deducted). R&D figures come from R&D stock issues."],
+    ["Generated", `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`],
+  ].forEach((r) => note.addRow(r));
+  note.getColumn(1).font = { bold: true };
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="issued-stock-report-${stamp}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 });

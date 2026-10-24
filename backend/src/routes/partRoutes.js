@@ -17,6 +17,9 @@ import {
   exportPartsCsv,
   exportPartVendorLinksCsv,
   exportStockSummaryXlsx,
+  exportIssuedStockXlsx,
+  exportStockMovementXlsx,
+  getIssuedStockReportOptions,
   getPartsCsvFields,
 } from "../controllers/partController.js";
 import { updatePart } from "../controllers/partAdminController.js";
@@ -64,6 +67,27 @@ router.get(
   protect,
   requirePermission("part.approve"),
   exportStockSummaryXlsx
+);
+
+router.get(
+  "/export/issued-stock-options",
+  protect,
+  requirePermission("part.approve"),
+  getIssuedStockReportOptions
+);
+
+router.get(
+  "/export/stock-movement-xlsx",
+  protect,
+  requirePermission("part.approve"),
+  exportStockMovementXlsx
+);
+
+router.get(
+  "/export/issued-stock-xlsx",
+  protect,
+  requirePermission("part.approve"),
+  exportIssuedStockXlsx
 );
 
 router.get("/", getParts);

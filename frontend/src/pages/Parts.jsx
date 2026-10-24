@@ -2769,6 +2769,365 @@ function PartComparisonDialog({ group, onClose, onPartUpdated, onPartDeleted }) 
 
 /* ------------------------------------------------------------------ */
 
+// "Custom stock report" — admin only. Lets the admin choose what to report on
+// (stock issued out to vendors through kits, stock issued to R&D people, or
+// both), narrow it to one vendor / one person, a date range and a part
+// keyword, then downloads a single Excel file with line-by-line and summary
+// sheets. The vendor / person pickers only list parties that actually have
+// something issued (see getIssuedStockReportOptions in partController.js).
+const ISSUED_SCOPES = [
+  { key: "full", label: "Complete history" },
+  { key: "both", label: "Issued: vendors + R&D" },
+  { key: "vendor", label: "Issued: vendors only" },
+  { key: "rnd", label: "Issued: R&D only" },
+];
+
+// Movements the "Complete history" report can include (keys match
+// MOVEMENT_TYPES in partController.js).
+const MOVEMENT_OPTIONS = [
+  { key: "received", label: "Received from vendor" },
+  { key: "iqc_approved", label: "IQC approved → main stock" },
+  { key: "iqc_rejected", label: "IQC rejected" },
+  { key: "kit_issued", label: "Issued in kit to vendor" },
+  { key: "rnd_issued", label: "Issued to R&D" },
+];
+
+// Searchable multi-part picker used by the custom stock report: type a part
+// number or any keyword from the description, click a match to add it, click
+// the x on a chip to drop it. Searches the same /parts endpoint as the rest of
+// the page, debounced.
+function ReportPartPicker({ selected, onChange }) {
+  const [term, setTerm] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  useEffect(() => {
+    const q = term.trim();
+    if (!q) {
+      setResults([]);
+      setSearching(false);
+      return undefined;
+    }
+    setSearching(true);
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/parts", { params: { search: q, limit: 30 } });
+        if (alive) setResults(Array.isArray(data) ? data : []);
+      } catch {
+        if (alive) setResults([]);
+      } finally {
+        if (alive) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [term]);
+
+  const add = (part) => {
+    if (!selected.some((p) => p._id === part._id)) {
+      onChange([
+        ...selected,
+        { _id: part._id, ttUniquePartNumber: part.ttUniquePartNumber, itemDescription: part.itemDescription },
+      ]);
+    }
+    setTerm("");
+    setResults([]);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={boxRef} className="space-y-2">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((p) => (
+            <span
+              key={p._id}
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs"
+              title={p.itemDescription}
+            >
+              <span className="font-mono">{p.ttUniquePartNumber}</span>
+              <button
+                type="button"
+                onClick={() => onChange(selected.filter((x) => x._id !== p._id))}
+                className="text-muted-foreground hover:text-foreground"
+                title="Remove"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          className="pl-8"
+          placeholder="Search part no. or description…"
+          value={term}
+          onChange={(e) => {
+            setTerm(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          autoComplete="off"
+        />
+      </div>
+      {open && term.trim() && (
+        <ul className="max-h-48 overflow-y-auto rounded-md border border-border bg-card">
+          {searching && <li className="px-3 py-2 text-xs text-muted-foreground">Searching…</li>}
+          {!searching && results.length === 0 && (
+            <li className="px-3 py-2 text-xs text-muted-foreground">No part matches “{term.trim()}”.</li>
+          )}
+          {results.map((p) => {
+            const already = selected.some((x) => x._id === p._id);
+            return (
+              <li key={p._id}>
+                <button
+                  type="button"
+                  disabled={already}
+                  onClick={() => add(p)}
+                  className="flex w-full items-start justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-secondary disabled:opacity-50"
+                >
+                  <span className="min-w-0">
+                    <span className="font-mono text-xs">{p.ttUniquePartNumber}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{p.itemDescription}</span>
+                  </span>
+                  {already && <span className="shrink-0 text-[11px] text-muted-foreground">Added</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function IssuedStockReportDialog({ onClose }) {
+  const [options, setOptions] = useState(null); // null while loading
+  const [loadError, setLoadError] = useState("");
+  const [scope, setScope] = useState("full");
+  const [types, setTypes] = useState(MOVEMENT_OPTIONS.map((m) => m.key));
+  const [vendor, setVendor] = useState("");
+  const [person, setPerson] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [pickedParts, setPickedParts] = useState([]);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get("/parts/export/issued-stock-options")
+      .then(({ data }) => {
+        if (alive) setOptions({ vendors: data?.vendors || [], people: data?.people || [] });
+      })
+      .catch((err) => {
+        if (alive) setLoadError(err.response?.data?.message || "Could not load the report options");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const isFull = scope === "full";
+  const showVendor = isFull || scope === "vendor" || scope === "both";
+  const showRnd = isFull || scope === "rnd" || scope === "both";
+  const toggleType = (key) =>
+    setTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  const selectClass =
+    "h-9 w-full rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+  const download = async () => {
+    if (from && to && from > to) {
+      toast.error("“From” date cannot be after “To” date");
+      return;
+    }
+    if (isFull && types.length === 0) {
+      toast.error("Pick at least one movement to include");
+      return;
+    }
+    setDownloading(true);
+    try {
+      const params = isFull ? {} : { scope };
+      if (isFull && types.length < MOVEMENT_OPTIONS.length) params.types = types.join(",");
+      if (showVendor && vendor) params.vendor = vendor;
+      if (showRnd && person) params.person = person;
+      if (from) params.from = from;
+      if (to) params.to = to;
+      if (pickedParts.length > 0) params.parts = pickedParts.map((p) => p._id).join(",");
+
+      const { data } = await api.get(
+        isFull ? "/parts/export/stock-movement-xlsx" : "/parts/export/issued-stock-xlsx",
+        {
+          params,
+          responseType: "blob",
+        }
+      );
+      const blobUrl = URL.createObjectURL(
+        new Blob([data], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        })
+      );
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${isFull ? "stock-movement" : "issued-stock-report"}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+      onClose();
+    } catch (err) {
+      toast.error("Could not download the custom stock report");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+          <div>
+            <h2 className="font-display text-base font-semibold">Custom stock report</h2>
+            <p className="text-xs text-muted-foreground">
+              Full trail of the stock: which vendor it came from and when, IQC approved or rejected,
+              and which kit / R&amp;D person it went to.
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {!options && !loadError && (
+            <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          )}
+          {loadError && <p className="py-8 text-center text-sm text-destructive">{loadError}</p>}
+
+          {options && (
+            <>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Report on</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {ISSUED_SCOPES.map((o) => (
+                    <Button
+                      key={o.key}
+                      type="button"
+                      size="sm"
+                      variant={scope === o.key ? "default" : "outline"}
+                      onClick={() => setScope(o.key)}
+                    >
+                      {o.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {isFull && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">Include these movements</p>
+                  <div className="grid grid-cols-1 gap-1 rounded-md border border-border p-2.5">
+                    {MOVEMENT_OPTIONS.map((m) => (
+                      <label key={m.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={types.includes(m.key)}
+                          onChange={() => toggleType(m.key)}
+                        />
+                        {m.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {showVendor && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {isFull ? "Vendor (received from / kit issued to)" : "Vendor (stock issued through kits)"}
+                  </p>
+                  <select className={selectClass} value={vendor} onChange={(e) => setVendor(e.target.value)}>
+                    <option value="">All vendors</option>
+                    {options.vendors.map((v) => (
+                      <option key={v._id} value={v._id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {showRnd && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">R&amp;D person</p>
+                  <select className={selectClass} value={person} onChange={(e) => setPerson(e.target.value)}>
+                    <option value="">Everyone</option>
+                    {options.people.map((u) => (
+                      <option key={u._id} value={u._id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">From (optional)</p>
+                  <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">To (optional)</p>
+                  <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Parts (optional — leave empty for all parts)
+                </p>
+                <ReportPartPicker selected={pickedParts} onChange={setPickedParts} />
+              </div>
+
+              <p className="rounded-md bg-muted/50 p-2.5 text-[11px] text-muted-foreground">
+                {isFull
+                  ? "The Excel file has a dated movement ledger, a receipts sheet (vendor, PO/PI, tax invoice, batch, IQC result, kits drawn from it) and a part-wise summary. Picking a vendor and/or an R&D person keeps only their movements."
+                  : "The Excel file has a line-by-line sheet and a summary sheet (totals per vendor / per person and part) for each of the sections you pick."}
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border bg-card px-5 py-3">
+          <Button type="button" variant="outline" onClick={onClose} disabled={downloading}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={download} disabled={!options || downloading}>
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            {downloading ? "Preparing…" : "Download Excel"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 // Remembers the last field selection/order the "Customise report" dialog
 // was used with, per browser — so a returning admin doesn't have to
 // rebuild their preferred column set every time.
@@ -2973,6 +3332,7 @@ export default function Parts() {
   const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [downloadingStock, setDownloadingStock] = useState(false);
   const [showCsvCustomize, setShowCsvCustomize] = useState(false);
+  const [showIssuedReport, setShowIssuedReport] = useState(false);
 
   // "MISC stock" column: the header dropdown just picks which bucket the
   // column shows ("rnd" | "rejected"). IQC stock has its own toolbar button
@@ -3195,6 +3555,17 @@ export default function Parts() {
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {downloadingStock ? "Preparing…" : "Stock report (Excel)"}
+            </Button>
+          )}
+          {isApprover && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowIssuedReport(true)}
+              title="Custom report — stock issued to which vendor, and to whom in R&D"
+            >
+              <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
+              Custom stock report
             </Button>
           )}
           {/* Same IQC approve/reject window the "MISC stock" column opens for
@@ -3467,6 +3838,8 @@ export default function Parts() {
           onCreated={() => setMyRequestsReloadKey((k) => k + 1)}
         />
       )}
+
+      {showIssuedReport && <IssuedStockReportDialog onClose={() => setShowIssuedReport(false)} />}
 
       {showCsvCustomize && (
         <CustomizePartsCsvDialog

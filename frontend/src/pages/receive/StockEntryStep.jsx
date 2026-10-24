@@ -38,7 +38,62 @@ import {
   Check,
   ChevronDown,
   X,
+  ImageOff,
 } from "lucide-react";
+
+// Part photo thumbnail. Click opens the full-size photo in a new tab (the
+// stopPropagation keeps it from also triggering a parent row's click, e.g.
+// the search-dropdown rows). Falls back to a placeholder when the part has no
+// photo or the image fails to load.
+const PHOTO_SIZES = {
+  sm: "h-10 w-10",
+  md: "h-14 w-14",
+  lg: "h-24 w-24",
+};
+
+function PartPhoto({ url, alt, size = "md", className = "" }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  const dim = PHOTO_SIZES[size] || PHOTO_SIZES.md;
+
+  if (!url || failed) {
+    return (
+      <div
+        className={
+          "flex shrink-0 items-center justify-center rounded border border-dashed border-border bg-muted/40 text-muted-foreground " +
+          dim +
+          " " +
+          className
+        }
+        title="No photo"
+      >
+        <ImageOff className="h-4 w-4" />
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className={"block shrink-0 " + className}
+      title="Open full-size photo"
+    >
+      <img
+        src={url}
+        alt={alt || "Part photo"}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className={"rounded border border-border bg-white object-cover " + dim}
+      />
+    </a>
+  );
+}
 
 // Debounced fetch of the lightweight "AI suggested checks" for the line
 // currently being entered — see getStockEntrySuggestions in
@@ -136,6 +191,9 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
           const isBusy = busyId === e._id;
           return (
             <div key={e._id || i} className="rounded-md border border-border bg-card p-2.5">
+              <div className="mb-2 flex items-start gap-2.5">
+                <PartPhoto url={e.part.photoUrl} alt={e.part.itemDescription} size="md" />
+                <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5">
                   {e.part.ttUniquePartNumber}
@@ -178,6 +236,8 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
               <p className="mt-1 text-xs text-muted-foreground line-clamp-2" title={e.part.itemDescription}>
                 {e.part.itemDescription}
               </p>
+                </div>
+              </div>
               {e.stockApplied ? (
                 <p className="mt-1 text-[11px] text-muted-foreground">In stock now: {e.part.quantityInStock}</p>
               ) : (
@@ -218,6 +278,7 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead className="w-[64px]">Photo</TableHead>
           <TableHead className="w-[150px]">Part no.</TableHead>
           <TableHead>Description</TableHead>
           <TableHead className="w-[110px] text-right">Qty</TableHead>
@@ -232,6 +293,9 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
           const isBusy = busyId === e._id;
           return (
             <TableRow key={e._id || i}>
+              <TableCell>
+                <PartPhoto url={e.part.photoUrl} alt={e.part.itemDescription} size="sm" />
+              </TableCell>
               <TableCell className="font-mono text-xs">{e.part.ttUniquePartNumber}</TableCell>
               <TableCell className="truncate max-w-0" title={e.part.itemDescription}>
                 {e.part.itemDescription}
@@ -944,7 +1008,8 @@ export default function StockEntryStep({
                           onClick={() => pickPart(p)}
                           className="flex w-full items-start justify-between gap-3 bg-card px-3 py-2 text-left text-sm hover:bg-secondary"
                         >
-                          <span className="min-w-0">
+                          <PartPhoto url={p.photoUrl} alt={p.itemDescription} size="md" />
+                          <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2">
                               <span className="font-mono text-xs bg-muted rounded px-1.5 py-0.5">
                                 {p.ttUniquePartNumber}
@@ -976,7 +1041,8 @@ export default function StockEntryStep({
                           onClick={() => pickApproved(r)}
                           className="flex w-full items-start justify-between gap-3 bg-card px-3 py-2 text-left text-sm hover:bg-secondary"
                         >
-                          <span className="min-w-0">
+                          <PartPhoto url={r.newPart?.photoUrl} alt={r.newPart?.itemDescription} size="md" />
+                          <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2">
                               <Badge variant="success" className="gap-1">
                                 <ShieldCheck className="h-3 w-3" />
@@ -1001,7 +1067,8 @@ export default function StockEntryStep({
                         key={r._id}
                         className="flex items-start justify-between gap-3 border-t border-border bg-card px-3 py-2 text-sm opacity-70"
                       >
-                        <span className="min-w-0">
+                        <PartPhoto url={r.newPart?.photoUrl} alt={r.newPart?.itemDescription} size="md" />
+                        <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
                             <Badge variant="warning" className="gap-1">
                               <Clock className="h-3 w-3" />
@@ -1070,9 +1137,10 @@ export default function StockEntryStep({
                             variant="outline"
                             onClick={() => pickApproved(r)}
                             title={r.newPart?.itemDescription}
-                            className="h-auto min-h-9 w-full min-w-0 justify-start whitespace-normal break-words py-1.5 text-left"
+                            className="h-auto min-h-9 w-full min-w-0 justify-start gap-2 whitespace-normal break-words py-1.5 text-left"
                           >
-                            {r.newPart?.itemDescription}
+                            <PartPhoto url={r.newPart?.photoUrl} alt={r.newPart?.itemDescription} size="sm" />
+                            <span className="min-w-0 flex-1">{r.newPart?.itemDescription}</span>
                           </Button>
                         ))}
                       </div>
@@ -1103,6 +1171,7 @@ export default function StockEntryStep({
           <form onSubmit={handleConfirmExisting}>
             <CardContent className="space-y-4">
               <div className="rounded-md border border-border p-3 flex items-start gap-3">
+                <PartPhoto url={matchedPart.photoUrl} alt={matchedPart.itemDescription} size="lg" />
                 <PackageCheck className="h-5 w-5 text-success mt-0.5 shrink-0" />
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -1220,6 +1289,7 @@ export default function StockEntryStep({
           <form onSubmit={handleConfirmApproved}>
             <CardContent className="space-y-4">
               <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 flex items-start gap-3">
+                <PartPhoto url={activeRequest.newPart?.photoUrl} alt={activeRequest.newPart?.itemDescription} size="lg" />
                 <ShieldCheck className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
                 <div className="space-y-1 text-emerald-900">
                   <div className="flex items-center gap-2">
