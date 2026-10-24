@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { Download, FileBarChart, RefreshCw, RotateCcw } from "lucide-react";
+import { Download, FileBarChart, FileSpreadsheet, RefreshCw, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SortableHead, useSort } from "@/components/SortableHead";
+import ReportPartPicker from "@/components/ReportPartPicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -69,6 +70,8 @@ export default function BillingReport() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingFull, setExportingFull] = useState(false);
+  const [pickedParts, setPickedParts] = useState([]);
   const detailSort = useSort();
   const groupSort = useSort();
 
@@ -76,8 +79,11 @@ export default function BillingReport() {
 
   // Only send filters that have a value.
   const params = useCallback(
-    () => Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")),
-    [f]
+    () => ({
+      ...Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")),
+      ...(pickedParts.length > 0 ? { parts: pickedParts.map((p) => p._id).join(",") } : {}),
+    }),
+    [f, pickedParts]
   );
 
   const run = useCallback(async () => {
@@ -121,6 +127,30 @@ export default function BillingReport() {
     }
   };
 
+  // Complete payment trail: every invoice with the received lines (parts, qty,
+  // rate, date, batch, IQC) behind it and how it was paid — same filters.
+  const exportFull = async () => {
+    setExportingFull(true);
+    try {
+      const res = await api.get("/billing/report/full-export", {
+        params: params(),
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `payment-trail-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Could not export the full payment trail");
+    } finally {
+      setExportingFull(false);
+    }
+  };
+
   const s = data?.summary;
   const rows = detailSort.apply(data?.rows || [], {
     vendor: (r) => r.vendor,
@@ -152,7 +182,14 @@ export default function BillingReport() {
           </CardDescription>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setF(EMPTY)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setF(EMPTY);
+              setPickedParts([]);
+            }}
+          >
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset
           </Button>
           <Button size="sm" onClick={run} disabled={loading}>
@@ -165,6 +202,16 @@ export default function BillingReport() {
             disabled={exporting || !rows.length}
           >
             <Download className="mr-1.5 h-3.5 w-3.5" /> {exporting ? "Preparing…" : "Excel"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportFull}
+            disabled={exportingFull || !rows.length}
+            title="Every invoice with the parts received against it and how it was paid"
+          >
+            <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />{" "}
+            {exportingFull ? "Preparing…" : "Full detail (Excel)"}
           </Button>
         </div>
       </CardHeader>
@@ -224,6 +271,10 @@ export default function BillingReport() {
           <div className="space-y-1">
             <Label>Max amount (₹)</Label>
             <Input type="number" min="0" value={f.maxAmount} onChange={set("maxAmount")} />
+          </div>
+          <div className="space-y-1 sm:col-span-2 lg:col-span-4">
+            <Label>Parts (optional — invoices that include these parts)</Label>
+            <ReportPartPicker selected={pickedParts} onChange={setPickedParts} />
           </div>
           <div className="space-y-1 sm:col-span-2">
             <Label>Search</Label>

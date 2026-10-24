@@ -4,6 +4,8 @@ import ExcelJS from "exceljs";
 import TaxInvoice, { PAYMENT_METHODS, CASH_METHOD } from "../models/TaxInvoice.js";
 import Vendor from "../models/Vendor.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
+import StockEntry from "../models/StockEntry.js";
+import Part from "../models/Part.js";
 import { triggerAmountBackfill, resumeBackfill, getBackfillStatus, countNeedingAmount } from "../utils/backfillInvoiceAmounts.js";
 
 /**
@@ -213,6 +215,21 @@ async function buildReport(query) {
     and.push({ $expr: { $and: conds } });
   }
 
+  // Part filter (comma-separated Part ids from the report's part picker): keep
+  // only invoices that cover at least one of those parts, i.e. that a received
+  // stock line of the part was booked against (StockEntry.appliedVia).
+  const partIds = String(query.parts || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => mongoose.isValidObjectId(x));
+  if (partIds.length) {
+    const invoiceIds = await StockEntry.distinct("appliedVia", {
+      part: { $in: partIds },
+      appliedVia: { $ne: null },
+    });
+    and.push({ _id: { $in: invoiceIds } });
+  }
+
   const min = query.minAmount !== undefined && query.minAmount !== "" ? Number(query.minAmount) : null;
   const max = query.maxAmount !== undefined && query.maxAmount !== "" ? Number(query.maxAmount) : null;
   if (min !== null && !Number.isNaN(min)) and.push({ $expr: { $gte: [AMOUNT_EXPR, min] } });
@@ -312,7 +329,7 @@ async function buildReport(query) {
       .sort((a, b) => (groupBy === "month" ? b.key.localeCompare(a.key) : b.amount - a.amount));
   }
 
-  return { rows, summary, groups, groupBy, filters: { status, dateField, groupBy } };
+  return { rows, summary, groups, groupBy, partIds, filters: { status, dateField, groupBy } };
 }
 
 // GET /api/billing/report
@@ -416,6 +433,243 @@ export const exportReport = asyncHandler(async (req, res) => {
   res.end();
 });
 
+
+/*
+  GET /api/billing/report/full-export  -> .xlsx download (same filters as the report)
+  The complete payment trail: for every invoice, what was received against it
+  (parts, qty, rate, received date, batch, IQC result) and how it was settled
+  (method, UTR, payment date, who paid). Sheets:
+    Payment trail   one row per received line; the invoice's amounts and payment
+                    details sit on the invoice's first row only, so the money
+                    columns can be summed without double counting
+    Invoices        one row per invoice (same as the standard export)
+    Vendor summary  total / paid / unpaid per vendor
+    Report filters  what this file was generated with
+  When parts are picked, the trail lists only those parts' lines.
+*/
+export const exportFullReport = asyncHandler(async (req, res) => {
+  const { rows, summary, partIds } = await buildReport(req.query);
+  const partSet = new Set(partIds.map(String));
+
+  const invoiceIds = rows.map((r) => r._id);
+  const entries = invoiceIds.length
+    ? await StockEntry.find({ appliedVia: { $in: invoiceIds } })
+        .populate("part", "ttUniquePartNumber itemDescription unit")
+        .sort({ createdAt: 1 })
+        .lean()
+    : [];
+  const linesByInvoice = new Map();
+  for (const e of entries) {
+    if (partSet.size && !partSet.has(String(e.part?._id))) continue;
+    const k = String(e.appliedVia);
+    if (!linesByInvoice.has(k)) linesByInvoice.set(k, []);
+    linesByInvoice.get(k).push(e);
+  }
+
+  const IQC_LABEL = {
+    awaiting_invoice: "Awaiting tax invoice",
+    in_iqc_stock: "In IQC stock",
+    accepted: "Accepted — in main stock",
+    rejected: "Rejected in IQC",
+  };
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stock Management";
+  const money = "#,##0.00";
+  const headFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+  const styleHead = (ws) => {
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    ws.getRow(1).fill = headFill;
+    ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+  };
+
+  // ---- Payment trail ----
+  const tr = wb.addWorksheet("Payment trail");
+  tr.columns = [
+    { header: "Vendor", key: "vendor", width: 30 },
+    { header: "GSTIN", key: "gstin", width: 18 },
+    { header: "PO / PI", key: "po", width: 16 },
+    { header: "Received on", key: "received", width: 13 },
+    { header: "TT part number", key: "pn", width: 20 },
+    { header: "Item description", key: "desc", width: 38 },
+    { header: "Qty", key: "qty", width: 9 },
+    { header: "Unit", key: "unit", width: 7 },
+    { header: "Rate", key: "rate", width: 11 },
+    { header: "Line value", key: "lineValue", width: 13 },
+    { header: "Batch (WW/YY)", key: "batch", width: 13 },
+    { header: "IQC status", key: "iqc", width: 24 },
+    { header: "Invoice no.", key: "invoiceNumber", width: 18 },
+    { header: "Invoice date", key: "invoiceDate", width: 13 },
+    { header: "Taxable amount", key: "taxable", width: 15 },
+    { header: "GST", key: "gst", width: 13 },
+    { header: "Freight", key: "freight", width: 12 },
+    { header: "Invoice amount", key: "amount", width: 16 },
+    { header: "Payment status", key: "status", width: 13 },
+    { header: "Payment method", key: "method", width: 15 },
+    { header: "UTR", key: "utr", width: 22 },
+    { header: "Payment date", key: "paymentDate", width: 13 },
+    { header: "Paid by", key: "paidBy", width: 16 },
+    { header: "Remarks", key: "remarks", width: 28 },
+  ];
+  styleHead(tr);
+
+  let trailRows = 0;
+  for (const r of rows) {
+    const lines = linesByInvoice.get(r._id) || [];
+    if (partSet.size && lines.length === 0) continue;
+    const base = {
+      vendor: r.vendor,
+      gstin: r.gstin,
+      po: r.poNumber,
+      invoiceNumber: r.invoiceNumber,
+      invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
+      status: r.status,
+    };
+    const money1 = {
+      taxable: r.taxable,
+      gst: r.gst,
+      freight: r.freight,
+      amount: r.amount,
+      method: r.method,
+      utr: r.utr,
+      paymentDate: r.paymentDate ? new Date(r.paymentDate) : null,
+      paidBy: r.paidBy,
+      remarks: r.remarks,
+    };
+    if (lines.length === 0) {
+      tr.addRow({ ...base, ...money1, pn: "— no received lines linked —" });
+      trailRows += 1;
+      continue;
+    }
+    lines.forEach((e, i) => {
+      const rate = e.price ?? null;
+      tr.addRow({
+        ...base,
+        ...(i === 0 ? money1 : {}),
+        received: e.createdAt ? new Date(e.createdAt) : null,
+        pn: e.part?.ttUniquePartNumber || "",
+        desc: e.part?.itemDescription || "",
+        qty: e.quantityReceived,
+        unit: e.unit || e.part?.unit || "",
+        rate,
+        lineValue: rate != null ? round2(rate * e.quantityReceived) : null,
+        batch: e.batchCode || "",
+        iqc: IQC_LABEL[e.iqcStatus] || "",
+      });
+      trailRows += 1;
+    });
+  }
+  ["D", "N", "V"].forEach((c) => (tr.getColumn(c).numFmt = "dd-mm-yyyy"));
+  ["I", "J", "O", "P", "Q", "R"].forEach((c) => (tr.getColumn(c).numFmt = money));
+  if (trailRows > 0) tr.autoFilter = { from: "A1", to: `X${trailRows + 1}` };
+
+  // ---- Invoices ----
+  const iv = wb.addWorksheet("Invoices");
+  iv.columns = [
+    { header: "Vendor", key: "vendor", width: 32 },
+    { header: "GSTIN", key: "gstin", width: 18 },
+    { header: "Invoice no.", key: "invoiceNumber", width: 18 },
+    { header: "Invoice date", key: "invoiceDate", width: 13 },
+    { header: "PO / PI", key: "poNumber", width: 16 },
+    { header: "Status", key: "status", width: 10 },
+    { header: "Taxable amount", key: "taxable", width: 15 },
+    { header: "GST", key: "gst", width: 13 },
+    { header: "Freight", key: "freight", width: 12 },
+    { header: "Invoice amount", key: "amount", width: 16 },
+    { header: "Payment method", key: "method", width: 15 },
+    { header: "UTR", key: "utr", width: 22 },
+    { header: "Payment date", key: "paymentDate", width: 13 },
+    { header: "Paid by", key: "paidBy", width: 16 },
+    { header: "Remarks", key: "remarks", width: 28 },
+    { header: "Received lines", key: "lines", width: 14 },
+  ];
+  styleHead(iv);
+  for (const r of rows) {
+    iv.addRow({
+      ...r,
+      invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
+      paymentDate: r.paymentDate ? new Date(r.paymentDate) : null,
+      lines: (linesByInvoice.get(r._id) || []).length,
+    });
+  }
+  ["D", "M"].forEach((c) => (iv.getColumn(c).numFmt = "dd-mm-yyyy"));
+  ["G", "H", "I", "J"].forEach((c) => (iv.getColumn(c).numFmt = money));
+  const tot = iv.addRow({
+    vendor: "TOTAL",
+    taxable: summary.taxable,
+    gst: summary.gst,
+    freight: summary.freight,
+    amount: summary.totalAmount,
+  });
+  tot.font = { bold: true };
+
+  // ---- Vendor summary ----
+  const vs = wb.addWorksheet("Vendor summary");
+  vs.columns = [
+    { header: "Vendor", key: "vendor", width: 34 },
+    { header: "Invoices", key: "count", width: 10 },
+    { header: "Total", key: "total", width: 16 },
+    { header: "Paid", key: "paid", width: 16 },
+    { header: "Unpaid", key: "unpaid", width: 16 },
+  ];
+  styleHead(vs);
+  const byVendor = new Map();
+  for (const r of rows) {
+    const g = byVendor.get(r.vendor) || { vendor: r.vendor, count: 0, total: 0, paid: 0, unpaid: 0 };
+    g.count += 1;
+    g.total += r.amount;
+    if (r.status === "Paid") g.paid += r.amount;
+    else g.unpaid += r.amount;
+    byVendor.set(r.vendor, g);
+  }
+  [...byVendor.values()]
+    .sort((a, b) => b.total - a.total)
+    .forEach((g) =>
+      vs.addRow({ ...g, total: round2(g.total), paid: round2(g.paid), unpaid: round2(g.unpaid) })
+    );
+  ["C", "D", "E"].forEach((c) => (vs.getColumn(c).numFmt = money));
+  const vt = vs.addRow({
+    vendor: "TOTAL",
+    count: summary.count,
+    total: summary.totalAmount,
+    paid: summary.paidAmount,
+    unpaid: summary.unpaidAmount,
+  });
+  vt.font = { bold: true };
+
+  // ---- Filters ----
+  const nf = wb.addWorksheet("Report filters");
+  nf.columns = [{ width: 24 }, { width: 80 }];
+  const q = req.query;
+  let partLabel = "All parts";
+  if (partSet.size) {
+    const found = await Part.find({ _id: { $in: [...partSet] } }).select("ttUniquePartNumber").lean();
+    partLabel = found.map((p) => p.ttUniquePartNumber).join(", ");
+  }
+  [
+    ["Report", "Complete payment trail"],
+    ["Status", q.status || "all"],
+    ["Date based on", q.dateField === "payment" ? "Payment date" : "Invoice date"],
+    ["From", q.from || "Beginning"],
+    ["To", q.to || "Today"],
+    ["Vendor filter", q.vendor ? "Selected vendor" : "All vendors"],
+    ["Payment method", q.method || "Any"],
+    ["Amount range", `${q.minAmount || "—"} to ${q.maxAmount || "—"}`],
+    ["Search", q.search || "—"],
+    ["Parts", partLabel],
+    ["Invoices", summary.count],
+    ["How to read", "Payment trail has one row per received line. The invoice amounts and payment details appear on the first row of each invoice only, so the columns can be summed. With parts picked, only those parts' lines are listed (invoice amounts are still for the whole invoice)."],
+    ["Generated", `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`],
+  ].forEach((r) => nf.addRow(r));
+  nf.getColumn(1).font = { bold: true };
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="payment-trail-${stamp}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
 
 // POST /api/billing/backfill-amounts — "Retry now" for the PDF amount reader.
 export const retryAmountBackfill = asyncHandler(async (req, res) => {

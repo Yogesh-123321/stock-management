@@ -98,6 +98,26 @@ const taxInvoiceSchema = new mongoose.Schema(
       paidBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       paidByName: { type: String, default: "" },
       remarks: { type: String, trim: true, default: "" },
+      // Corrections made after the invoice was marked paid (see updatePayment
+      // in controllers/billingController.js). Every change is kept — what it
+      // was, what it became, who changed it and when — so the original entry
+      // is never silently lost.
+      editedAt: { type: Date, default: null },
+      editedByName: { type: String, default: "" },
+      editHistory: {
+        type: [
+          {
+            at: { type: Date, default: Date.now },
+            by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+            byName: { type: String, default: "" },
+            changes: {
+              type: [{ field: String, from: String, to: String }],
+              default: [],
+            },
+          },
+        ],
+        default: [],
+      },
     },
   },
   { timestamps: true }

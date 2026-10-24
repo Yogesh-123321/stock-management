@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { RefreshCw, Banknote, Eye, Search, Wallet, FileBarChart } from "lucide-react";
+import { RefreshCw, Banknote, Eye, Search, Wallet, FileBarChart, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -188,7 +188,140 @@ function PayDialog({ invoice, onClose, onPaid }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Payment details of an already-paid invoice (read-only)              */
+/* Edit the payment details of an already-paid invoice                 */
+/* ------------------------------------------------------------------ */
+
+const dayInput = (d) => (d ? new Date(d).toISOString().slice(0, 10) : todayInput());
+
+function EditPaymentDialog({ invoice, onClose, onSaved }) {
+  const [method, setMethod] = useState("NEFT");
+  const [utr, setUtr] = useState("");
+  const [date, setDate] = useState(todayInput());
+  const [remarks, setRemarks] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!invoice) return;
+    const p = invoice.payment || {};
+    setMethod(p.method || "NEFT");
+    setUtr(p.utrNumber || "");
+    setDate(dayInput(p.paymentDate));
+    setRemarks(p.remarks || "");
+  }, [invoice]);
+
+  const isCash = method === CASH_METHOD;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!isCash && !utr.trim()) return toast.error("Enter the UTR number");
+    if (!date) return toast.error("Choose the payment date");
+
+    setSaving(true);
+    try {
+      await api.patch(`/billing/${invoice._id}/payment`, {
+        paymentMethod: method,
+        utrNumber: isCash ? null : utr.trim(),
+        paymentDate: date,
+        remarks,
+      });
+      toast.success("Payment details updated");
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      toast.error(errMsg(err, "Could not update the payment details"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={Boolean(invoice)} onOpenChange={(v) => !v && !saving && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit payment details</DialogTitle>
+          <DialogDescription>
+            {invoice?.vendor?.companyName || "Vendor"} · invoice {invoice?.invoiceNumber || "—"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center justify-between rounded-md border border-border bg-secondary/50 px-3 py-2">
+          <span className="text-xs text-muted-foreground">Amount paid</span>
+          <span className="text-base font-semibold tabular-nums">{inr(invoice?.amount)}</span>
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="edit-method">Payment method *</Label>
+            <select
+              id="edit-method"
+              className={selectClass}
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="edit-utr">UTR number {isCash ? "" : "*"}</Label>
+            <Input
+              id="edit-utr"
+              value={isCash ? "" : utr}
+              onChange={(e) => setUtr(e.target.value)}
+              disabled={isCash}
+              placeholder={isCash ? "Not needed for a cash purchase" : "Bank UTR / reference number"}
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="edit-date">Payment date *</Label>
+            <Input
+              id="edit-date"
+              type="date"
+              max={todayInput()}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="edit-remarks">Remarks</Label>
+            <Textarea
+              id="edit-remarks"
+              rows={2}
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            The invoice stays marked as paid. What you change here is recorded in the invoice's edit
+            history.
+          </p>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              <Pencil className="mr-1.5 h-4 w-4" />
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Payment details of an already-paid invoice                          */
 /* ------------------------------------------------------------------ */
 
 function DetailRow({ label, children }) {
@@ -200,7 +333,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-function PaymentDetailsDialog({ invoice, onClose, onPreview }) {
+function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
   const payment = invoice?.payment;
   const cash = payment?.method === CASH_METHOD;
   const paidBy = payment?.paidBy?.name || payment?.paidByName;
@@ -248,10 +381,42 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview }) {
             </DetailRow>
             <DetailRow label="Marked paid by">{paidBy || "—"}</DetailRow>
             {payment?.paidAt && <DetailRow label="Marked paid on">{fmtDate(payment.paidAt)}</DetailRow>}
+            {payment?.editedAt && (
+              <DetailRow label="Last edited">
+                {fmtDate(payment.editedAt)}
+                {payment.editedByName ? ` · ${payment.editedByName}` : ""}
+              </DetailRow>
+            )}
           </dl>
         )}
 
+        {(payment?.editHistory || []).length > 0 && (
+          <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-border bg-secondary/40 p-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Edit history
+            </p>
+            {[...payment.editHistory].reverse().map((h, i) => (
+              <div key={i} className="text-[11px]">
+                <p className="text-muted-foreground">
+                  {fmtDate(h.at)}
+                  {h.byName ? ` · ${h.byName}` : ""}
+                </p>
+                {(h.changes || []).map((c, j) => (
+                  <p key={j}>
+                    <span className="font-medium">{c.field}:</span> {c.from || "—"} → {c.to || "—"}
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
         <DialogFooter>
+          {invoice && onEdit && (
+            <Button type="button" variant="outline" onClick={() => onEdit(invoice)}>
+              <Pencil className="mr-1.5 h-4 w-4" /> Edit details
+            </Button>
+          )}
           {invoice?.documentUrl && (
             <Button type="button" variant="outline" onClick={() => onPreview(invoice)}>
               <Eye className="mr-1.5 h-4 w-4" /> View invoice
@@ -289,6 +454,7 @@ export default function Payments() {
   const [payInvoice, setPayInvoice] = useState(null);
   const [previewInvoice, setPreviewInvoice] = useState(null);
   const [detailsInvoice, setDetailsInvoice] = useState(null);
+  const [editInvoice, setEditInvoice] = useState(null);
 
   const load = useCallback(async () => {
     if (!allowed) return;
@@ -577,6 +743,21 @@ export default function Payments() {
                             <Banknote className="mr-1.5 h-3.5 w-3.5" /> Mark paid
                           </Button>
                         )}
+                        {paid && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditInvoice(row);
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            title="Edit the payment details"
+                            aria-label="Edit the payment details"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
                         {row.documentUrl && (
                           <button
                             type="button"
@@ -633,7 +814,13 @@ export default function Payments() {
           setDetailsInvoice(null);
           setPreviewInvoice(inv);
         }}
+        onEdit={(inv) => {
+          setDetailsInvoice(null);
+          setEditInvoice(inv);
+        }}
       />
+
+      <EditPaymentDialog invoice={editInvoice} onClose={() => setEditInvoice(null)} onSaved={load} />
 
       <PayDialog invoice={payInvoice} onClose={() => setPayInvoice(null)} onPaid={load} />
     </div>

@@ -1,5 +1,5 @@
 import express from "express";
-import { listInvoices, pendingCount, markPaid, getReport, exportReport, retryAmountBackfill } from "../controllers/billingController.js";
+import { listInvoices, pendingCount, markPaid, getReport, exportReport, exportFullReport, retryAmountBackfill } from "../controllers/billingController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -15,6 +15,7 @@ router.use(requirePermission("payment.pay"));
 router.get("/", listInvoices);
 router.get("/report", getReport);
 router.get("/report/export", exportReport);
+router.get("/report/full-export", exportFullReport);
 router.post("/backfill-amounts", retryAmountBackfill);
 router.patch("/:id/pay", markPaid);
 
