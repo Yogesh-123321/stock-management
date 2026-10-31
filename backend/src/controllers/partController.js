@@ -1,10 +1,14 @@
 import asyncHandler from "express-async-handler";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
 import KitTemplate from "../models/KitTemplate.js";
+import ActivityLog from "../models/ActivityLog.js";
 import User from "../models/User.js";
 import Vendor from "../models/Vendor.js";
 import { buildPartNumber } from "../utils/generatePartNumber.js";
@@ -1023,24 +1027,174 @@ export const getPartKitUsage = asyncHandler(async (req, res) => {
   res.json(usage);
 });
 /*
+  Stock-mismatch check used by the Stock report (Excel).
+
+  The ledger says: Inward - Outward = what we should be holding.
+    Inward  = every unit received for the part (main + IQC + awaiting
+              invoice), rejected-in-IQC units excluded.
+    Outward = units issued out through kits.
+  The recorded total (what the system says we hold) is
+    Main + In IQC + Awaiting invoice + R&D.
+  When the two differ, something changed the stock without a matching
+  inward / outward entry. This builds the plain-language "why".
+*/
+const STOCK_EPS = 0.0005;
+const r3 = (n) => Math.round((Number(n) || 0) * 1000) / 1000;
+const fmtQty = (n) => String(r3(n));
+
+/*
+  Seeded / opening stock for the report. It comes ONLY from the stock sheet
+  that was used to seed the store (Total Closing Stock column), kept as a
+  read-only lookup in src/data/seededStock.json. Nothing here reads or
+  writes seeded stock on the parts master.
+*/
+const __dirnamePart = path.dirname(fileURLToPath(import.meta.url));
+function loadSeededFromSheet() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirnamePart, "..", "data", "seededStock.json"), "utf-8");
+    return JSON.parse(raw).quantities || {};
+  } catch (err) {
+    console.warn("Stock report: seededStock.json not readable —", err.message);
+    return {};
+  }
+}
+
+/*
+  Activity-log trace: manual stock adjustments (PATCH /api/parts/:id/stock)
+  recorded in the activity log, grouped by part. Used to explain, in the
+  report, why a part's stock differs from seeded + inward - outward.
+  The stock-sheet import itself is a command-line script, so it is NOT in
+  the activity log, and neither is anything done before logging started.
+*/
+async function loadManualAdjustments() {
+  const byPart = new Map();
+  let firstLogAt = null;
+  try {
+    const first = await ActivityLog.findOne().sort({ createdAt: 1 }).select("createdAt").lean();
+    firstLogAt = first?.createdAt || null;
+    const logs = await ActivityLog.find({
+      success: true,
+      method: "PATCH",
+      path: { $regex: "/parts/[0-9a-fA-F]{24}/stock" },
+    })
+      .select("path userName meta createdAt")
+      .sort({ createdAt: 1 })
+      .lean();
+    for (const l of logs) {
+      const m = String(l.path || "").match(/\/parts\/([0-9a-fA-F]{24})\/stock/);
+      const qty = Number(l.meta?.quantity);
+      if (!m || !Number.isFinite(qty) || qty === 0) continue;
+      if (!byPart.has(m[1])) byPart.set(m[1], []);
+      byPart.get(m[1]).push({ qty, by: l.userName || "Unknown", at: l.createdAt });
+    }
+  } catch (err) {
+    console.warn("Stock report: activity log not readable —", err.message);
+  }
+  return { byPart, firstLogAt };
+}
+
+function buildActivityTrace(adjustments, diff, firstLogAt, unit) {
+  const u = unit ? ` ${unit}` : "";
+  const day = (d) => new Date(d).toISOString().slice(0, 10);
+  const since = firstLogAt ? ` Activity log starts ${day(firstLogAt)}; the stock-sheet import and earlier changes are not logged.` : "";
+  if (!adjustments || adjustments.length === 0) {
+    return `No manual stock adjustment found in the activity log for this part.${since}`;
+  }
+  const net = r3(adjustments.reduce((n, a) => n + a.qty, 0));
+  const shown = adjustments
+    .slice(-5)
+    .map((a) => `${a.qty > 0 ? "+" : ""}${fmtQty(a.qty)}${u} by ${a.by} on ${day(a.at)}`)
+    .join("; ");
+  const more = adjustments.length > 5 ? ` (latest 5 of ${adjustments.length})` : "";
+  let verdict;
+  if (Math.abs(net - diff) <= STOCK_EPS) verdict = "This fully explains the gap.";
+  else if (Math.sign(net) === Math.sign(diff) && Math.abs(net) < Math.abs(diff)) verdict = "This explains only part of the gap.";
+  else verdict = "This does not explain the gap.";
+  return `Manual stock adjustments in activity log${more}: ${shown}. Net ${net > 0 ? "+" : ""}${fmtQty(net)}${u}. ${verdict}`;
+}
+
+function checkStockMismatch({ main, iqc, awaiting, rnd, appliedIn, kits, rndIssued, seeded = 0, unit }) {
+  const inward = r3(appliedIn + iqc + awaiting);
+  const outward = r3(kits);
+  const seededQty = r3(seeded); // from the stock sheet only
+  const recorded = r3(main + iqc + awaiting + rnd);
+  const ledger = r3(seededQty + inward - outward);
+  const diff = r3(recorded - ledger);
+  // Gap WITHOUT any seeded qty: used to tell "seeded qty is missing from
+  // the stock" apart from other kinds of shortfall.
+  const rawDiff = r3(recorded - (inward - outward));
+  const rndDiff = r3(rnd - rndIssued);
+  const mainDiff = r3(diff - rndDiff);
+
+  const totalMismatch = Math.abs(diff) > STOCK_EPS;
+  const rndMismatch = Math.abs(rndDiff) > STOCK_EPS;
+  const mismatch = totalMismatch || rndMismatch;
+  const u = unit ? ` ${unit}` : "";
+  const remarks = [];
+
+  if (totalMismatch) {
+    remarks.push(
+      `Total stock is ${fmtQty(recorded)}${u} but ${seededQty !== 0 ? `seeded ${fmtQty(seededQty)} + ` : ""}inward ${fmtQty(inward)} - outward ${fmtQty(outward)} = ${fmtQty(ledger)}${u}; ` +
+        `${fmtQty(Math.abs(diff))}${u} ${diff > 0 ? "EXTRA in stock" : "SHORT in stock"} compared to the entries.`
+    );
+    if (diff > 0) {
+      remarks.push(
+        seededQty === 0
+          ? "This part has no seeded quantity in the stock sheet, so the extra stock has no receipt or seeded entry behind it - likely a manual stock increase or stock added outside a receipt."
+          : "The stock is higher than the seeded quantity plus receipts explain - likely a manual stock increase after seeding."
+      );
+    } else if (seededQty > 0 && Math.abs(rawDiff) <= STOCK_EPS) {
+      remarks.push(
+        `The stock sheet seeded ${fmtQty(seededQty)}${u} but the stock now equals inward - outward only, so the seeded quantity is not in the stock any more - it was reduced or overwritten after seeding, or never loaded into this part.`
+      );
+    } else {
+      remarks.push(
+        "Stock is lower than the entries explain - likely a manual reduction / stock-take correction, an Excel stock import that overwrote the count, or an issue / delete that took more than was available."
+      );
+    }
+    if (rndMismatch) {
+      remarks.push(
+        `Part of the gap is in R&D stock (${fmtQty(rnd)}${u} held vs ${fmtQty(rndIssued)}${u} in the R&D issue log).`
+      );
+    }
+  } else if (rndMismatch) {
+    remarks.push(
+      `Total tallies, but R&D stock (${fmtQty(rnd)}${u}) does not match the R&D issue log (${fmtQty(rndIssued)}${u}); ` +
+        `main stock is off by the opposite amount (${fmtQty(mainDiff)}${u}). R&D stock was changed without an issue entry or main stock was adjusted manually.`
+    );
+  } else if (seededQty > 0) {
+    remarks.push(`Seeded qty ${fmtQty(seededQty)}${u} from the stock sheet (opening stock) - total tallies.`);
+  }
+
+  return { seeded: seededQty, inward, outward, ledger, recorded, diff, mismatch, remarks: remarks.join(" ") };
+}
+
+/*
   GET /api/parts/export/stock-summary-xlsx — ADMIN ONLY.
   One Excel sheet with the all-in stock picture of every part (same
   numbers as the "Total stock — all in all" card in Part history):
     Expected total = Main + IQC + Awaiting invoice + R&D
     All-in total   = Expected total + Issued in kits
   Rejected-in-IQC units are listed but not counted in either total.
-  Computed with two aggregations (stock entries, kit issues) rather than
+
+  Each part is also reconciled against the ledger:
+    Total inward - total outward (kits)  vs  Expected total stock
+  A part where they differ is highlighted in red and given a remark
+  explaining why the stock entry does not match.
+  Computed with a few aggregations (stock entries, kit issues) rather than
   one history call per part, so it stays fast with thousands of parts.
 */
 export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
   const parts = await Part.find({})
-    .select("ttUniquePartNumber itemDescription manufacturerPartNumber unit quantityInStock rndStock")
+    .select(
+      "ttUniquePartNumber itemDescription manufacturerPartNumber unit quantityInStock rndStock rndIssues"
+    )
     .sort({ ttUniquePartNumber: 1 })
     .lean();
 
-  // Received lines not yet credited to main stock, bucketed by IQC state.
-  const pendingAgg = await StockEntry.aggregate([
-    { $match: { stockApplied: { $ne: true } } },
+  // Every received line, bucketed by where it is now. "applied" = already
+  // credited to main stock; the rest are still pending, split by IQC state.
+  const entryAgg = await StockEntry.aggregate([
     {
       $group: {
         _id: {
@@ -1048,6 +1202,7 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
           bucket: {
             $switch: {
               branches: [
+                { case: { $eq: ["$stockApplied", true] }, then: "applied" },
                 { case: { $eq: ["$iqcStatus", "in_iqc_stock"] }, then: "iqc" },
                 { case: { $eq: ["$iqcStatus", "rejected"] }, then: "rejected" },
               ],
@@ -1056,14 +1211,18 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
           },
         },
         qty: { $sum: "$quantityReceived" },
+        count: { $sum: 1 },
       },
     },
   ]);
-  const pending = new Map(); // partId -> { iqc, rejected, awaiting }
-  for (const r of pendingAgg) {
+  const pending = new Map(); // partId -> { applied, iqc, rejected, awaiting, count }
+  for (const r of entryAgg) {
+    if (!r._id.part) continue;
     const key = String(r._id.part);
-    if (!pending.has(key)) pending.set(key, { iqc: 0, rejected: 0, awaiting: 0 });
-    pending.get(key)[r._id.bucket] = r.qty;
+    if (!pending.has(key)) pending.set(key, { applied: 0, iqc: 0, rejected: 0, awaiting: 0, count: 0 });
+    const slot = pending.get(key);
+    slot[r._id.bucket] = r.qty;
+    slot.count += r.count;
   }
 
   const kitAgg = await KitIssue.aggregate([
@@ -1071,6 +1230,9 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     { $group: { _id: "$lines.part", qty: { $sum: "$lines.qtyIssued" } } },
   ]);
   const kitByPart = new Map(kitAgg.map((k) => [String(k._id), k.qty]));
+
+  const seededSheet = loadSeededFromSheet(); // read-only lookup, see above
+  const { byPart: adjustmentsByPart, firstLogAt } = await loadManualAdjustments();
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Stock management";
@@ -1088,16 +1250,44 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     { header: "Issued in kits", key: "kits", width: 14 },
     { header: "All-in total (incl. kits)", key: "allin", width: 22 },
     { header: "Rejected (IQC, not counted)", key: "rejected", width: 26 },
+    { header: "Seeded / opening stock", key: "seeded", width: 17 },
+    { header: "Total inward (received)", key: "inward", width: 20 },
+    { header: "Total outward (kits)", key: "outward", width: 19 },
+    { header: "Seeded + Inward - Outward", key: "ledger", width: 20 },
+    { header: "Difference (Total - (Seeded + Inward - Outward))", key: "diff", width: 26 },
+    { header: "Stock check", key: "status", width: 14 },
+    { header: "Remarks", key: "remarks", width: 90 },
+    { header: "Activity log trace", key: "trace", width: 80 },
   ];
 
+  const LAST_COL = 20; // T
+  const STATUS_COL = 18; // R
+  const REMARKS_COL = 19; // S
+  const TRACE_COL = 20; // T
+  const RED_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+  let mismatchCount = 0;
+
   parts.forEach((p, i) => {
-    const pd = pending.get(String(p._id)) || { iqc: 0, rejected: 0, awaiting: 0 };
+    const pd = pending.get(String(p._id)) || { applied: 0, iqc: 0, rejected: 0, awaiting: 0, count: 0 };
     const main = p.quantityInStock || 0;
     const rnd = p.rndStock || 0;
     const kits = kitByPart.get(String(p._id)) || 0;
     const expected = main + pd.iqc + pd.awaiting + rnd;
+    const rndIssued = (p.rndIssues || []).reduce((n, e) => n + (Number(e.quantity) || 0), 0);
+    const chk = checkStockMismatch({
+      main,
+      iqc: pd.iqc,
+      awaiting: pd.awaiting,
+      rnd,
+      appliedIn: pd.applied,
+      kits,
+      rndIssued,
+      seeded: seededSheet[p.ttUniquePartNumber] || 0,
+      unit: p.unit || "",
+    });
+    if (chk.mismatch) mismatchCount += 1;
     const r = i + 2; // header is row 1
-    ws.addRow({
+    const row = ws.addRow({
       pn: p.ttUniquePartNumber || "",
       desc: p.itemDescription || "",
       mpn: p.manufacturerPartNumber || "",
@@ -1110,29 +1300,78 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
       kits,
       allin: { formula: `I${r}+J${r}`, result: expected + kits },
       rejected: pd.rejected,
+      seeded: chk.seeded,
+      inward: chk.inward,
+      outward: chk.outward,
+      ledger: { formula: `M${r}+N${r}-O${r}`, result: chk.ledger },
+      diff: { formula: `ROUND(I${r}-P${r},3)`, result: chk.diff },
+      status: chk.mismatch ? "MISMATCH" : chk.seeded > 0 ? "OK (seeded)" : "OK",
+      remarks: chk.remarks,
+      trace: chk.mismatch
+        ? buildActivityTrace(adjustmentsByPart.get(String(p._id)), chk.diff, firstLogAt, p.unit || "")
+        : "",
     });
+    if (chk.mismatch) {
+      // Highlight the whole line so it stands out when scrolling.
+      for (let c = 1; c <= LAST_COL; c += 1) {
+        const cell = row.getCell(c);
+        cell.fill = RED_FILL;
+        cell.font = { ...(cell.font || {}), color: { argb: "FF9C0006" } };
+      }
+      row.getCell(STATUS_COL).font = { bold: true, color: { argb: "FF9C0006" } };
+    } else {
+      row.getCell(STATUS_COL).font = { color: { argb: "FF006100" } };
+      if (chk.seeded > 0) {
+        // Light-yellow marker on the seeded quantity so it is easy to spot.
+        row.getCell(13).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
+      }
+    }
+    row.getCell(REMARKS_COL).alignment = { wrapText: true, vertical: "top" };
+    row.getCell(TRACE_COL).alignment = { wrapText: true, vertical: "top" };
   });
 
   // Totals row (only when there is data).
   if (parts.length > 0) {
     const last = parts.length + 1;
     const totals = ws.addRow({ pn: "TOTAL" });
-    for (const col of ["E", "F", "G", "H", "I", "J", "K", "L"]) {
+    for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"]) {
       totals.getCell(col).value = { formula: `SUM(${col}2:${col}${last})` };
     }
+    totals.getCell("R").value = {
+      formula: `COUNTIF(R2:R${last},"MISMATCH")&" mismatch(es)"`,
+      result: `${mismatchCount} mismatch(es)`,
+    };
     totals.font = { bold: true };
-    ws.autoFilter = { from: "A1", to: `L${last}` };
+    ws.autoFilter = { from: "A1", to: `T${last}` };
   }
 
   ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
   ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
-  for (const col of ["E", "F", "G", "H", "I", "J", "K", "L"]) {
+  for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"]) {
     ws.getColumn(col).alignment = { horizontal: "right" };
     ws.getColumn(col).numFmt = "#,##0.###";
   }
+  ws.getColumn("R").alignment = { horizontal: "center" };
+  ws.getRow(1).getCell(STATUS_COL).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  ws.getRow(1).getCell(REMARKS_COL).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+  ws.getRow(1).getCell(TRACE_COL).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+  // Column-level fonts above would override the red row font; only bold the
+  // two total columns on rows that are not already highlighted.
   ws.getColumn("I").font = { bold: true };
   ws.getColumn("K").font = { bold: true };
+
+  // Re-apply row highlight fonts (column fonts are applied as defaults only
+  // to cells without their own style, but be explicit for the red rows).
+  ws.eachRow((row, n) => {
+    if (n === 1) return;
+    if (String(row.getCell(STATUS_COL).value) === "MISMATCH") {
+      for (let c = 1; c <= LAST_COL; c += 1) {
+        const cell = row.getCell(c);
+        cell.font = { bold: c === 9 || c === 11 || c === STATUS_COL, color: { argb: "FF9C0006" } };
+      }
+    }
+  });
 
   const note = wb.addWorksheet("How to read");
   note.columns = [{ width: 110 }];
@@ -1145,6 +1384,16 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     "R&D stock: set aside for R&D.",
     "Issued in kits: already sent out through issued kits.",
     "Rejected: failed IQC; shown for reference and not counted in either total.",
+    "",
+    "STOCK CHECK (red rows)",
+    "Seeded / opening stock = the 'Total Closing Stock' of the part in the stock sheet used to seed the store (Vendor Stock Management workbook), kept as a read-only lookup file. It is never written to the parts master. Rows that tally with their seeded stock are marked OK (seeded) with a yellow cell.",
+    "Total inward = every unit received for the part (main + IQC + awaiting invoice), rejected units excluded.",
+    "Total outward = units issued out through kits.",
+    "Difference = Expected total stock - (Seeded + Total inward - Total outward). It should be 0.",
+    "A row is highlighted red and marked MISMATCH when the difference is not 0, or when R&D stock does not match its R&D issue log.",
+    "The Remarks column explains the likely reason. The Activity log trace column lists manual stock adjustments recorded in the activity log for that part and says whether they explain the gap (the stock-sheet import is a script and is not in the log).",
+    `Parts with a mismatch in this report: ${mismatchCount} of ${parts.length}`,
+    "",
     `Generated ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
   ].forEach((t) => note.addRow([t]));
 
