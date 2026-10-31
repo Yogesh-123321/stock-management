@@ -309,7 +309,9 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                       <SelectTrigger>
                         <SelectValue placeholder="Choose a kit to copy…" />
                       </SelectTrigger>
-                      <SelectContent>
+                      {/* The editor overlay is z-[120]; the dropdown list is portaled to
+                          <body>, so it needs to sit above it or it opens hidden behind. */}
+                      <SelectContent className="z-[200]">
                         {existingTemplates.map((t) => (
                           <SelectItem key={t._id} value={t._id}>
                             {t.kitName} {t.kitCode ? `(${t.kitCode})` : ""}
@@ -398,6 +400,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                         "TT part #",
                         "Mfr part #",
                         "Qty/kit",
+                        "Unit",
                         "DNP",
                         "Match",
                         "",
@@ -449,15 +452,20 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                             disabled={locked}
                           />
                         </td>
-                        <td className="px-1.5 py-1 w-[80px]">
+                        <td className="px-1.5 py-1 w-[100px]">
                           <Input
                             type="number"
                             min="0"
+                            step="any"
+                            inputMode="decimal"
                             className="h-8 text-xs font-mono-tech"
                             value={r.qtyPerKit}
                             onChange={(e) => setItem(r._key, "qtyPerKit", e.target.value)}
                             disabled={locked}
                           />
+                        </td>
+                        <td className="px-1.5 py-2 w-[60px] text-xs text-muted-foreground whitespace-nowrap">
+                          {r.matchedPart?.unit || "—"}
                         </td>
                         <td className="px-1.5 py-1 w-[50px] text-center">
                           <input
@@ -710,7 +718,7 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                 <table className="w-full text-sm">
                   <thead className="bg-secondary/70">
                     <tr className="border-b border-border">
-                      {["Ref.", "Value", "TT part #", "Description", "Qty/kit", "In stock", "DNP"].map(
+                      {["Ref.", "Value", "TT part #", "Description", "Qty/kit", "Unit", "In stock", "DNP"].map(
                         (h) => (
                           <th
                             key={h}
@@ -725,7 +733,7 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                   <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                     {items.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                        <td colSpan={8} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
                           This kit has no items.
                         </td>
                       </tr>
@@ -741,6 +749,7 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                           )}
                         </td>
                         <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{it.qtyPerKit}</td>
+                        <td className="px-2.5 py-1.5 text-xs">{it.matchedPart?.unit || "—"}</td>
                         <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                           {it.matchedPart ? it.matchedPart.quantityInStock : "—"}
                         </td>

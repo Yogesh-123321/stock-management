@@ -43,13 +43,17 @@ const sanitizeItem = (raw = {}) => {
   };
 };
 
+// Quantities can be decimal (metres, kilograms, ...). Rounding to 4 places keeps
+// float noise (0.1 * 3 = 0.30000000000000004) out of stock and issue figures.
+const qr = (n) => Math.round((Number(n) || 0) * 1e4) / 1e4;
+
 // Resolves every ttUniquePartNumber referenced by a set of kit items
 // against the live parts master in one query, keyed by code.
 async function resolvePartsByCode(items) {
   const codes = [...new Set((items || []).map((it) => it.ttUniquePartNumber).filter(Boolean))];
   if (!codes.length) return new Map();
   const parts = await Part.find({ ttUniquePartNumber: { $in: codes } }).select(
-    "ttUniquePartNumber itemDescription quantityInStock"
+    "ttUniquePartNumber itemDescription quantityInStock unit"
   );
   return new Map(parts.map((p) => [p.ttUniquePartNumber, p]));
 }
@@ -89,7 +93,7 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
   const batchCache = new Map();
   for (const item of items) {
     const partDoc = byCode.get(item.ttUniquePartNumber);
-    const required = item.qtyPerKit * qty;
+    const required = qr(item.qtyPerKit * qty);
     const available = partDoc ? partDoc.quantityInStock : 0;
 
     let toDeduct;
@@ -106,7 +110,7 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
     } else {
       toDeduct = Math.min(available, required);
     }
-    const short = Math.max(0, required - toDeduct);
+    const short = qr(Math.max(0, required - toDeduct));
 
     if (short > 0) {
       shortages.push({
@@ -136,7 +140,7 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
   // line whose part isn't in the master at all.
   for (const { partDoc, toDeduct } of resolvedLines) {
     if (partDoc && toDeduct > 0) {
-      partDoc.quantityInStock = Math.max(0, partDoc.quantityInStock - toDeduct);
+      partDoc.quantityInStock = qr(Math.max(0, partDoc.quantityInStock - toDeduct));
       await partDoc.save();
     }
   }
@@ -173,13 +177,13 @@ async function resolveDraftLines(items, qty, overrideLines) {
   const batchCache = new Map();
   for (const item of items) {
     const partDoc = byCode.get(item.ttUniquePartNumber);
-    const required = item.qtyPerKit * qty;
+    const required = qr(item.qtyPerKit * qty);
     const available = partDoc ? partDoc.quantityInStock : 0;
 
     const planned = overrideByCode.has(item.ttUniquePartNumber)
       ? overrideByCode.get(item.ttUniquePartNumber)
       : Math.min(available, required);
-    const short = Math.max(0, required - planned);
+    const short = qr(Math.max(0, required - planned));
 
     if (short > 0) {
       shortages.push({
@@ -528,7 +532,7 @@ export const getKitIssues = asyncHandler(async (req, res) => {
 
   const issues = await KitIssue.find(filter)
     .populate("vendor", "companyName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock")
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit")
     .sort({ createdAt: -1 })
     .limit(limit);
   const plain = issues.map((i) => i.toObject());
@@ -751,7 +755,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
 export const getKitIssueById = asyncHandler(async (req, res) => {
   const issue = await KitIssue.findById(req.params.id)
     .populate("vendor")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
   if (!issue || issue.status !== "issued") {
     res.status(404);
     throw new Error("Kit issue not found");
@@ -858,7 +862,7 @@ export const issueKit = asyncHandler(async (req, res) => {
 
   const populated = await KitIssue.findById(issue._id)
     .populate("vendor", "companyName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
 
   res.status(201).json({
     ...populated.toObject(),
@@ -1004,7 +1008,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
   const populated = await KitIssue.findById(draft._id)
     .populate("vendor", "companyName")
     .populate("editedFrom", "issueCode kitName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
 
   res.status(201).json({
     ...populated.toObject(),
@@ -1095,7 +1099,7 @@ export const deleteKitIssueLine = asyncHandler(async (req, res) => {
 
   const partDoc = await Part.findById(line.part);
   if (partDoc) {
-    partDoc.quantityInStock = partDoc.quantityInStock + Number(line.qtyIssued || 0);
+    partDoc.quantityInStock = qr(partDoc.quantityInStock + Number(line.qtyIssued || 0));
     await partDoc.save();
   }
 
@@ -1166,7 +1170,7 @@ export const saveKitDraft = asyncHandler(async (req, res) => {
 
   const populated = await KitIssue.findById(draft._id)
     .populate("vendor", "companyName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
 
   res.status(201).json({
     ...populated.toObject(),
@@ -1237,7 +1241,7 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
 
   const populated = await KitIssue.findById(draft._id)
     .populate("vendor", "companyName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
 
   res.json({
     ...populated.toObject(),
@@ -1254,7 +1258,7 @@ export const getKitDrafts = asyncHandler(async (req, res) => {
   const drafts = await KitIssue.find({ status: "draft" })
     .populate("vendor", "companyName")
     .populate("editedFrom", "issueCode kitName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock")
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit")
     .sort({ updatedAt: -1 })
     .limit(limit);
   res.json(drafts.map((d) => d.toObject()));
@@ -1267,7 +1271,7 @@ export const getKitDraftById = asyncHandler(async (req, res) => {
   const draft = await KitIssue.findById(req.params.draftId)
     .populate("vendor")
     .populate("editedFrom", "issueCode kitName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
   if (!draft || draft.status !== "draft") {
     res.status(404);
     throw new Error("Saved kit not found");
@@ -1433,7 +1437,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
 
   const populated = await KitIssue.findById(draft._id)
     .populate("vendor", "companyName")
-    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock");
+    .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit");
 
   res.status(200).json({
     ...populated.toObject(),

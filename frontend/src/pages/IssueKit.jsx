@@ -87,6 +87,10 @@ async function downloadXlsx(path, filename) {
 const issueXlsxName = (issue) =>
   `kit-issue-${String(issue.issueCode || issue.kitName || "kit").replace(/[^A-Za-z0-9._-]+/g, "_")}.xlsx`;
 
+// Quantities can be decimal (metres, kilograms, ...). Rounding to 4 places keeps
+// float noise like 0.1 * 3 = 0.30000000000000004 out of the screens and payloads.
+const r4 = (n) => Math.round((Number(n) || 0) * 1e4) / 1e4;
+
 // Client-side mirror of the backend's FIFO batch walk (see
 // utils/batchAllocation.js) — used only to preview, before a kit is
 // actually issued, which batch(es) a line's qty will be drawn from.
@@ -100,10 +104,10 @@ function previewBatchBreakdown(batches, qty) {
   for (const b of batches || []) {
     if (remaining <= 0) break;
     if (b.remaining <= 0) continue;
-    const take = Math.min(b.remaining, remaining);
+    const take = r4(Math.min(b.remaining, remaining));
     if (take > 0) {
       breakdown.push({ batchCode: b.batchCode, quantity: take });
-      remaining -= take;
+      remaining = r4(remaining - take);
     }
   }
   if (remaining > 0) breakdown.push({ batchCode: null, quantity: remaining });
@@ -176,7 +180,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
     () =>
       (issue.lines || []).map((l) => {
         const available = l.part?.quantityInStock ?? 0;
-        const required = (l.qtyPerKit || 0) * qtyNum;
+        const required = r4((l.qtyPerKit || 0) * qtyNum);
         const ok = available >= required;
         const defaultToIssue = Math.min(available, required);
         const cumulativePrevious = previousTotals?.[l.ttUniquePartNumber];
@@ -184,6 +188,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
           ttUniquePartNumber: l.ttUniquePartNumber,
           itemDescription: l.part?.itemDescription || l.itemDescription,
           qtyPerKit: l.qtyPerKit,
+          unit: l.part?.unit || "",
           required,
           available,
           ok,
@@ -219,8 +224,8 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
     const linesPayload = [];
     for (const p of preview) {
       const q = qtyToIssueFor(p);
-      if (!Number.isFinite(q) || q < 0 || !Number.isInteger(q)) {
-        toast.error(`Qty being issued for ${p.ttUniquePartNumber} must be a whole number of 0 or more`);
+      if (!Number.isFinite(q) || q < 0) {
+        toast.error(`Qty being issued for ${p.ttUniquePartNumber} must be a number of 0 or more`);
         return;
       }
       if (q > p.available) {
@@ -235,8 +240,8 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
     const extraItemsPayload = [];
     for (const l of extraLines) {
       const q = Number(l.qty);
-      if (!Number.isFinite(q) || q < 0 || !Number.isInteger(q)) {
-        toast.error(`Qty for added part ${l.ttUniquePartNumber} must be a whole number of 0 or more`);
+      if (!Number.isFinite(q) || q < 0) {
+        toast.error(`Qty for added part ${l.ttUniquePartNumber} must be a number of 0 or more`);
         return;
       }
       if (q > l.available) {
@@ -342,13 +347,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
             <div className="rounded-lg border border-border">
               <table className="w-full table-fixed text-sm">
                 <colgroup>
-                  <col className="w-[13%]" />
-                  <col className="w-[23%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[19%]" />
                   <col className="w-[8%]" />
+                  <col className="w-[6%]" />
                   <col className="w-[9%]" />
-                  <col className="w-[13%]" />
+                  <col className="w-[11%]" />
                   <col className="w-[9%]" />
-                  <col className="w-[13%]" />
+                  <col className="w-[14%]" />
                   <col className="w-[12%]" />
                 </colgroup>
                 <thead className="bg-secondary/70">
@@ -357,6 +363,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                       "TT part #",
                       "Description",
                       "Qty/kit",
+                      "Unit",
                       "Required",
                       isDraft ? "Last saved" : "Prev. issued",
                       "Available",
@@ -378,6 +385,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                       <td className="break-all px-1.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
                       <td className="break-words px-1.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.qtyPerKit}</td>
+                      <td className="break-words px-1.5 py-1.5 text-xs text-muted-foreground">{p.unit || "—"}</td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.required}</td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground">
                         {p.previouslyIssued}
@@ -388,7 +396,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                           type="number"
                           min="0"
                           max={p.available}
-                          step="1"
+                          step="any"
                           className="h-7 w-full font-mono-tech text-xs text-right"
                           value={issueQtyOverrides[p.ttUniquePartNumber] ?? String(p.defaultToIssue)}
                           onChange={(e) => setQtyToIssueFor(p.ttUniquePartNumber, e.target.value)}
@@ -454,6 +462,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                             ttUniquePartNumber: p.ttUniquePartNumber,
                             itemDescription: p.itemDescription,
                             available: p.quantityInStock ?? 0,
+                            unit: p.unit || "",
                             qty: "1",
                           },
                         ]);
@@ -482,14 +491,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                           <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
                           <td className="px-2.5 py-1.5 text-xs">{l.itemDescription || "—"}</td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground whitespace-nowrap">
-                            {l.available} in stock
+                            {l.available}{l.unit ? ` ${l.unit}` : ""} in stock
                           </td>
                           <td className="px-2.5 py-1.5">
                             <Input
                               type="number"
                               min="0"
                               max={l.available}
-                              step="1"
+                              step="any"
                               className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
                               value={l.qty}
                               onChange={(e) =>
@@ -638,7 +647,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
             <table className="w-full text-sm">
               <thead className="bg-secondary/70">
                 <tr className="border-b border-border">
-                  {["TT part #", "Description", "Qty/kit", "Required", "Issued", "Batches", "Short"].map((h) => (
+                  {["TT part #", "Description", "Qty/kit", "Unit", "Required", "Issued", "Batches", "Short"].map((h) => (
                     <th
                       key={h}
                       className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
@@ -651,7 +660,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
               <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                 {lines.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                    <td colSpan={8} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
                       This issue has no lines.
                     </td>
                   </tr>
@@ -663,6 +672,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                       {l.part?.itemDescription || l.itemDescription || "—"}
                     </td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyPerKit}</td>
+                    <td className="px-2.5 py-1.5 text-xs">{l.part?.unit || "—"}</td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyRequired}</td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyIssued}</td>
                     <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
@@ -1217,7 +1227,7 @@ export default function IssueKit() {
   const preview = useMemo(
     () =>
       issuableItems.map((it) => {
-        const required = (it.qtyPerKit || 0) * qtyNum;
+        const required = r4((it.qtyPerKit || 0) * qtyNum);
         const available = it.matchedPart?.quantityInStock ?? 0;
         const ok = !!it.matchedPart && available >= required;
         const defaultToIssue = Math.min(available, required);
@@ -1299,8 +1309,8 @@ export default function IssueKit() {
     const linesPayload = [];
     for (const p of preview) {
       const q = qtyToIssueFor(p);
-      if (!Number.isFinite(q) || q < 0 || !Number.isInteger(q)) {
-        toast.error(`Qty for ${p.ttUniquePartNumber} must be a whole number of 0 or more`);
+      if (!Number.isFinite(q) || q < 0) {
+        toast.error(`Qty for ${p.ttUniquePartNumber} must be a number of 0 or more`);
         return;
       }
       linesPayload.push({ ttUniquePartNumber: p.ttUniquePartNumber, qtyIssued: q });
@@ -1356,8 +1366,8 @@ export default function IssueKit() {
     const linesPayload = [];
     for (const p of preview) {
       const q = qtyToIssueFor(p);
-      if (!Number.isFinite(q) || q < 0 || !Number.isInteger(q)) {
-        toast.error(`Qty being issued for ${p.ttUniquePartNumber} must be a whole number of 0 or more`);
+      if (!Number.isFinite(q) || q < 0) {
+        toast.error(`Qty being issued for ${p.ttUniquePartNumber} must be a number of 0 or more`);
         return;
       }
       if (q > p.available) {
@@ -1518,7 +1528,7 @@ export default function IssueKit() {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        {["TT part #", "Description", "Qty/kit", "Required", "Available", "Qty issuing", "Batches", "Status"].map(
+                        {["TT part #", "Description", "Qty/kit", "Unit", "Required", "Available", "Qty issuing", "Batches", "Status"].map(
                           (h) => (
                             <th
                               key={h}
@@ -1544,6 +1554,7 @@ export default function IssueKit() {
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                             {p.qtyPerKit}
                           </td>
+                          <td className="px-2.5 py-1.5 text-xs">{p.matchedPart?.unit || "—"}</td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                             {p.required}
                           </td>
@@ -1555,7 +1566,7 @@ export default function IssueKit() {
                               type="number"
                               min="0"
                               max={p.available}
-                              step="1"
+                              step="any"
                               className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
                               value={
                                 issueQtyOverrides[p.ttUniquePartNumber] ?? String(p.defaultToIssue)

@@ -40,6 +40,12 @@ async function touchPurchaseOrder(purchaseOrderId) {
   }
 }
 
+// Sets partDoc.unit from a delivery's unit, but only when the part has none.
+function fillPartUnit(partDoc, unit) {
+  const u = String(unit ?? "").trim();
+  if (u && !String(partDoc.unit || "").trim()) partDoc.unit = u;
+}
+
 /**
  * Logs a received line against a part that already exists in the master
  * database. No approval is needed for this path — the part number is
@@ -73,6 +79,10 @@ export async function bookExistingPart({
   // just an association and is safe to record immediately, unlike the
   // quantity itself.
   partDoc.vendors.addToSet(vendor);
+  // The part master has no unit yet -> adopt the one entered on this delivery,
+  // so the Parts page / kit templates know how this part's qty is measured.
+  // Never overwrites a unit that is already set on the part.
+  fillPartUnit(partDoc, unit);
   await partDoc.save();
 
   const entry = await StockEntry.create({
@@ -84,7 +94,7 @@ export async function bookExistingPart({
     matchType: "existing_part_number",
     enteredBy,
     remarks,
-    unit: unit || "",
+    unit: unit || partDoc.unit || "",
     price: price === "" || price == null ? null : Number(price),
     stockApplied: false,
   });
@@ -196,6 +206,7 @@ export async function bookNewPart({
       alternateOfPart = await Part.findById(alternateOfPartId);
     }
     partDoc.vendors.addToSet(vendor);
+    fillPartUnit(partDoc, unit);
     await partDoc.save();
   } else {
     // Fallback: no part created for this request yet (e.g. it was approved
@@ -226,7 +237,7 @@ export async function bookNewPart({
       companyCode: newPart.companyCode.toUpperCase(),
       category: newPart.category.toUpperCase(),
       partTypeBatchNo: newPart.partTypeBatchNo.toUpperCase(),
-      unit: newPart.unit || "",
+      unit: newPart.unit || unit || "",
       price: newPart.price === "" || newPart.price == null ? null : Number(newPart.price),
       quantityInStock: 0,
       vendors: [vendor],

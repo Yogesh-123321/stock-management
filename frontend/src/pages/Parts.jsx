@@ -54,6 +54,7 @@ import {
   ExternalLink,
   Boxes,
 } from "lucide-react";
+import { fmtQty } from "@/lib/utils";
 
 /**
  * Column descriptor for the Parts master table.
@@ -1163,8 +1164,8 @@ function EditPartDialog({ part, onClose, onSaved }) {
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold">Edit part</h2>
             <p className="break-all text-xs text-muted-foreground">
-              {part.ttUniquePartNumber} · stock {part.quantityInStock ?? 0} · R&amp;D stock{" "}
-              {part.rndStock ?? 0}
+              {part.ttUniquePartNumber} · stock {fmtQty(part.quantityInStock)} · R&amp;D stock{" "}
+              {fmtQty(part.rndStock)}
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -1405,7 +1406,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Stock qty
                   </p>
-                  <p className="font-mono-tech text-sm">{part.quantityInStock ?? 0}</p>
+                  <p className="font-mono-tech text-sm">{fmtQty(part.quantityInStock)}</p>
                 </div>
 
                 <div className="inline-block w-full align-top pb-3 sm:w-1/2 sm:pr-3">
@@ -1413,7 +1414,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                     Qty in kits
                   </p>
                   <p className="font-mono-tech text-sm">
-                    {part.totalQtyInKits ?? 0}
+                    {fmtQty(part.totalQtyInKits)}
                     {part.kitTemplateCount ? (
                       <span className="ml-1.5 text-xs font-sans text-muted-foreground">
                         issued via {part.kitTemplateCount} kit template(s)
@@ -1428,7 +1429,7 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
                   </p>
                   <p className="font-mono-tech text-sm">
                     <RndStockHover issues={part.rndIssues}>
-                      <span>{part.rndStock ?? 0}</span>
+                      <span>{fmtQty(part.rndStock)}</span>
                     </RndStockHover>
                   </p>
                 </div>
@@ -1754,7 +1755,7 @@ useEffect(() => {
                         <div className="rounded border border-emerald-500/30 bg-emerald-500/5 p-2.5">
                           <div className="text-[11px] text-muted-foreground">Expected total stock</div>
                           <div className="font-mono-tech text-lg font-semibold">
-                            {data.stockSummary.expectedTotal}
+                            {fmtQty(data.stockSummary.expectedTotal)}
                             <span className="ml-1 text-[11px] font-normal text-muted-foreground">
                               {data.stockSummary.unit}
                             </span>
@@ -1766,7 +1767,7 @@ useEffect(() => {
                         <div className="rounded border border-border p-2.5">
                           <div className="text-[11px] text-muted-foreground">All-in incl. issued kits</div>
                           <div className="font-mono-tech text-lg font-semibold">
-                            {data.stockSummary.allInTotal}
+                            {fmtQty(data.stockSummary.allInTotal)}
                           </div>
                           <div className="text-[10px] text-muted-foreground">
                             Expected total + already issued in kits
@@ -1775,7 +1776,7 @@ useEffect(() => {
                         <div className="rounded border border-border p-2.5">
                           <div className="text-[11px] text-muted-foreground">Main stock (usable now)</div>
                           <div className="font-mono-tech text-lg font-semibold">
-                            {data.stockSummary.mainStock}
+                            {fmtQty(data.stockSummary.mainStock)}
                           </div>
                           <div className="text-[10px] text-muted-foreground">Cleared IQC</div>
                         </div>
@@ -1790,7 +1791,7 @@ useEffect(() => {
                         ].map((c) => (
                           <div key={c.label} className="rounded border border-border p-2.5">
                             <div className="text-[11px] text-muted-foreground">{c.label}</div>
-                            <div className="font-mono-tech font-semibold">{c.value}</div>
+                            <div className="font-mono-tech font-semibold">{fmtQty(c.value)}</div>
                             <div className="text-[10px] text-muted-foreground">{c.hint}</div>
                           </div>
                         ))}
@@ -1959,7 +1960,7 @@ useEffect(() => {
                         Current balance
                       </span>
                       <p className="font-mono-tech text-base font-semibold">
-                        {data.closingBalance ?? 0}
+                        {fmtQty(data.closingBalance)}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -2070,7 +2071,7 @@ useEffect(() => {
                                   {e.type === "issued" &&
                                     (e.batchBreakdown || []).map((b, i) => (
                                       <Badge key={i} variant="secondary" className="font-mono-tech">
-                                        {b.batchCode ? `Batch ${b.batchCode}` : "No batch"}: {b.quantity}
+                                        {b.batchCode ? `Batch ${b.batchCode}` : "No batch"}: {fmtQty(b.quantity)}
                                       </Badge>
                                     ))}
                                 </div>
@@ -2141,7 +2142,7 @@ useEffect(() => {
                                 }`}
                               >
                                 {e.direction === "out" ? "−" : "+"}
-                                {e.quantity}
+                                {fmtQty(e.quantity)}
                                 {part?.unit ? (
                                   <span className="ml-0.5 text-[10px] text-muted-foreground">{part.unit}</span>
                                 ) : null}
@@ -2563,7 +2564,7 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
                               : "—"}
                           </TableCell>
                           <TableCell className="text-right font-mono-tech">
-                            {p.quantityInStock ?? 0}
+                            {fmtQty(p.quantityInStock)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -2615,7 +2616,7 @@ const COMPARISON_FIELDS = [
     key: "quantityInStock",
     label: "Stock qty",
     mono: true,
-    format: (p) => p.quantityInStock ?? 0,
+    format: (p) => fmtQty(p.quantityInStock),
   },
   {
     key: "vendors",
@@ -3725,7 +3726,7 @@ export default function Parts() {
                       )}
                     </TableCell>
                     <TableCell className="align-top py-1 text-right font-mono-tech">
-                      {p.quantityInStock}
+                      {fmtQty(p.quantityInStock)}
                     </TableCell>
                     <TableCell
                       className="align-top py-1 text-right font-mono-tech text-muted-foreground"
@@ -3735,7 +3736,7 @@ export default function Parts() {
                           : "Not yet issued in any kit"
                       }
                     >
-                      {p.totalQtyInKits ?? 0}
+                      {fmtQty(p.totalQtyInKits)}
                     </TableCell>
                     <TableCell className="align-top py-1 text-right font-mono-tech">
                       {miscView === "rejected" ? (
@@ -3743,11 +3744,11 @@ export default function Parts() {
                           className={miscValue(p) > 0 ? "text-destructive" : "text-muted-foreground"}
                           title="Quantity rejected during IQC"
                         >
-                          {miscValue(p)}
+                          {fmtQty(miscValue(p))}
                         </span>
                       ) : (
                         <RndStockHover issues={p.rndIssues}>
-                          <span>{p.rndStock ?? 0}</span>
+                          <span>{fmtQty(p.rndStock)}</span>
                         </RndStockHover>
                       )}
                     </TableCell>

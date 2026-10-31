@@ -173,6 +173,84 @@ export const markPaid = asyncHandler(async (req, res) => {
   res.json(updated);
 });
 
+// PATCH /api/billing/:id/payment   { paymentMethod, utrNumber, paymentDate, remarks }
+// Corrects the payment details of an invoice that is ALREADY paid. The invoice
+// stays paid; every changed field is appended to payment.editHistory
+// (from -> to, who, when) so the original entry is never silently lost.
+export const updatePayment = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid invoice id" });
+
+  const invoice = await TaxInvoice.findById(id).select("-extractedLines");
+  if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+  if (invoice.payment?.status !== "paid")
+    return res.status(409).json({ message: "This invoice is not marked as paid yet. Mark it paid first." });
+
+  const method = String(req.body?.paymentMethod || "").trim();
+  if (!PAYMENT_METHODS.includes(method))
+    return res.status(400).json({ message: "Choose how this invoice was paid." });
+
+  let utrNumber = null;
+  if (method !== CASH_METHOD) {
+    utrNumber = String(req.body?.utrNumber || "").trim().toUpperCase();
+    if (!utrNumber) return res.status(400).json({ message: "Enter the UTR number." });
+    if (!/^[A-Z0-9][A-Z0-9\-/]{4,39}$/.test(utrNumber))
+      return res.status(400).json({
+        message: "The UTR number should be 5–40 characters: letters, digits, - or / only.",
+      });
+  }
+
+  const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : null;
+  if (!paymentDate || Number.isNaN(paymentDate.getTime()))
+    return res.status(400).json({ message: "Enter a valid payment date." });
+  if (paymentDate.getTime() > Date.now() + 24 * 60 * 60 * 1000)
+    return res.status(400).json({ message: "Payment date cannot be in the future." });
+
+  const remarks = String(req.body?.remarks || "").trim();
+
+  const old = invoice.payment;
+  const day = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+  const changes = [];
+  const track = (field, from, to) => {
+    if (String(from ?? "") !== String(to ?? "")) changes.push({ field, from: String(from ?? ""), to: String(to ?? "") });
+  };
+  track("Payment method", old.method, method);
+  track("UTR number", old.utrNumber, utrNumber);
+  track("Payment date", day(old.paymentDate), day(paymentDate));
+  track("Remarks", old.remarks, remarks);
+
+  if (changes.length === 0) {
+    await invoice.populate(POPULATE);
+    return res.json(invoice);
+  }
+
+  const byName = req.user.name || req.user.username || "";
+  const now = new Date();
+
+  // Targeted $set/$push (not doc.save) so older invoices with missing fields
+  // are never re-validated, and the invoice can only be edited while paid.
+  const updated = await TaxInvoice.findOneAndUpdate(
+    { _id: id, "payment.status": "paid" },
+    {
+      $set: {
+        "payment.method": method,
+        "payment.utrNumber": utrNumber,
+        "payment.paymentDate": paymentDate,
+        "payment.remarks": remarks,
+        "payment.editedAt": now,
+        "payment.editedByName": byName,
+      },
+      $push: { "payment.editHistory": { at: now, by: req.user._id, byName, changes } },
+    },
+    { new: true }
+  )
+    .select("-extractedLines")
+    .populate(POPULATE);
+
+  if (!updated) return res.status(409).json({ message: "This invoice is no longer marked as paid." });
+  res.json(updated);
+});
+
 /* ------------------------------------------------------------------ */
 /* Custom report                                                       */
 /* ------------------------------------------------------------------ */

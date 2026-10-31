@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { FlaskConical } from "lucide-react";
+import { fmtQty } from "@/lib/utils";
 
 /*
   Hover popover for the Parts master "R&D stock" column — lists everyone
@@ -95,7 +96,7 @@ export default function RndStockHover({ issues, children }) {
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium truncate">{it.personName}</span>
                       <span className="font-mono-tech text-xs text-muted-foreground shrink-0">
-                        {it.quantity}
+                        {fmtQty(it.quantity)}
                       </span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
