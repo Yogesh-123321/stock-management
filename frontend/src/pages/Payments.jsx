@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { RefreshCw, Banknote, Eye, Search, Wallet, FileBarChart, Pencil } from "lucide-react";
+import { RefreshCw, Banknote, Eye, Search, Wallet, FileBarChart, Pencil, Trash2 } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -41,7 +41,8 @@ const PAYMENT_METHODS = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque", "Card", "Other
 const CASH_METHOD = "Cash purchase";
 
 const TABS = [
-  { key: "unpaid", label: "Unpaid" },
+  { key: "unpaid", label: "Unpaid" }, // still owes money (includes part-paid)
+  { key: "partial", label: "Part-paid" },
   { key: "paid", label: "Paid" },
   { key: "all", label: "All" },
 ];
@@ -52,18 +53,33 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const todayInput = () => new Date().toISOString().slice(0, 10);
 const errMsg = (err, fallback) => err?.response?.data?.message || fallback;
 const isPaid = (row) => row?.payment?.status === "paid";
+const isPartial = (row) => row?.payment?.status === "partial";
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const statusLabel = (row) => (isPaid(row) ? "Paid" : isPartial(row) ? "Part-paid" : "Unpaid");
+const STATUS_STYLE = {
+  Paid: "bg-emerald-100 text-emerald-800",
+  "Part-paid": "bg-sky-100 text-sky-800",
+  Unpaid: "bg-amber-100 text-amber-800",
+};
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /* ------------------------------------------------------------------ */
-/* Mark an invoice as paid                                             */
+/* Record a payment — in full, or as one installment of several        */
 /* ------------------------------------------------------------------ */
 
 function PayDialog({ invoice, onClose, onPaid }) {
+  const total = round2(invoice?.amount);
+  const already = round2(invoice?.paidAmount);
+  const balance = Math.max(0, round2(total - already));
+  // Without a known invoice amount there is nothing to split, so it is paid in one go.
+  const canSplit = total > 0 && balance > 0;
+
   const [method, setMethod] = useState("NEFT");
   const [utr, setUtr] = useState("");
   const [date, setDate] = useState(todayInput());
+  const [amount, setAmount] = useState("");
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -72,13 +88,22 @@ function PayDialog({ invoice, onClose, onPaid }) {
     setMethod("NEFT");
     setUtr("");
     setDate(todayInput());
+    setAmount(balance > 0 ? String(balance) : "");
     setRemarks("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoice]);
 
   const isCash = method === CASH_METHOD;
+  const entered = round2(amount);
+  const isPart = canSplit && entered > 0 && entered < balance - 0.004;
+  const remaining = isPart ? round2(balance - entered) : 0;
 
   const submit = async (e) => {
     e.preventDefault();
+    if (canSplit) {
+      if (!(entered > 0)) return toast.error("Enter the amount you are paying now");
+      if (entered > balance + 0.004) return toast.error(`The amount cannot be more than the balance (${inr(balance)})`);
+    }
     if (!isCash && !utr.trim()) return toast.error("Enter the UTR number");
     if (!date) return toast.error("Choose the payment date");
 
@@ -90,12 +115,14 @@ function PayDialog({ invoice, onClose, onPaid }) {
         utrNumber: isCash ? null : utr.trim(),
         paymentDate: date,
         remarks,
+        // Left out when the invoice has no known amount: the server then pays it in full.
+        ...(canSplit ? { amount: entered } : {}),
       });
-      toast.success("Invoice marked as paid");
+      toast.success(isPart ? `Part payment of ${inr(entered)} recorded` : "Invoice marked as paid");
       onPaid?.();
       onClose();
     } catch (err) {
-      toast.error(errMsg(err, "Could not mark the invoice as paid"));
+      toast.error(errMsg(err, "Could not record the payment"));
     } finally {
       setSaving(false);
     }
@@ -105,18 +132,63 @@ function PayDialog({ invoice, onClose, onPaid }) {
     <Dialog open={Boolean(invoice)} onOpenChange={(v) => !v && !saving && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Mark invoice as paid</DialogTitle>
+          <DialogTitle>{isPart ? "Record part payment" : already > 0 ? "Pay the balance" : "Mark invoice as paid"}</DialogTitle>
           <DialogDescription>
             {invoice?.vendor?.companyName || "Vendor"} · invoice {invoice?.invoiceNumber || "—"}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center justify-between rounded-md border border-border bg-secondary/50 px-3 py-2">
-          <span className="text-xs text-muted-foreground">Amount to pay</span>
-          <span className="text-base font-semibold tabular-nums">{inr(invoice?.amount)}</span>
+        <div className="space-y-1 rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Invoice amount</span>
+            <span className="tabular-nums">{inr(total)}</span>
+          </div>
+          {already > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Already paid</span>
+              <span className="tabular-nums text-emerald-700">{inr(already)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between border-t border-border/60 pt-1">
+            <span className="font-medium">Balance due</span>
+            <span className="text-base font-semibold tabular-nums">{inr(balance)}</span>
+          </div>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
+          {canSplit && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pay-amount">Amount paying now (₹) *</Label>
+                {entered !== balance && (
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                    onClick={() => setAmount(String(balance))}
+                  >
+                    Pay full balance
+                  </button>
+                )}
+              </div>
+              <Input
+                id="pay-amount"
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                step="0.01"
+                max={balance}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                autoComplete="off"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {isPart
+                  ? `Part payment — ${inr(remaining)} will remain due and the invoice stays open as part-paid.`
+                  : "Paying the full balance closes this invoice as paid. Enter a smaller amount to pay in installments."}
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1">
             <Label htmlFor="pay-method">Payment method *</Label>
             <select
@@ -145,7 +217,7 @@ function PayDialog({ invoice, onClose, onPaid }) {
             />
             {isCash && (
               <p className="text-[11px] text-muted-foreground">
-                Cash purchase — no UTR is recorded for this invoice.
+                Cash purchase — no UTR is recorded for this payment.
               </p>
             )}
           </div>
@@ -178,7 +250,7 @@ function PayDialog({ invoice, onClose, onPaid }) {
             </Button>
             <Button type="submit" disabled={saving}>
               <Banknote className="mr-1.5 h-4 w-4" />
-              {saving ? "Saving…" : "Mark as paid"}
+              {saving ? "Saving…" : isPart ? "Record part payment" : "Mark as paid"}
             </Button>
           </DialogFooter>
         </form>
@@ -245,8 +317,14 @@ function EditPaymentDialog({ invoice, onClose, onSaved }) {
         </DialogHeader>
 
         <div className="flex items-center justify-between rounded-md border border-border bg-secondary/50 px-3 py-2">
-          <span className="text-xs text-muted-foreground">Amount paid</span>
-          <span className="text-base font-semibold tabular-nums">{inr(invoice?.amount)}</span>
+          <span className="text-xs text-muted-foreground">
+            {isPartial(invoice) || (invoice?.payment?.installments || []).length > 1
+              ? "Latest payment"
+              : "Amount paid"}
+          </span>
+          <span className="text-base font-semibold tabular-nums">
+            {inr(invoice?.payment?.installments?.at(-1)?.amount ?? invoice?.amount)}
+          </span>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
@@ -301,8 +379,10 @@ function EditPaymentDialog({ invoice, onClose, onSaved }) {
           </div>
 
           <p className="text-[11px] text-muted-foreground">
-            The invoice stays marked as paid. What you change here is recorded in the invoice's edit
-            history.
+            {(invoice?.payment?.installments || []).length > 1 || isPartial(invoice)
+              ? "This changes the most recent payment only; the invoice keeps its status. "
+              : "The invoice stays marked as paid. "}
+            What you change here is recorded in the invoice's edit history.
           </p>
 
           <DialogFooter>
@@ -312,6 +392,100 @@ function EditPaymentDialog({ invoice, onClose, onSaved }) {
             <Button type="submit" disabled={saving}>
               <Pencil className="mr-1.5 h-4 w-4" />
               {saving ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Delete a recorded payment (entered by mistake)                      */
+/* ------------------------------------------------------------------ */
+
+function DeletePaymentDialog({ target, onClose, onDeleted }) {
+  const invoice = target?.invoice;
+  const inst = target?.installment || null; // null = invoice paid in one go before installments existed
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (target) setReason("");
+  }, [target]);
+
+  const all = invoice?.payment?.installments || [];
+  const amount = round2(inst ? inst.amount : invoice?.amount);
+  const paidAfter = inst ? Math.max(0, round2(all.reduce((t, p) => t + (p.amount || 0), 0) - amount)) : 0;
+  const after = paidAfter <= 0 ? "Unpaid" : paidAfter >= round2(invoice?.amount) - 0.004 ? "Paid" : "Part-paid";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!reason.trim()) return toast.error("Write a reason for deleting this payment");
+    setSaving(true);
+    try {
+      await api.delete(`/billing/${invoice._id}/payment`, {
+        data: { installmentId: inst?._id, reason: reason.trim() },
+      });
+      toast.success("Payment deleted");
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      toast.error(errMsg(err, "Could not delete the payment"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={Boolean(target)} onOpenChange={(v) => !v && !saving && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete this payment?</DialogTitle>
+          <DialogDescription>
+            {invoice?.vendor?.companyName || "Vendor"} · invoice {invoice?.invoiceNumber || "—"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-1 rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Payment being deleted</span>
+            <span className="text-base font-semibold tabular-nums">{inr(amount)}</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {fmtDate(inst ? inst.paymentDate : invoice?.payment?.paymentDate)} ·{" "}
+            {(inst ? inst.method : invoice?.payment?.method) || "—"}
+            {(inst ? inst.utrNumber : invoice?.payment?.utrNumber)
+              ? ` · UTR ${inst ? inst.utrNumber : invoice.payment.utrNumber}`
+              : ""}
+          </p>
+          <p className="border-t border-border/60 pt-1 text-[11px]">
+            The invoice will go back to <span className="font-semibold">{after}</span>
+            {after !== "Unpaid" && ` (${inr(paidAfter)} paid, ${inr(Math.max(0, round2(invoice?.amount) - paidAfter))} due)`}.
+          </p>
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="del-reason">Reason *</Label>
+            <Textarea
+              id="del-reason"
+              rows={2}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Entered twice / wrong invoice / payment bounced"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            The deleted payment stays in the invoice's history with your name and this reason.
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="destructive" disabled={saving}>
+              <Trash2 className="mr-1.5 h-4 w-4" />
+              {saving ? "Deleting…" : "Delete payment"}
             </Button>
           </DialogFooter>
         </form>
@@ -333,10 +507,13 @@ function DetailRow({ label, children }) {
   );
 }
 
-function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
+function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit, onPay, onDelete }) {
   const payment = invoice?.payment;
+  const partial = isPartial(invoice);
   const cash = payment?.method === CASH_METHOD;
   const paidBy = payment?.paidBy?.name || payment?.paidByName;
+  const installments = payment?.installments || [];
+  const balance = Math.max(0, round2((invoice?.amount || 0) - (invoice?.paidAmount || 0)));
 
   return (
     <Dialog open={Boolean(invoice)} onOpenChange={(v) => !v && onClose()}>
@@ -351,11 +528,16 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
         {invoice && (
           <dl>
             <DetailRow label="Status">
-              <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
-                Paid
+              <span
+                className={cn(
+                  "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  STATUS_STYLE[statusLabel(invoice)]
+                )}
+              >
+                {statusLabel(invoice)}
               </span>
             </DetailRow>
-            <DetailRow label="Amount paid">
+            <DetailRow label={partial ? "Invoice amount" : "Amount paid"}>
               <span className="font-semibold tabular-nums">{inr(invoice.amount)}</span>
               {invoice.gstTotal > 0 && (
                 <span className="block text-[11px] text-muted-foreground">
@@ -363,24 +545,39 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
                 </span>
               )}
             </DetailRow>
-            <DetailRow label="Payment method">{payment?.method || "—"}</DetailRow>
-            <DetailRow label="UTR number">
-              {cash ? (
-                <span className="text-muted-foreground">Not applicable (cash purchase)</span>
-              ) : (
-                payment?.utrNumber || "—"
-              )}
-            </DetailRow>
-            <DetailRow label="Payment date">{fmtDate(payment?.paymentDate)}</DetailRow>
-            <DetailRow label="Remarks">
-              {payment?.remarks ? (
-                <span className="whitespace-pre-wrap">{payment.remarks}</span>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )}
-            </DetailRow>
-            <DetailRow label="Marked paid by">{paidBy || "—"}</DetailRow>
-            {payment?.paidAt && <DetailRow label="Marked paid on">{fmtDate(payment.paidAt)}</DetailRow>}
+            {partial && (
+              <>
+                <DetailRow label="Paid so far">
+                  <span className="font-semibold tabular-nums text-emerald-700">{inr(invoice.paidAmount)}</span>
+                </DetailRow>
+                <DetailRow label="Balance due">
+                  <span className="font-semibold tabular-nums text-amber-700">{inr(balance)}</span>
+                </DetailRow>
+              </>
+            )}
+            {/* Invoices paid in one go before installments existed keep the old layout. */}
+            {installments.length === 0 && (
+              <>
+                <DetailRow label="Payment method">{payment?.method || "—"}</DetailRow>
+                <DetailRow label="UTR number">
+                  {cash ? (
+                    <span className="text-muted-foreground">Not applicable (cash purchase)</span>
+                  ) : (
+                    payment?.utrNumber || "—"
+                  )}
+                </DetailRow>
+                <DetailRow label="Payment date">{fmtDate(payment?.paymentDate)}</DetailRow>
+                <DetailRow label="Remarks">
+                  {payment?.remarks ? (
+                    <span className="whitespace-pre-wrap">{payment.remarks}</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </DetailRow>
+                <DetailRow label="Marked paid by">{paidBy || "—"}</DetailRow>
+                {payment?.paidAt && <DetailRow label="Marked paid on">{fmtDate(payment.paidAt)}</DetailRow>}
+              </>
+            )}
             {payment?.editedAt && (
               <DetailRow label="Last edited">
                 {fmtDate(payment.editedAt)}
@@ -388,6 +585,66 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
               </DetailRow>
             )}
           </dl>
+        )}
+
+        {installments.length > 0 && (
+          <div className="max-h-52 overflow-y-auto rounded-md border border-border">
+            <p className="border-b border-border bg-secondary/50 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {installments.length === 1 ? "Payment" : `Payments (${installments.length})`}
+            </p>
+            {installments.map((p, i) => (
+              <div
+                key={i}
+                className="flex items-start justify-between gap-3 border-b border-border/60 px-2.5 py-2 text-[11px] last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {installments.length > 1 ? `#${i + 1} · ` : ""}
+                    {fmtDate(p.paymentDate)} · {p.method}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {p.method === CASH_METHOD ? "No UTR (cash purchase)" : `UTR ${p.utrNumber || "—"}`}
+                    {p.paidByName ? ` · ${p.paidByName}` : ""}
+                  </p>
+                  {p.remarks && <p className="whitespace-pre-wrap text-muted-foreground">{p.remarks}</p>}
+                </div>
+                <div className="flex shrink-0 items-start gap-1.5">
+                  <span className="text-xs font-semibold tabular-nums">{inr(p.amount)}</span>
+                  {onDelete && (
+                    <button
+                      type="button"
+                      onClick={() => onDelete(invoice, p)}
+                      title="Delete this payment"
+                      aria-label="Delete this payment"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {(payment?.deletedPayments || []).length > 0 && (
+          <div className="max-h-32 space-y-2 overflow-y-auto rounded-md border border-border bg-secondary/40 p-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Deleted payments
+            </p>
+            {[...payment.deletedPayments].reverse().map((d, i) => (
+              <div key={i} className="text-[11px]">
+                <p>
+                  <span className="font-medium tabular-nums">{inr(d.amount)}</span> · {d.method || "—"}
+                  {d.utrNumber ? ` · UTR ${d.utrNumber}` : ""}
+                </p>
+                <p className="text-muted-foreground">
+                  Deleted {fmtDate(d.at)}
+                  {d.byName ? ` by ${d.byName}` : ""} — {d.reason || "no reason"}
+                </p>
+              </div>
+            ))}
+          </div>
         )}
 
         {(payment?.editHistory || []).length > 0 && (
@@ -412,9 +669,19 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
         )}
 
         <DialogFooter>
+          {invoice && partial && onPay && (
+            <Button type="button" onClick={() => onPay(invoice)}>
+              <Banknote className="mr-1.5 h-4 w-4" /> Add payment
+            </Button>
+          )}
+          {invoice && onDelete && installments.length === 0 && (
+            <Button type="button" variant="outline" onClick={() => onDelete(invoice, null)}>
+              <Trash2 className="mr-1.5 h-4 w-4" /> Delete payment
+            </Button>
+          )}
           {invoice && onEdit && (
             <Button type="button" variant="outline" onClick={() => onEdit(invoice)}>
-              <Pencil className="mr-1.5 h-4 w-4" /> Edit details
+              <Pencil className="mr-1.5 h-4 w-4" /> {installments.length > 1 || partial ? "Edit latest payment" : "Edit details"}
             </Button>
           )}
           {invoice?.documentUrl && (
@@ -422,7 +689,7 @@ function PaymentDetailsDialog({ invoice, onClose, onPreview, onEdit }) {
               <Eye className="mr-1.5 h-4 w-4" /> View invoice
             </Button>
           )}
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant={partial && onPay ? "outline" : "default"} onClick={onClose}>
             Close
           </Button>
         </DialogFooter>
@@ -444,8 +711,8 @@ export default function Payments() {
   const [tab, setTab] = useState("unpaid");
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([]);
-  const [counts, setCounts] = useState({ unpaid: 0, paid: 0, all: 0 });
-  const [amounts, setAmounts] = useState({ unpaid: 0, paid: 0, all: 0 });
+  const [counts, setCounts] = useState({ unpaid: 0, partial: 0, paid: 0, all: 0 });
+  const [amounts, setAmounts] = useState({ unpaid: 0, partial: 0, paid: 0, all: 0 });
   const [listedTotal, setListedTotal] = useState(0);
   const [amountsPending, setAmountsPending] = useState(0);
   const [backfill, setBackfill] = useState(null);
@@ -455,6 +722,7 @@ export default function Payments() {
   const [previewInvoice, setPreviewInvoice] = useState(null);
   const [detailsInvoice, setDetailsInvoice] = useState(null);
   const [editInvoice, setEditInvoice] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null); // { invoice, installment | null }
 
   const load = useCallback(async () => {
     if (!allowed) return;
@@ -462,8 +730,8 @@ export default function Payments() {
     try {
       const { data } = await api.get("/billing", { params: { status: tab, search: search.trim() } });
       setItems(data.items || []);
-      setCounts(data.counts || { unpaid: 0, paid: 0, all: 0 });
-      setAmounts(data.amounts || { unpaid: 0, paid: 0, all: 0 });
+      setCounts(data.counts || { unpaid: 0, partial: 0, paid: 0, all: 0 });
+      setAmounts(data.amounts || { unpaid: 0, partial: 0, paid: 0, all: 0 });
       setListedTotal(data.listedTotal || 0);
       setAmountsPending(data.amountsPending || 0);
       setBackfill(data.backfill || null);
@@ -510,7 +778,7 @@ export default function Payments() {
       return Number.isNaN(d.getTime()) ? null : d.getTime();
     },
     po: (r) => r.purchaseOrder?.documentNumber,
-    status: (r) => (isPaid(r) ? "Paid" : "Unpaid"),
+    status: (r) => statusLabel(r),
     amount: (r) => Number(r.amount) || 0,
     paymentDate: (r) => (r.payment?.paymentDate ? new Date(r.payment.paymentDate).getTime() : null),
   });
@@ -538,8 +806,10 @@ export default function Payments() {
             </CardTitle>
             <CardDescription>
               Tax invoices uploaded at stock entry appear here as unpaid. Mark each one paid with its
-              UTR number (not needed for a cash purchase). Click a paid invoice to see its payment
-              details.
+              UTR number (not needed for a cash purchase), or record an installment when a bill is paid
+              in parts — it stays open as part-paid until the full amount is paid. Click a paid or
+              part-paid invoice to see its payments. Tab figures for Unpaid and Part-paid show the
+              balance still due.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -641,16 +911,22 @@ export default function Payments() {
                     ? "Loading…"
                     : tab === "unpaid"
                     ? "No unpaid invoices."
+                    : tab === "partial"
+                    ? "No part-paid invoices."
                     : "No invoices here."}
                 </TableEmpty>
               )}
               {sortedItems.map((row) => {
-                const paid = isPaid(row);
+                const partial = isPartial(row);
+                // Paid and part-paid rows both have payments to show.
+                const paid = isPaid(row) || partial;
                 const cash = row.payment?.method === CASH_METHOD;
+                const label = statusLabel(row);
+                const nInst = (row.payment?.installments || []).length;
                 return (
                   <TableRow
                     key={row._id}
-                    // Paid rows open a read-only details popup; unpaid rows stay inert.
+                    // Paid / part-paid rows open a details popup; unpaid rows stay inert.
                     onClick={paid ? () => setDetailsInvoice(row) : undefined}
                     onKeyDown={
                       paid
@@ -696,11 +972,11 @@ export default function Payments() {
                     <TableCell>
                       <span
                         className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                          paid ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                          "inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          STATUS_STYLE[label]
                         )}
                       >
-                        {paid ? "Paid" : "Unpaid"}
+                        {label}
                       </span>
                     </TableCell>
                     <TableCell className="text-right text-xs tabular-nums">
@@ -710,11 +986,28 @@ export default function Payments() {
                           incl. GST {inr(row.gstTotal)}
                         </p>
                       )}
+                      {partial && (
+                        <>
+                          <p className="text-[10px] font-medium text-emerald-700">
+                            Paid {inr(row.paidAmount)}
+                          </p>
+                          <p className="text-[10px] font-medium text-amber-700">
+                            Due {inr(row.balance)}
+                          </p>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs">
                       {paid ? (
                         <>
-                          <p className="font-medium">{row.payment.method}</p>
+                          <p className="font-medium">
+                            {row.payment.method}
+                            {nInst > 1 && (
+                              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                                (latest of {nInst} payments)
+                              </span>
+                            )}
+                          </p>
                           <p className="text-[11px] text-muted-foreground">
                             {cash ? "No UTR (cash purchase)" : `UTR ${row.payment.utrNumber}`}
                           </p>
@@ -731,7 +1024,7 @@ export default function Payments() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        {!paid && (
+                        {!isPaid(row) && (
                           <Button
                             size="sm"
                             className="h-8"
@@ -739,8 +1032,9 @@ export default function Payments() {
                               e.stopPropagation();
                               setPayInvoice(row);
                             }}
+                            onKeyDown={(e) => e.stopPropagation()}
                           >
-                            <Banknote className="mr-1.5 h-3.5 w-3.5" /> Mark paid
+                            <Banknote className="mr-1.5 h-3.5 w-3.5" /> {partial ? "Add payment" : "Mark paid"}
                           </Button>
                         )}
                         {paid && (
@@ -751,11 +1045,27 @@ export default function Payments() {
                               setEditInvoice(row);
                             }}
                             onKeyDown={(e) => e.stopPropagation()}
-                            title="Edit the payment details"
-                            aria-label="Edit the payment details"
+                            title={partial || nInst > 1 ? "Edit the latest payment" : "Edit the payment details"}
+                            aria-label={partial || nInst > 1 ? "Edit the latest payment" : "Edit the payment details"}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
                           >
                             <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                        {paid && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Deletes the most recent payment; older ones are deleted from the details popup.
+                              setDeleteTarget({ invoice: row, installment: row.payment?.installments?.at(-1) || null });
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            title={nInst > 1 || partial ? "Delete the latest payment" : "Delete the payment"}
+                            aria-label={nInst > 1 || partial ? "Delete the latest payment" : "Delete the payment"}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         )}
                         {row.documentUrl && (
@@ -818,6 +1128,20 @@ export default function Payments() {
           setDetailsInvoice(null);
           setEditInvoice(inv);
         }}
+        onPay={(inv) => {
+          setDetailsInvoice(null);
+          setPayInvoice(inv);
+        }}
+        onDelete={(inv, installment) => {
+          setDetailsInvoice(null);
+          setDeleteTarget({ invoice: inv, installment });
+        }}
+      />
+
+      <DeletePaymentDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDeleted={load}
       />
 
       <EditPaymentDialog invoice={editInvoice} onClose={() => setEditInvoice(null)} onSaved={load} />

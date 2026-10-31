@@ -223,15 +223,16 @@ export default function BillingReport() {
             <Label>Status</Label>
             <select className={selectClass} value={f.status} onChange={set("status")}>
               <option value="all">All</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
+              <option value="unpaid">Unpaid (incl. part-paid)</option>
+              <option value="partial">Part-paid only</option>
+              <option value="paid">Paid in full</option>
             </select>
           </div>
           <div className="space-y-1">
             <Label>Date based on</Label>
             <select className={selectClass} value={f.dateField} onChange={set("dateField")}>
               <option value="invoice">Invoice date</option>
-              <option value="payment">Payment date (paid only)</option>
+              <option value="payment">Payment date (latest payment)</option>
             </select>
           </div>
           <div className="space-y-1">
@@ -300,9 +301,14 @@ export default function BillingReport() {
         {s && (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Total" value={inr(s.totalAmount)} sub={`${s.count} invoices`} />
-            <Stat label="Paid" value={inr(s.paidAmount)} sub={`${s.paidCount} invoices`} tone="paid" />
             <Stat
-              label="Unpaid"
+              label="Paid"
+              value={inr(s.paidAmount)}
+              sub={`${s.paidCount} paid in full${s.partialCount ? ` · ${s.partialCount} part-paid` : ""}`}
+              tone="paid"
+            />
+            <Stat
+              label="Balance due"
               value={inr(s.unpaidAmount)}
               sub={`${s.unpaidCount} invoices`}
               tone="unpaid"
@@ -329,7 +335,7 @@ export default function BillingReport() {
                 <SortableHead label="Invoices" sortKey="count" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[90px]" />
                 <SortableHead label="Total" sortKey="amount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
                 <SortableHead label="Paid" sortKey="paidAmount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
-                <SortableHead label="Unpaid" sortKey="unpaidAmount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
+                <SortableHead label="Balance due" sortKey="unpaidAmount" sort={groupSort.sort} onSort={groupSort.toggle} align="right" className="w-[150px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -387,19 +393,28 @@ export default function BillingReport() {
                     <span
                       className={cn(
                         "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                        paid ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                        paid
+                          ? "bg-emerald-100 text-emerald-800"
+                          : r.status === "Partial"
+                          ? "bg-sky-100 text-sky-800"
+                          : "bg-amber-100 text-amber-800"
                       )}
                     >
-                      {r.status}
+                      {r.status === "Partial" ? "Part-paid" : r.status}
                     </span>
                   </TableCell>
                   <TableCell className="text-right text-xs tabular-nums">{inr(r.taxable)}</TableCell>
                   <TableCell className="text-right text-xs tabular-nums">{inr(r.gst)}</TableCell>
                   <TableCell className="text-right text-xs font-semibold tabular-nums">
                     {inr(r.amount)}
+                    {r.status === "Partial" && (
+                      <span className="block text-[10px] font-normal text-muted-foreground">
+                        Paid {inr(r.received)} · Due {inr(r.balance)}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {paid ? (
+                    {paid || r.status === "Partial" ? (
                       <>
                         <p className="font-medium">{r.method || "—"}</p>
                         <p className="text-[11px] text-muted-foreground">

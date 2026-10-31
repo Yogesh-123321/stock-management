@@ -62,6 +62,7 @@ export default function InvoicePreviewDialog({ invoice, onClose, onMarkPaid }) {
   const url = fileUrl(invoice?.documentUrl);
   const kind = kindOf(invoice);
   const paid = invoice?.payment?.status === "paid";
+  const partial = invoice?.payment?.status === "partial";
 
   return (
     <Dialog open={Boolean(invoice)} onOpenChange={(v) => !v && onClose()}>
@@ -149,7 +150,7 @@ export default function InvoicePreviewDialog({ invoice, onClose, onMarkPaid }) {
             )}
             {!paid && onMarkPaid && (
               <Button size="sm" onClick={() => onMarkPaid(invoice)}>
-                <Banknote className="mr-1.5 h-3.5 w-3.5" /> Mark paid
+                <Banknote className="mr-1.5 h-3.5 w-3.5" /> {partial ? "Add payment" : "Mark paid"}
               </Button>
             )}
           </div>

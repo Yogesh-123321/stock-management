@@ -39,6 +39,27 @@ const gstOf = (inv) =>
 
 const AMOUNT_EXPR = { $ifNull: ["$grandTotal", { $ifNull: ["$totalBill", { $ifNull: ["$paymentAmount", 0] }] }] };
 
+// Installments: an invoice can be settled in parts. payment.status goes
+// unpaid -> partial -> paid; payment.paidAmount is the running total received.
+// An invoice that is "paid" (including every one marked before installments
+// existed) counts as fully received, whatever paidAmount says.
+const receivedOf = (inv) =>
+  inv?.payment?.status === "paid"
+    ? round2(invoiceAmount(inv))
+    : round2(Math.min(Number(inv?.payment?.paidAmount) || 0, invoiceAmount(inv) || Infinity));
+const balanceOf = (inv) => Math.max(0, round2(invoiceAmount(inv) - receivedOf(inv)));
+const statusOf = (inv) => inv?.payment?.status || "unpaid";
+const withMoney = (inv) => {
+  const o = inv.toObject ? inv.toObject() : inv;
+  return {
+    ...o,
+    amount: invoiceAmount(inv),
+    gstTotal: round2(gstOf(inv)),
+    paidAmount: receivedOf(inv),
+    balance: balanceOf(inv),
+  };
+};
+
 const sumAmounts = (rows) => round2(rows.reduce((s, r) => s + invoiceAmount(r), 0));
 
 // GET /api/billing?status=unpaid|paid|all&search=
@@ -46,6 +67,8 @@ export const listInvoices = asyncHandler(async (req, res) => {
   const status = String(req.query.status || "unpaid");
   const filter = {};
   if (status === "paid") filter["payment.status"] = "paid";
+  else if (status === "partial") filter["payment.status"] = "partial";
+  // "Unpaid" = still owes money, so part-paid invoices stay in this tab.
   else if (status === "unpaid") filter["payment.status"] = NOT_PAID;
 
   const q = String(req.query.search || "").trim();
@@ -63,20 +86,28 @@ export const listInvoices = asyncHandler(async (req, res) => {
     ];
   }
 
-  const [items, unpaid, paid, amountRows, amountsPending] = await Promise.all([
+  const [items, amountRows, amountsPending] = await Promise.all([
     TaxInvoice.find(filter)
       .select("-extractedLines")
       .populate(POPULATE)
       .sort(status === "paid" ? { "payment.paidAt": -1 } : { createdAt: -1 })
       .limit(500),
-    TaxInvoice.countDocuments({ "payment.status": NOT_PAID }),
-    TaxInvoice.countDocuments({ "payment.status": "paid" }),
-    // Rupee totals per tab (whole collection, not just the 500 rows shown).
+    // Counts and rupee totals per tab (whole collection, not just the 500 rows shown).
     TaxInvoice.aggregate([
       {
         $group: {
-          _id: { $cond: [{ $eq: ["$payment.status", "paid"] }, "paid", "unpaid"] },
+          _id: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$payment.status", "paid"] }, then: "paid" },
+                { case: { $eq: ["$payment.status", "partial"] }, then: "partial" },
+              ],
+              default: "unpaid",
+            },
+          },
+          count: { $sum: 1 },
           total: { $sum: AMOUNT_EXPR },
+          received: { $sum: { $ifNull: ["$payment.paidAmount", 0] } },
         },
       },
     ]),
@@ -87,16 +118,30 @@ export const listInvoices = asyncHandler(async (req, res) => {
   // the page re-loads while amountsPending > 0.
   if (amountsPending > 0) triggerAmountBackfill();
 
-  const amounts = { unpaid: 0, paid: 0, all: 0 };
-  for (const r of amountRows) amounts[r._id] = round2(r.total);
-  amounts.all = round2(amounts.unpaid + amounts.paid);
+  // Tab figures: "Unpaid" and "Partial" show what is still OWED (invoice amount
+  // minus installments received); "Paid" and "All" show full invoice values.
+  const by = Object.fromEntries(amountRows.map((r) => [r._id, r]));
+  const g = (k) => by[k] || { count: 0, total: 0, received: 0 };
+  const partialDue = Math.max(0, g("partial").total - g("partial").received);
+  const counts = {
+    unpaid: g("unpaid").count + g("partial").count,
+    partial: g("partial").count,
+    paid: g("paid").count,
+    all: g("unpaid").count + g("partial").count + g("paid").count,
+  };
+  const amounts = {
+    unpaid: round2(g("unpaid").total + partialDue),
+    partial: round2(partialDue),
+    paid: round2(g("paid").total),
+    all: round2(g("unpaid").total + g("partial").total + g("paid").total),
+  };
 
   // Total of the rows currently listed (respects the search box).
   const listedTotal = sumAmounts(items);
 
   res.json({
-    items: items.map((i) => ({ ...i.toObject(), amount: invoiceAmount(i), gstTotal: round2(gstOf(i)) })),
-    counts: { unpaid, paid, all: unpaid + paid },
+    items: items.map(withMoney),
+    counts,
     amounts,
     listedTotal,
     amountsPending,
@@ -113,7 +158,13 @@ export const pendingCount = asyncHandler(async (req, res) => {
   res.json({ count });
 });
 
-// PATCH /api/billing/:id/pay   { paymentMethod, utrNumber, paymentDate, remarks }
+// PATCH /api/billing/:id/pay   { paymentMethod, utrNumber, paymentDate, remarks, amount? }
+// Records ONE payment against the invoice.
+//   - no `amount`            -> pays the whole remaining balance (invoice closes as "paid")
+//   - `amount` < balance     -> an installment: invoice becomes / stays "partial"
+//   - `amount` == balance    -> last installment: invoice closes as "paid"
+// Every payment is kept in payment.installments; the top-level payment fields
+// mirror the latest one.
 export const markPaid = asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid invoice id" });
@@ -142,40 +193,97 @@ export const markPaid = asyncHandler(async (req, res) => {
 
   const remarks = String(req.body?.remarks || "").trim();
 
-  // Only flips an invoice that is still unpaid, so two people paying at the
-  // same moment cannot overwrite each other's UTR.
-  const updated = await TaxInvoice.findOneAndUpdate(
-    { _id: id, "payment.status": NOT_PAID },
-    {
-      $set: {
-        "payment.status": "paid",
-        "payment.method": method,
-        "payment.utrNumber": utrNumber,
-        "payment.paymentDate": paymentDate,
-        "payment.paidAt": new Date(),
-        "payment.paidBy": req.user._id,
-        "payment.paidByName": req.user.name || req.user.username || "",
-        "payment.remarks": remarks,
-      },
+  const invoice = await TaxInvoice.findById(id).select("-extractedLines");
+  if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+  if (statusOf(invoice) === "paid")
+    return res.status(409).json({ message: "This invoice has already been marked as paid." });
+
+  const total = round2(invoiceAmount(invoice));
+  const before = round2(Math.max(0, Number(invoice.payment?.paidAmount) || 0));
+  const balance = round2(Math.max(0, total - before));
+
+  // How much is being paid now. Left blank = the whole balance.
+  const rawAmount = req.body?.amount;
+  const given = rawAmount !== undefined && rawAmount !== null && String(rawAmount).trim() !== "";
+  let amount = balance;
+  if (given) {
+    amount = round2(Number(rawAmount));
+    if (!Number.isFinite(amount) || amount <= 0)
+      return res.status(400).json({ message: "Enter an amount greater than 0." });
+    if (total <= 0)
+      return res.status(400).json({
+        message:
+          "This invoice's amount has not been read yet, so a part payment cannot be recorded. Wait for the amount to appear (or use Read amounts now), then try again.",
+      });
+    if (amount > balance + 0.004)
+      return res.status(400).json({
+        message: `The amount is more than the balance due (₹${balance.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+        })}).`,
+      });
+  }
+
+  const nowPaid = round2(before + amount);
+  // Closes the invoice when nothing is left (or it never had an amount, which
+  // keeps the old "mark paid" behaviour for such invoices).
+  const closes = total <= 0 || nowPaid >= total - 0.004;
+  const now = new Date();
+  const byName = req.user.name || req.user.username || "";
+
+  const update = {
+    $set: {
+      "payment.status": closes ? "paid" : "partial",
+      "payment.method": method,
+      "payment.utrNumber": utrNumber,
+      "payment.paymentDate": paymentDate,
+      "payment.paidAt": now,
+      "payment.paidBy": req.user._id,
+      "payment.paidByName": byName,
+      "payment.remarks": remarks,
+      "payment.paidAmount": closes && total > 0 ? total : nowPaid,
     },
+  };
+  if (amount > 0)
+    update.$push = {
+      "payment.installments": {
+        amount,
+        method,
+        utrNumber,
+        paymentDate,
+        paidAt: now,
+        paidBy: req.user._id,
+        paidByName: byName,
+        remarks,
+      },
+    };
+
+  // Only applies if the invoice is still exactly as it was read above (not
+  // paid, same amount already received), so two people paying at the same
+  // moment can never overwrite each other or overpay the invoice.
+  const updated = await TaxInvoice.findOneAndUpdate(
+    {
+      _id: id,
+      "payment.status": NOT_PAID,
+      "payment.paidAmount": before === 0 ? { $in: [0, null] } : before,
+    },
+    update,
     { new: true }
   )
     .select("-extractedLines")
     .populate(POPULATE);
 
-  if (!updated) {
-    const exists = await TaxInvoice.exists({ _id: id });
-    return exists
-      ? res.status(409).json({ message: "This invoice has already been marked as paid." })
-      : res.status(404).json({ message: "Invoice not found" });
-  }
+  if (!updated)
+    return res.status(409).json({
+      message: "This invoice was just updated by someone else. Refresh the page and check the balance.",
+    });
 
-  res.json(updated);
+  res.json(withMoney(updated));
 });
 
 // PATCH /api/billing/:id/payment   { paymentMethod, utrNumber, paymentDate, remarks }
-// Corrects the payment details of an invoice that is ALREADY paid. The invoice
-// stays paid; every changed field is appended to payment.editHistory
+// Corrects the payment details of an invoice that is ALREADY paid or part-paid
+// (for a part-paid / multi-installment invoice this edits the LATEST payment).
+// The invoice keeps its status; every changed field is appended to payment.editHistory
 // (from -> to, who, when) so the original entry is never silently lost.
 export const updatePayment = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -183,8 +291,8 @@ export const updatePayment = asyncHandler(async (req, res) => {
 
   const invoice = await TaxInvoice.findById(id).select("-extractedLines");
   if (!invoice) return res.status(404).json({ message: "Invoice not found" });
-  if (invoice.payment?.status !== "paid")
-    return res.status(409).json({ message: "This invoice is not marked as paid yet. Mark it paid first." });
+  if (!["paid", "partial"].includes(invoice.payment?.status))
+    return res.status(409).json({ message: "No payment has been recorded for this invoice yet." });
 
   const method = String(req.body?.paymentMethod || "").trim();
   if (!PAYMENT_METHODS.includes(method))
@@ -221,7 +329,7 @@ export const updatePayment = asyncHandler(async (req, res) => {
 
   if (changes.length === 0) {
     await invoice.populate(POPULATE);
-    return res.json(invoice);
+    return res.json(withMoney(invoice));
   }
 
   const byName = req.user.name || req.user.username || "";
@@ -229,17 +337,27 @@ export const updatePayment = asyncHandler(async (req, res) => {
 
   // Targeted $set/$push (not doc.save) so older invoices with missing fields
   // are never re-validated, and the invoice can only be edited while paid.
+  const set = {
+    "payment.method": method,
+    "payment.utrNumber": utrNumber,
+    "payment.paymentDate": paymentDate,
+    "payment.remarks": remarks,
+    "payment.editedAt": now,
+    "payment.editedByName": byName,
+  };
+  // Keep the latest installment in step with the top-level fields.
+  const lastIdx = (invoice.payment?.installments?.length || 0) - 1;
+  if (lastIdx >= 0) {
+    set[`payment.installments.${lastIdx}.method`] = method;
+    set[`payment.installments.${lastIdx}.utrNumber`] = utrNumber;
+    set[`payment.installments.${lastIdx}.paymentDate`] = paymentDate;
+    set[`payment.installments.${lastIdx}.remarks`] = remarks;
+  }
+
   const updated = await TaxInvoice.findOneAndUpdate(
-    { _id: id, "payment.status": "paid" },
+    { _id: id, "payment.status": { $in: ["paid", "partial"] } },
     {
-      $set: {
-        "payment.method": method,
-        "payment.utrNumber": utrNumber,
-        "payment.paymentDate": paymentDate,
-        "payment.remarks": remarks,
-        "payment.editedAt": now,
-        "payment.editedByName": byName,
-      },
+      $set: set,
       $push: { "payment.editHistory": { at: now, by: req.user._id, byName, changes } },
     },
     { new: true }
@@ -247,8 +365,114 @@ export const updatePayment = asyncHandler(async (req, res) => {
     .select("-extractedLines")
     .populate(POPULATE);
 
-  if (!updated) return res.status(409).json({ message: "This invoice is no longer marked as paid." });
-  res.json(updated);
+  if (!updated) return res.status(409).json({ message: "No payment is recorded for this invoice any more." });
+  res.json(withMoney(updated));
+});
+
+// DELETE /api/billing/:id/payment   { installmentId?, reason }
+// Removes a payment that should not be there (entered by mistake, wrong invoice…).
+//   - installmentId given -> that installment is removed
+//   - no installmentId    -> only allowed for an invoice paid in one go before
+//                            installments existed (it has none): clears that payment
+// The invoice's status and paid total are recalculated (Paid -> Part-paid -> Unpaid)
+// and the removed entry is kept in payment.deletedPayments with who/when/why.
+export const deletePayment = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid invoice id" });
+
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ message: "Write a reason for deleting this payment." });
+
+  const invoice = await TaxInvoice.findById(id).select("-extractedLines");
+  if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+  if (!["paid", "partial"].includes(statusOf(invoice)))
+    return res.status(409).json({ message: "No payment is recorded for this invoice." });
+
+  const p = invoice.payment || {};
+  const all = (p.installments || []).map((i) => (i.toObject ? i.toObject() : i));
+  const installmentId = String(req.body?.installmentId || "").trim();
+
+  let removed;
+  let remaining;
+  if (installmentId) {
+    const idx = all.findIndex((i) => String(i._id) === installmentId);
+    if (idx < 0)
+      return res.status(404).json({ message: "That payment was not found (it may already be deleted)." });
+    removed = all[idx];
+    remaining = all.filter((_, i) => i !== idx);
+  } else {
+    if (all.length)
+      return res.status(400).json({ message: "Choose which payment to delete." });
+    // Paid in one go before installments existed.
+    removed = {
+      amount: round2(invoiceAmount(invoice)),
+      method: p.method,
+      utrNumber: p.utrNumber,
+      paymentDate: p.paymentDate,
+      paidByName: p.paidByName,
+    };
+    remaining = [];
+  }
+
+  const total = round2(invoiceAmount(invoice));
+  const paidAmount = round2(remaining.reduce((s, i) => s + (Number(i.amount) || 0), 0));
+  const status = remaining.length === 0 ? "unpaid" : total > 0 && paidAmount >= total - 0.004 ? "paid" : "partial";
+  const last = remaining[remaining.length - 1];
+
+  const byName = req.user.name || req.user.username || "";
+  const now = new Date();
+  const set = {
+    "payment.status": status,
+    "payment.installments": remaining,
+    "payment.paidAmount": paidAmount,
+    // The top-level fields always mirror the latest remaining payment.
+    "payment.method": last?.method || "",
+    "payment.utrNumber": last ? last.utrNumber ?? null : null,
+    "payment.paymentDate": last?.paymentDate || null,
+    "payment.paidAt": last?.paidAt || null,
+    "payment.paidBy": last?.paidBy || null,
+    "payment.paidByName": last?.paidByName || "",
+    "payment.remarks": last?.remarks || "",
+  };
+  // Nothing left: the invoice goes back to a clean unpaid state.
+  if (!last) {
+    set["payment.editedAt"] = null;
+    set["payment.editedByName"] = "";
+  }
+
+  // Only applies if the payments are still exactly as read above.
+  const sizeGuard = all.length
+    ? { "payment.installments": { $size: all.length } }
+    : { "payment.installments.0": { $exists: false } };
+  const updated = await TaxInvoice.findOneAndUpdate(
+    { _id: id, "payment.status": { $in: ["paid", "partial"] }, ...sizeGuard },
+    {
+      $set: set,
+      $push: {
+        "payment.deletedPayments": {
+          at: now,
+          by: req.user._id,
+          byName,
+          reason,
+          amount: round2(removed.amount),
+          method: removed.method || "",
+          utrNumber: removed.utrNumber ?? null,
+          paymentDate: removed.paymentDate || null,
+          paidByName: removed.paidByName || "",
+        },
+      },
+    },
+    { new: true }
+  )
+    .select("-extractedLines")
+    .populate(POPULATE);
+
+  if (!updated)
+    return res.status(409).json({
+      message: "This invoice's payments just changed. Refresh the page and try again.",
+    });
+
+  res.json(withMoney(updated));
 });
 
 /* ------------------------------------------------------------------ */
@@ -268,13 +492,14 @@ const endOfDay = (s) => {
 //   status=all|paid|unpaid  dateField=invoice|payment  from=YYYY-MM-DD  to=YYYY-MM-DD
 //   vendor=<id>  method=<payment method>  minAmount  maxAmount  search  groupBy=none|vendor|method|month
 async function buildReport(query) {
-  const status = ["paid", "unpaid"].includes(query.status) ? query.status : "all";
+  const status = ["paid", "unpaid", "partial"].includes(query.status) ? query.status : "all";
   const dateField = query.dateField === "payment" ? "payment" : "invoice";
   const groupBy = ["vendor", "method", "month"].includes(query.groupBy) ? query.groupBy : "none";
 
   const and = [];
   if (status === "paid") and.push({ "payment.status": "paid" });
-  if (status === "unpaid") and.push({ "payment.status": NOT_PAID });
+  if (status === "unpaid") and.push({ "payment.status": NOT_PAID }); // includes part-paid
+  if (status === "partial") and.push({ "payment.status": "partial" });
 
   if (query.vendor && mongoose.isValidObjectId(query.vendor))
     and.push({ vendor: new mongoose.Types.ObjectId(query.vendor) });
@@ -341,7 +566,10 @@ async function buildReport(query) {
     .lean();
 
   const rows = invoices.map((inv) => {
-    const paid = inv.payment?.status === "paid";
+    const st = statusOf(inv);
+    const paid = st === "paid";
+    // Method / UTR / date / who show the LATEST payment for paid and part-paid invoices.
+    const hasPayment = paid || st === "partial";
     return {
       _id: String(inv._id),
       vendor: inv.vendor?.companyName || "—",
@@ -349,30 +577,37 @@ async function buildReport(query) {
       invoiceNumber: inv.invoiceNumber || "",
       invoiceDate: inv.invoiceDate || inv.createdAt,
       poNumber: inv.purchaseOrder?.documentNumber || "",
-      status: paid ? "Paid" : "Unpaid",
+      status: paid ? "Paid" : st === "partial" ? "Partial" : "Unpaid",
       taxable: round2(inv.paymentAmount),
       gst: round2(gstOf(inv)),
       freight: round2(inv.freightCharges),
       amount: round2(invoiceAmount(inv)),
-      method: paid ? inv.payment?.method || "" : "",
-      utr: paid ? inv.payment?.utrNumber || "" : "",
-      paymentDate: paid ? inv.payment?.paymentDate || null : null,
-      paidBy: paid ? inv.payment?.paidBy?.name || inv.payment?.paidByName || "" : "",
-      remarks: paid ? inv.payment?.remarks || "" : "",
+      received: receivedOf(inv),
+      balance: balanceOf(inv),
+      installments: (inv.payment?.installments || []).length,
+      method: hasPayment ? inv.payment?.method || "" : "",
+      utr: hasPayment ? inv.payment?.utrNumber || "" : "",
+      paymentDate: hasPayment ? inv.payment?.paymentDate || null : null,
+      paidBy: hasPayment ? inv.payment?.paidBy?.name || inv.payment?.paidByName || "" : "",
+      remarks: hasPayment ? inv.payment?.remarks || "" : "",
     };
   });
 
   const paidRows = rows.filter((r) => r.status === "Paid");
-  const unpaidRows = rows.filter((r) => r.status !== "Paid");
+  const partialRows = rows.filter((r) => r.status === "Partial");
+  const unpaidRows = rows.filter((r) => r.status !== "Paid"); // unpaid + part-paid
   const sum = (list, key = "amount") => round2(list.reduce((s, r) => s + r[key], 0));
 
   const summary = {
     count: rows.length,
     totalAmount: sum(rows),
+    // paidAmount = money actually received (full payments + installments);
+    // unpaidAmount = balance still due. They always add up to totalAmount.
     paidCount: paidRows.length,
-    paidAmount: sum(paidRows),
+    partialCount: partialRows.length,
+    paidAmount: sum(rows, "received"),
     unpaidCount: unpaidRows.length,
-    unpaidAmount: sum(unpaidRows),
+    unpaidAmount: sum(rows, "balance"),
     taxable: sum(rows, "taxable"),
     gst: sum(rows, "gst"),
     freight: sum(rows, "freight"),
@@ -383,7 +618,8 @@ async function buildReport(query) {
   if (groupBy !== "none") {
     const keyOf = (r) => {
       if (groupBy === "vendor") return r.vendor;
-      if (groupBy === "method") return r.status === "Paid" ? r.method || "—" : "Unpaid";
+      if (groupBy === "method")
+        return r.status === "Paid" ? r.method || "—" : r.status === "Partial" ? "Part-paid" : "Unpaid";
       const d = r.invoiceDate ? new Date(r.invoiceDate) : null;
       return d ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` : "—";
     };
@@ -393,8 +629,8 @@ async function buildReport(query) {
       const g = map.get(k) || { key: k, count: 0, paidAmount: 0, unpaidAmount: 0, amount: 0 };
       g.count += 1;
       g.amount += r.amount;
-      if (r.status === "Paid") g.paidAmount += r.amount;
-      else g.unpaidAmount += r.amount;
+      g.paidAmount += r.received;
+      g.unpaidAmount += r.balance;
       map.set(k, g);
     }
     groups = [...map.values()]
@@ -447,6 +683,8 @@ export const exportReport = asyncHandler(async (req, res) => {
     { header: "Payment date", key: "paymentDate", width: 13 },
     { header: "Paid by", key: "paidBy", width: 16 },
     { header: "Remarks", key: "remarks", width: 28 },
+    { header: "Amount paid", key: "received", width: 16 },
+    { header: "Balance due", key: "balance", width: 16 },
   ];
   const head = ws.getRow(1);
   head.font = { bold: true };
@@ -461,9 +699,9 @@ export const exportReport = asyncHandler(async (req, res) => {
     });
   }
   ["D", "M"].forEach((c) => (ws.getColumn(c).numFmt = "dd-mm-yyyy"));
-  ["G", "H", "I", "J"].forEach((c) => (ws.getColumn(c).numFmt = money));
+  ["G", "H", "I", "J", "P", "Q"].forEach((c) => (ws.getColumn(c).numFmt = money));
 
-  const total = ws.addRow({ vendor: "TOTAL", taxable: summary.taxable, gst: summary.gst, freight: summary.freight, amount: summary.totalAmount });
+  const total = ws.addRow({ vendor: "TOTAL", taxable: summary.taxable, gst: summary.gst, freight: summary.freight, amount: summary.totalAmount, received: summary.paidAmount, balance: summary.unpaidAmount });
   total.font = { bold: true };
   total.fill = headFill;
 
@@ -480,8 +718,8 @@ export const exportReport = asyncHandler(async (req, res) => {
   const h = ss.addRow(["", "Invoices", "Amount"]);
   h.font = { bold: true };
   h.fill = headFill;
-  ss.addRow(["Unpaid", summary.unpaidCount, summary.unpaidAmount]);
-  ss.addRow(["Paid", summary.paidCount, summary.paidAmount]);
+  ss.addRow(["Balance due (unpaid + part-paid)", summary.unpaidCount, summary.unpaidAmount]);
+  ss.addRow(["Amount received (incl. installments)", summary.paidCount + summary.partialCount, summary.paidAmount]);
   const t = ss.addRow(["Total", summary.count, summary.totalAmount]);
   t.font = { bold: true };
 
@@ -589,6 +827,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     { header: "Payment date", key: "paymentDate", width: 13 },
     { header: "Paid by", key: "paidBy", width: 16 },
     { header: "Remarks", key: "remarks", width: 28 },
+    { header: "Amount paid", key: "received", width: 16 },
+    { header: "Balance due", key: "balance", width: 16 },
   ];
   styleHead(tr);
 
@@ -614,6 +854,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
       paymentDate: r.paymentDate ? new Date(r.paymentDate) : null,
       paidBy: r.paidBy,
       remarks: r.remarks,
+      received: r.received,
+      balance: r.balance,
     };
     if (lines.length === 0) {
       tr.addRow({ ...base, ...money1, pn: "— no received lines linked —" });
@@ -639,8 +881,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     });
   }
   ["D", "N", "V"].forEach((c) => (tr.getColumn(c).numFmt = "dd-mm-yyyy"));
-  ["I", "J", "O", "P", "Q", "R"].forEach((c) => (tr.getColumn(c).numFmt = money));
-  if (trailRows > 0) tr.autoFilter = { from: "A1", to: `X${trailRows + 1}` };
+  ["I", "J", "O", "P", "Q", "R", "Y", "Z"].forEach((c) => (tr.getColumn(c).numFmt = money));
+  if (trailRows > 0) tr.autoFilter = { from: "A1", to: `Z${trailRows + 1}` };
 
   // ---- Invoices ----
   const iv = wb.addWorksheet("Invoices");
@@ -661,6 +903,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     { header: "Paid by", key: "paidBy", width: 16 },
     { header: "Remarks", key: "remarks", width: 28 },
     { header: "Received lines", key: "lines", width: 14 },
+    { header: "Amount paid", key: "received", width: 16 },
+    { header: "Balance due", key: "balance", width: 16 },
   ];
   styleHead(iv);
   for (const r of rows) {
@@ -672,13 +916,15 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     });
   }
   ["D", "M"].forEach((c) => (iv.getColumn(c).numFmt = "dd-mm-yyyy"));
-  ["G", "H", "I", "J"].forEach((c) => (iv.getColumn(c).numFmt = money));
+  ["G", "H", "I", "J", "Q", "R"].forEach((c) => (iv.getColumn(c).numFmt = money));
   const tot = iv.addRow({
     vendor: "TOTAL",
     taxable: summary.taxable,
     gst: summary.gst,
     freight: summary.freight,
     amount: summary.totalAmount,
+    received: summary.paidAmount,
+    balance: summary.unpaidAmount,
   });
   tot.font = { bold: true };
 
@@ -688,8 +934,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     { header: "Vendor", key: "vendor", width: 34 },
     { header: "Invoices", key: "count", width: 10 },
     { header: "Total", key: "total", width: 16 },
-    { header: "Paid", key: "paid", width: 16 },
-    { header: "Unpaid", key: "unpaid", width: 16 },
+    { header: "Paid (received)", key: "paid", width: 16 },
+    { header: "Balance due", key: "unpaid", width: 16 },
   ];
   styleHead(vs);
   const byVendor = new Map();
@@ -697,8 +943,8 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     const g = byVendor.get(r.vendor) || { vendor: r.vendor, count: 0, total: 0, paid: 0, unpaid: 0 };
     g.count += 1;
     g.total += r.amount;
-    if (r.status === "Paid") g.paid += r.amount;
-    else g.unpaid += r.amount;
+    g.paid += r.received;
+    g.unpaid += r.balance;
     byVendor.set(r.vendor, g);
   }
   [...byVendor.values()]

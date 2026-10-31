@@ -87,7 +87,10 @@ const taxInvoiceSchema = new mongoose.Schema(
     // page as UNPAID and is marked paid there. Invoices saved before this
     // field existed have no payment.status at all — treat "not paid" as unpaid.
     payment: {
-      status: { type: String, enum: ["unpaid", "paid"], default: "unpaid" },
+      // "partial" = some installments are recorded but a balance is still due.
+      // It flips to "paid" automatically once the installments add up to the
+      // invoice amount.
+      status: { type: String, enum: ["unpaid", "partial", "paid"], default: "unpaid" },
       method: { type: String, enum: [...PAYMENT_METHODS, ""], default: "" },
       // Required for every method except a cash purchase, where it stays null.
       utrNumber: { type: String, trim: true, default: null },
@@ -98,12 +101,53 @@ const taxInvoiceSchema = new mongoose.Schema(
       paidBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       paidByName: { type: String, default: "" },
       remarks: { type: String, trim: true, default: "" },
+      // Running total of every installment recorded so far. Invoices paid in
+      // one go before installments existed have none: paid -> the whole
+      // invoice amount, anything else -> 0.
+      paidAmount: { type: Number, min: 0, default: 0 },
+      // One entry per installment, oldest first. method / utrNumber /
+      // paymentDate / remarks / paidAt / paidBy above always mirror the LATEST
+      // installment, so older code and reports keep working unchanged.
+      installments: {
+        type: [
+          {
+            amount: { type: Number, min: 0.01, required: true },
+            method: { type: String, enum: PAYMENT_METHODS, required: true },
+            utrNumber: { type: String, trim: true, default: null },
+            paymentDate: { type: Date, required: true },
+            paidAt: { type: Date, default: Date.now },
+            paidBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+            paidByName: { type: String, default: "" },
+            remarks: { type: String, trim: true, default: "" },
+          },
+        ],
+        default: [],
+      },
       // Corrections made after the invoice was marked paid (see updatePayment
       // in controllers/billingController.js). Every change is kept — what it
       // was, what it became, who changed it and when — so the original entry
       // is never silently lost.
       editedAt: { type: Date, default: null },
       editedByName: { type: String, default: "" },
+      // Payments that were deleted (entered by mistake, etc.). The deleted
+      // entry is copied here with who removed it, when, and why, so removing a
+      // payment never erases the fact that it existed.
+      deletedPayments: {
+        type: [
+          {
+            at: { type: Date, default: Date.now },
+            by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+            byName: { type: String, default: "" },
+            reason: { type: String, default: "" },
+            amount: { type: Number, default: 0 },
+            method: { type: String, default: "" },
+            utrNumber: { type: String, default: null },
+            paymentDate: { type: Date, default: null },
+            paidByName: { type: String, default: "" },
+          },
+        ],
+        default: [],
+      },
       editHistory: {
         type: [
           {
