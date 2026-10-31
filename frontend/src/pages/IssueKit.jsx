@@ -142,6 +142,12 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   const [vendor, setVendor] = useState(issue.vendor || null);
   const [remarks, setRemarks] = useState(issue.remarks || "");
   const [submitting, setSubmitting] = useState(false);
+  // Code this edit gets when it is issued (KIT_05-A, KIT_05-B …). Shown
+  // pre-filled from the server; typing over it makes it a custom code.
+  // A saved edit that already carries a custom code keeps it.
+  const [issueCode, setIssueCode] = useState(isDraft ? issue.issueCode || "" : "");
+  const [codeCustom, setCodeCustom] = useState(isDraft && !!issue.issueCode);
+  const [codeRefresh, setCodeRefresh] = useState(0);
   const [issueQtyOverrides, setIssueQtyOverrides] = useState(() => {
     const init = {};
     (issue.lines || []).forEach((l) => {
@@ -173,6 +179,28 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
       cancelled = true;
     };
   }, [issue._id]);
+
+  useEffect(() => {
+    if (codeCustom) return undefined;
+    let cancelled = false;
+    api
+      .get(`/kits/issues/${issue._id}/next-edit-code`)
+      .then(({ data }) => {
+        if (!cancelled) setIssueCode(data?.issueCode || "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issue._id, codeRefresh]);
+
+  const onCodeChange = (value) => {
+    setIssueCode(value);
+    const custom = value.trim() !== "";
+    setCodeCustom(custom);
+    if (!custom) setCodeRefresh((n) => n + 1); // emptied -> back to the suggestion
+  };
 
   const qtyNum = Number(quantity) || 0;
 
@@ -264,6 +292,8 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         remarks,
         lines: linesPayload,
         extraItems: extraItemsPayload,
+        // "" = let the server pick the next -A / -B when it is issued
+        issueCode: codeCustom ? issueCode.trim() : "",
       };
       // First save creates the saved kit; later saves update it in place.
       const { data } = isDraft
@@ -307,6 +337,23 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                 Issue to vendor
               </label>
               <VendorSearchSelect value={vendor} onSelect={setVendor} placeholder="Start typing the vendor name…" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Kit code (editable)
+              </label>
+              <Input
+                className="font-mono-tech"
+                maxLength={40}
+                value={issueCode}
+                onChange={(e) => onCodeChange(e.target.value)}
+                placeholder="Assigned when issued"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {codeCustom
+                  ? "Custom code — used as typed."
+                  : "Next code in this kit's series. Type to change it."}
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1050,6 +1097,11 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                               Edit of {d.editedFrom.issueCode || d.editedFrom.kitName}
                             </Badge>
                           )}
+                          {d.issueCode && (
+                            <Badge variant="outline" className="font-mono-tech">
+                              Code: {d.issueCode}
+                            </Badge>
+                          )}
                           {d.hasShortage && (
                             <Badge variant="destructive" className="gap-1">
                               <AlertTriangle className="h-3 w-3" />
@@ -1165,6 +1217,12 @@ export default function IssueKit() {
   const [quantity, setQuantity] = useState("1");
   const [vendor, setVendor] = useState(null);
   const [remarks, setRemarks] = useState("");
+  // Code this kit gets when issued. Pre-filled from the chosen template's kit
+  // code (KIT_05); typing over it makes it a custom code, and a custom code
+  // is what gets sent. Left alone, the server assigns the code at issue time.
+  const [issueCode, setIssueCode] = useState("");
+  const [codeCustom, setCodeCustom] = useState(false);
+  const [codeRefresh, setCodeRefresh] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [shortages, setShortages] = useState(null);
@@ -1217,6 +1275,42 @@ export default function IssueKit() {
       .finally(() => setLoadingTemplate(false));
   }, [templateId]);
 
+  // Suggested code for the chosen template (its kit code, or KIT_05-2 … when
+  // that one is already taken). Not applied over a code the person typed or
+  // one saved on a resumed kit.
+  useEffect(() => {
+    if (!templateId) {
+      setIssueCode("");
+      setCodeCustom(false);
+      return undefined;
+    }
+    if (codeCustom) return undefined;
+    let cancelled = false;
+    api
+      .get(`/kits/${templateId}/next-code`)
+      .then(({ data }) => {
+        if (!cancelled) setIssueCode(data?.issueCode || "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, codeRefresh]);
+
+  const chooseTemplate = (id) => {
+    setCodeCustom(false);
+    setIssueCode("");
+    setTemplateId(id);
+  };
+
+  const onCodeChange = (value) => {
+    setIssueCode(value);
+    const custom = value.trim() !== "";
+    setCodeCustom(custom);
+    if (!custom) setCodeRefresh((n) => n + 1); // emptied -> back to the suggestion
+  };
+
   const issuableItems = useMemo(
     () => (template?.items || []).filter((it) => !it.dnp),
     [template]
@@ -1258,6 +1352,8 @@ export default function IssueKit() {
     setTemplate(null);
     setIssueQtyOverrides({});
     setDraftId(null);
+    setIssueCode("");
+    setCodeCustom(false);
     pendingResumeRef.current = null;
   };
 
@@ -1275,6 +1371,10 @@ export default function IssueKit() {
     setVendor(draft.vendor || null);
     setRemarks(draft.remarks || "");
     setShortages(null);
+    // A code saved on the kit stays; otherwise show the suggestion again.
+    setIssueCode(draft.issueCode || "");
+    setCodeCustom(!!draft.issueCode);
+    if (!draft.issueCode) setCodeRefresh((n) => n + 1);
     const nextTemplateId = draft.kitTemplate?._id || draft.kitTemplate || "";
     if (nextTemplateId === templateId) {
       // Same template already loaded — the fetch effect won't re-fire,
@@ -1323,6 +1423,7 @@ export default function IssueKit() {
         vendor: vendor?._id || null,
         remarks,
         lines: linesPayload,
+        issueCode: codeCustom ? issueCode.trim() : "",
       };
       const { data } = draftId
         ? await api.patch(`/kits/drafts/${draftId}`, payload)
@@ -1388,12 +1489,14 @@ export default function IssueKit() {
             vendor: vendor._id,
             remarks,
             lines: linesPayload,
+            issueCode: codeCustom ? issueCode.trim() : "",
           })
         : await api.post(`/kits/${template._id}/issue`, {
             quantity: qtyNum,
             vendor: vendor._id,
             remarks,
             lines: linesPayload,
+            issueCode: codeCustom ? issueCode.trim() : "",
           });
       const shortLines = (data.lines || []).filter((l) => (l.qtyShort || 0) > 0);
       if (shortLines.length > 0) {
@@ -1403,7 +1506,7 @@ export default function IssueKit() {
         );
       } else {
         toast.success(
-          `Issued ${qtyNum} × "${template.kitName}" to ${data.vendor?.companyName || "the vendor"}`
+          `Issued ${qtyNum} × "${template.kitName}" as ${data.issueCode || "—"} to ${data.vendor?.companyName || "the vendor"}`
         );
       }
       resetAfterIssue();
@@ -1448,7 +1551,7 @@ export default function IssueKit() {
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Kit template
                 </label>
-                <Select value={templateId} onValueChange={setTemplateId}>
+                <Select value={templateId} onValueChange={chooseTemplate}>
                   <SelectTrigger>
                     <SelectValue placeholder="Choose a kit…" />
                   </SelectTrigger>
@@ -1489,6 +1592,28 @@ export default function IssueKit() {
                   onSelect={setVendor}
                   placeholder="Start typing the vendor name…"
                 />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Kit code (editable)
+                </label>
+                <Input
+                  className="font-mono-tech"
+                  maxLength={40}
+                  value={issueCode}
+                  onChange={(e) => onCodeChange(e.target.value)}
+                  placeholder={templateId ? "Loading…" : "Choose a kit first"}
+                  disabled={!templateId}
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {!templateId
+                    ? "Taken from the kit's own code."
+                    : codeCustom
+                    ? "Custom code — used as typed."
+                    : issueCode
+                    ? `From the kit's code. Edits become ${issueCode}-A, ${issueCode}-B …`
+                    : "From the kit's code."}
+                </p>
               </div>
               <div className="sm:col-span-3">
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

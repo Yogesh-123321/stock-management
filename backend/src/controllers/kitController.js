@@ -243,6 +243,70 @@ function editLetterSuffix(n) {
   return out;
 }
 
+/* ---------------------------------------------------------------------
+  Issue codes
+  The code of an issued kit is taken from the kit template's own kit code
+  (e.g. KIT_05) at the moment it is issued:
+    first issue            KIT_05
+    its 1st / 2nd edit     KIT_05-A / KIT_05-B ... (KIT_05-Z, then -AA)
+    same template issued   KIT_05-2, KIT_05-3 ...   (a fresh issue, not an edit)
+    again from scratch
+  A template with no kit code falls back to its name. The person issuing
+  can overwrite the suggested code with their own; a code can only be used
+  by one issued kit.
+--------------------------------------------------------------------- */
+const escapeRegExp = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Trim, collapse inner whitespace, cap the length. "" when nothing usable.
+const cleanIssueCode = (v) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+
+// The base every code of this kit starts from: its kit code, else its name.
+const kitCodeBase = (src) => cleanIssueCode(src?.kitCode) || cleanIssueCode(src?.kitName) || "Kit";
+
+// Case-insensitive: is this code already carried by an ISSUED kit?
+async function issueCodeTaken(code, excludeId = null) {
+  const filter = { status: "issued", issueCode: new RegExp(`^${escapeRegExp(code)}$`, "i") };
+  if (excludeId) filter._id = { $ne: excludeId };
+  return !!(await KitIssue.exists(filter));
+}
+
+// Throws a 400 when a code typed by the user is already in use.
+async function assertIssueCodeFree(res, code, excludeId = null) {
+  if (code && (await issueCodeTaken(code, excludeId))) {
+    res.status(400);
+    throw new Error(`The code "${code}" is already used by another issued kit — type a different one`);
+  }
+}
+
+// Next code for a fresh (non-edit) issue of a template.
+async function suggestRootIssueCode(src) {
+  const base = kitCodeBase(src);
+  if (!(await issueCodeTaken(base))) return base;
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!(await issueCodeTaken(candidate))) return candidate;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+// Next code in an edit series: root code + "-A", "-B", ... `nextIndex` is
+// the position in the chain (kept for editIndex); the letter is bumped
+// further only if somebody already used that exact code.
+async function suggestEditIssueCode(rootDoc) {
+  const priorEdits = await KitIssue.find({ rootIssue: rootDoc._id, status: "issued" })
+    .select("editIndex")
+    .lean();
+  const nextIndex = priorEdits.reduce((max, e) => Math.max(max, e.editIndex || 0), 0) + 1;
+  const baseCode = rootDoc.issueCode || rootDoc.kitName;
+  let letter = nextIndex;
+  let issueCode = `${baseCode}-${editLetterSuffix(letter)}`;
+  while (await issueCodeTaken(issueCode)) {
+    letter += 1;
+    issueCode = `${baseCode}-${editLetterSuffix(letter)}`;
+  }
+  return { nextIndex, baseCode, issueCode };
+}
+
 // Parts added to ONE kit on top of its template (the "Add part" button on
 // the edit screen) are stored as lines with qtyPerKit 0, since they aren't
 // on the template. Saving / issuing a saved kit rebuilds its item list from
@@ -786,6 +850,7 @@ export const getKitIssueById = asyncHandler(async (req, res) => {
 */
 export const issueKit = asyncHandler(async (req, res) => {
   const { quantity, vendor, issuedBy, remarks, lines: overrideLines } = req.body;
+  const requestedCode = cleanIssueCode(req.body.issueCode);
 
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty < 1 || !Number.isInteger(qty)) {
@@ -823,6 +888,13 @@ export const issueKit = asyncHandler(async (req, res) => {
     throw new Error("This kit template has no issuable (non-DNP) items");
   }
 
+  // The code comes from the template's kit code (KIT_05, then KIT_05-2 …
+  // if the same template is issued again from scratch) unless the person
+  // typed their own. Settled BEFORE any stock is deducted so a clash is
+  // refused cleanly. Edits grow "-A", "-B" off this code (see issueKitDraft).
+  await assertIssueCodeFree(res, requestedCode);
+  const issueCode = requestedCode || (await suggestRootIssueCode(template));
+
   let resolvedLines, shortages;
   try {
     ({ resolvedLines, shortages } = await resolveAndDeductLines(items, qty, overrideLines));
@@ -830,19 +902,6 @@ export const issueKit = asyncHandler(async (req, res) => {
     res.status(err.status || 400);
     throw err;
   }
-
-  // First issue of this kit template is "Kit 1", the next time this same
-  // template is issued it's "Kit 2", and so on — counted from the root
-  // issues already recorded against this template (edits don't count,
-  // they grow a letter suffix off their own root instead — see
-  // editKitIssue). Scoped per kitTemplate, so a different kit's numbering
-  // starts back at 1.
-  const priorRootIssues = await KitIssue.countDocuments({
-    kitTemplate: template._id,
-    rootIssue: null,
-    status: "issued",
-  });
-  const issueCode = `Kit ${priorRootIssues + 1}`;
 
   const issue = await KitIssue.create({
     status: "issued",
@@ -900,6 +959,7 @@ export const issueKit = asyncHandler(async (req, res) => {
 export const editKitIssue = asyncHandler(async (req, res) => {
   const { issueId } = req.params;
   const { quantity, vendor, remarks, lines: overrideLines, extraItems } = req.body;
+  const requestedCode = cleanIssueCode(req.body.issueCode);
 
   const original = await KitIssue.findById(issueId);
   if (!original || original.status !== "issued") {
@@ -943,6 +1003,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("Quantity must be a whole number of at least 1");
   }
+  await assertIssueCodeFree(res, requestedCode);
 
   let vendorDoc = null;
   if (vendor) {
@@ -993,7 +1054,9 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     kitTemplate: original.kitTemplate,
     kitName: original.kitName,
     kitCode: original.kitCode,
-    // issueCode / editIndex are assigned when this is issued.
+    // Only set when the person typed their own code; otherwise the next
+    // "-A" / "-B" code is assigned when this is issued. editIndex too.
+    issueCode: requestedCode,
     rootIssue: rootDoc._id,
     editedFrom: original._id,
     quantity: qty,
@@ -1129,6 +1192,8 @@ export const deleteKitIssueLine = asyncHandler(async (req, res) => {
 // yet.
 export const saveKitDraft = asyncHandler(async (req, res) => {
   const { quantity, vendor, remarks, lines: overrideLines } = req.body;
+  const requestedCode = cleanIssueCode(req.body.issueCode);
+  await assertIssueCodeFree(res, requestedCode);
 
   const template = await KitTemplate.findById(req.params.id);
   if (!template) {
@@ -1159,6 +1224,7 @@ export const saveKitDraft = asyncHandler(async (req, res) => {
     kitTemplate: template._id,
     kitName: template.kitName,
     kitCode: template.kitCode,
+    issueCode: requestedCode, // blank = auto-assigned when issued
     quantity: qty,
     vendor: vendorDoc ? vendorDoc._id : null,
     issuedBy: req.user?.name || req.user?.username || "",
@@ -1190,6 +1256,11 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
   }
 
   const { quantity, vendor, remarks, lines: overrideLines } = req.body;
+  // Only touched when the body carries issueCode: "" clears a custom code
+  // (back to auto), a value sets it.
+  const codeSent = req.body.issueCode !== undefined;
+  const requestedCode = cleanIssueCode(req.body.issueCode);
+  if (codeSent) await assertIssueCodeFree(res, requestedCode, draft._id);
 
   // Prefer the live template (picks up any item/qty-per-kit changes since
   // the draft was last saved); fall back to the draft's own snapshot
@@ -1230,6 +1301,7 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
     withSavedExtraQty(overrideLines, draft.lines)
   );
 
+  if (codeSent) draft.issueCode = requestedCode;
   draft.quantity = qty;
   draft.vendor = vendorDoc ? vendorDoc._id : null;
   draft.remarks = remarks || "";
@@ -1312,6 +1384,13 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Saved kit not found");
   }
+  // A code sent now wins — an explicit "" means "assign it automatically".
+  // Nothing sent (e.g. "Issue now" from the Saved kits list) falls back to
+  // the code saved on the draft, if any.
+  const requestedCode =
+    req.body.issueCode !== undefined
+      ? cleanIssueCode(req.body.issueCode)
+      : cleanIssueCode(draft.issueCode);
 
   const qty = Number(quantity ?? draft.quantity);
   if (!Number.isFinite(qty) || qty < 1 || !Number.isInteger(qty)) {
@@ -1392,15 +1471,24 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
       res.status(404);
       throw new Error("The original kit issue in this series could not be found");
     }
-    const priorEdits = await KitIssue.find({ rootIssue: rootDoc._id, status: "issued" })
-      .select("editIndex")
-      .lean();
-    const nextIndex = priorEdits.reduce((max, e) => Math.max(max, e.editIndex || 0), 0) + 1;
-    editMeta = {
-      nextIndex,
-      baseCode: rootDoc.issueCode || rootDoc.kitName,
-      issueCode: `${rootDoc.issueCode || rootDoc.kitName}${editLetterSuffix(nextIndex)}`,
-    };
+    // KIT_05 -> KIT_05-A -> KIT_05-B ...
+    editMeta = await suggestEditIssueCode(rootDoc);
+  }
+
+  // Settle the code BEFORE any stock moves: the person's own code if they
+  // gave one, else the next "-A"/"-B" (edit) or the template's kit code.
+  await assertIssueCodeFree(res, requestedCode, draft._id);
+  let issueCode;
+  if (requestedCode) {
+    issueCode = requestedCode;
+  } else if (editMeta) {
+    issueCode = editMeta.issueCode;
+  } else {
+    // Pull the template's CURRENT kit code; fall back to the snapshot.
+    const liveTemplate = draft.kitTemplate
+      ? await KitTemplate.findById(draft.kitTemplate).select("kitCode kitName")
+      : null;
+    issueCode = await suggestRootIssueCode(liveTemplate || draft);
   }
 
   let resolvedLines, shortages;
@@ -1411,18 +1499,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
     throw err;
   }
 
-  let issueCode;
-  if (editMeta) {
-    issueCode = editMeta.issueCode;
-    draft.editIndex = editMeta.nextIndex;
-  } else {
-    const priorRootIssues = await KitIssue.countDocuments({
-      kitTemplate: draft.kitTemplate,
-      rootIssue: null,
-      status: "issued",
-    });
-    issueCode = `Kit ${priorRootIssues + 1}`;
-  }
+  if (editMeta) draft.editIndex = editMeta.nextIndex;
 
   draft.status = "issued";
   draft.issueCode = issueCode;
@@ -1450,4 +1527,41 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
         : `Issued ${qty} × "${draft.kitName}" as ${issueCode}`,
     shortages,
   });
+});
+
+/*
+  GET /api/kits/:id/next-code
+  The code a fresh issue of this template would get right now (its kit
+  code, or KIT_05-2 … if that is taken) — shown pre-filled, and editable,
+  on the Issue-a-kit form.
+*/
+export const getNextKitIssueCode = asyncHandler(async (req, res) => {
+  const template = await KitTemplate.findById(req.params.id).select("kitCode kitName");
+  if (!template) {
+    res.status(404);
+    throw new Error("Kit template not found");
+  }
+  res.json({ issueCode: await suggestRootIssueCode(template), kitCode: template.kitCode || "" });
+});
+
+/*
+  GET /api/kits/issues/:issueId/next-edit-code
+  The code an edit of this entry would get when issued (KIT_05-A, then
+  KIT_05-B …). `issueId` is the issued entry being edited, or a saved edit
+  (draft) of it.
+*/
+export const getNextEditIssueCode = asyncHandler(async (req, res) => {
+  const entry = await KitIssue.findById(req.params.issueId).select("status rootIssue editedFrom");
+  if (!entry) {
+    res.status(404);
+    throw new Error("Kit issue not found");
+  }
+  const rootId = entry.rootIssue || (entry.status === "issued" ? entry._id : entry.editedFrom);
+  const rootDoc = rootId ? await KitIssue.findById(rootId) : null;
+  if (!rootDoc) {
+    res.status(404);
+    throw new Error("The original kit issue in this series could not be found");
+  }
+  const { issueCode, baseCode } = await suggestEditIssueCode(rootDoc);
+  res.json({ issueCode, baseCode });
 });

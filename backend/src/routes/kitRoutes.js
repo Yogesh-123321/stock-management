@@ -20,6 +20,8 @@ import {
   getKitDraftById,
   deleteKitDraft,
   issueKitDraft,
+  getNextKitIssueCode,
+  getNextEditIssueCode,
 } from "../controllers/kitController.js";
 import { getReturnableKits, bookKitReturn } from "../controllers/kitReturnController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
@@ -42,6 +44,9 @@ router.get("/issues/:id/export", protect, exportKitIssueById);
 // for the same reason as "/export" above.
 router.get("/issues/:id/previous-quantities", getKitIssueChainTotals);
 router.get("/issues/:id", getKitIssueById);
+// Suggested (editable) code an edit of this entry / saved edit would get when
+// issued: KIT_05-A, KIT_05-B ...
+router.get("/issues/:issueId/next-edit-code", getNextEditIssueCode);
 // Never touches the original entry — always creates a new KitIssue in
 // that entry's edit series (see editKitIssue). Same permission as issuing
 // a kit in the first place.
@@ -85,6 +90,8 @@ router.post("/drafts/:draftId/issue", protect, requirePermission("kit.issue"), i
 router.get("/", getKitTemplates);
 router.get("/:id", getKitTemplateById);
 router.get("/:id/issues", getIssuesForTemplate);
+// Suggested (editable) code for a fresh issue of this template: its kit code.
+router.get("/:id/next-code", getNextKitIssueCode);
 
 router.post("/", protect, requirePermission("kit.manage"), createKitTemplate);
 router.patch("/:id", protect, requirePermission("kit.manage"), updateKitTemplate);

@@ -679,7 +679,7 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
 
   return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
@@ -714,15 +714,25 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                 {items.length !== issuableCount ? ` · ${items.length - issuableCount} DNP (excluded)` : ""}
               </p>
 
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full text-sm">
+              <div className="overflow-hidden rounded-lg border border-border">
+                <table className="w-full table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-[9%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[14%]" />
+                    <col />
+                    <col className="w-[8%]" />
+                    <col className="w-[6%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[6%]" />
+                  </colgroup>
                   <thead className="bg-secondary/70">
                     <tr className="border-b border-border">
                       {["Ref.", "Value", "TT part #", "Description", "Qty/kit", "Unit", "In stock", "DNP"].map(
                         (h) => (
                           <th
                             key={h}
-                            className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
+                            className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground break-words"
                           >
                             {h}
                           </th>
@@ -740,10 +750,10 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                     )}
                     {items.map((it, i) => (
                       <tr key={it._id || i} className="border-b border-border">
-                        <td className="px-2.5 py-1.5 text-xs">{it.referenceDesignator || "—"}</td>
-                        <td className="px-2.5 py-1.5 text-xs">{it.value || "—"}</td>
-                        <td className="px-2.5 py-1.5 text-xs font-mono-tech">{it.ttUniquePartNumber}</td>
-                        <td className="px-2.5 py-1.5 text-xs">
+                        <td className="px-2.5 py-1.5 text-xs break-words">{it.referenceDesignator || "—"}</td>
+                        <td className="px-2.5 py-1.5 text-xs break-words">{it.value || "—"}</td>
+                        <td className="px-2.5 py-1.5 text-xs font-mono-tech break-all">{it.ttUniquePartNumber}</td>
+                        <td className="px-2.5 py-1.5 text-xs break-words">
                           {it.matchedPart?.itemDescription || (
                             <span className="text-amber-700">not in parts master</span>
                           )}

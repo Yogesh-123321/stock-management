@@ -1267,7 +1267,11 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
   const RED_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
   let mismatchCount = 0;
 
-  parts.forEach((p, i) => {
+  // First pass: work out every part's stock check so the rows can be written
+  // in priority order — red (MISMATCH) first, then yellow (OK, seeded), then
+  // the normal OK rows. Parts keep their part-number order inside each group
+  // (Array.prototype.sort is stable and `parts` is already sorted by number).
+  const prepared = parts.map((p) => {
     const pd = pending.get(String(p._id)) || { applied: 0, iqc: 0, rejected: 0, awaiting: 0, count: 0 };
     const main = p.quantityInStock || 0;
     const rnd = p.rndStock || 0;
@@ -1285,6 +1289,13 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
       seeded: seededSheet[p.ttUniquePartNumber] || 0,
       unit: p.unit || "",
     });
+    // 0 = red (mismatch), 1 = yellow (OK, seeded), 2 = normal
+    const priority = chk.mismatch ? 0 : chk.seeded > 0 ? 1 : 2;
+    return { p, pd, main, rnd, kits, expected, chk, priority };
+  });
+  prepared.sort((a, b) => a.priority - b.priority);
+
+  prepared.forEach(({ p, pd, main, rnd, kits, expected, chk }, i) => {
     if (chk.mismatch) mismatchCount += 1;
     const r = i + 2; // header is row 1
     const row = ws.addRow({
@@ -1391,6 +1402,7 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     "Total outward = units issued out through kits.",
     "Difference = Expected total stock - (Seeded + Total inward - Total outward). It should be 0.",
     "A row is highlighted red and marked MISMATCH when the difference is not 0, or when R&D stock does not match its R&D issue log.",
+    "Row order: all red (MISMATCH) rows come first, then the yellow (OK, seeded) rows, then the normal OK rows. Within each group the parts are in part-number order.",
     "The Remarks column explains the likely reason. The Activity log trace column lists manual stock adjustments recorded in the activity log for that part and says whether they explain the gap (the stock-sheet import is a script and is not in the log).",
     `Parts with a mismatch in this report: ${mismatchCount} of ${parts.length}`,
     "",
