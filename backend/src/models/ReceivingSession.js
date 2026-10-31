@@ -23,6 +23,11 @@ const receivingSessionSchema = new mongoose.Schema(
     stockQuantity: { type: Number, default: 0 },
     taxInvoiceDone: { type: Boolean, default: false },
 
+    // "Is this inward stock against an issued kit?" — set when kit return /
+    // produced lines are booked right after the vendor is picked.
+    againstKit: { type: Boolean, default: false },
+    kitIssues: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "KitIssue" }], default: [] },
+
     status: {
       type: String,
       enum: ["in_progress", "completed", "abandoned"],

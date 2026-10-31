@@ -197,6 +197,11 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5">
                   {e.part.ttUniquePartNumber}
+                  {e.kitLink?.kind && (
+                    <span className="ml-1.5 rounded bg-sky-100 px-1 text-[10px] font-sans font-medium text-sky-800">
+                      {e.kitLink.kind === "returned" ? "Kit return" : "From kit"}
+                    </span>
+                  )}
                 </span>
                 {isEditing ? (
                   <div className="flex items-center gap-1">
@@ -296,7 +301,14 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
               <TableCell>
                 <PartPhoto url={e.part.photoUrl} alt={e.part.itemDescription} size="sm" />
               </TableCell>
-              <TableCell className="font-mono text-xs">{e.part.ttUniquePartNumber}</TableCell>
+              <TableCell className="font-mono text-xs">
+                {e.part.ttUniquePartNumber}
+                {e.kitLink?.kind && (
+                  <span className="ml-1.5 rounded bg-sky-100 px-1 text-[10px] font-sans font-medium text-sky-800">
+                    {e.kitLink.kind === "returned" ? "Kit return" : "From kit"}
+                  </span>
+                )}
+              </TableCell>
               <TableCell className="truncate max-w-0" title={e.part.itemDescription}>
                 {e.part.itemDescription}
               </TableCell>

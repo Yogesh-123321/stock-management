@@ -132,6 +132,30 @@ const stockEntrySchema = new mongoose.Schema(
       },
     },
 
+    // Set when this inward line is against a kit that was issued to the vendor
+    // (see controllers/kitReturnController.js):
+    //   returned - unused parts of the kit coming back. `allocations` records
+    //              how much of EACH kit's issued quantity this line uses up, so
+    //              a part can never be returned more than was issued.
+    //   produced - a new part that came out of the kit (e.g. an assembled
+    //              board). `kitIssues` just links it to the kit(s).
+    // Everything else about the line is a normal inward line: it waits for the
+    // tax invoice, then goes through IQC like any other received material.
+    kitLink: {
+      kind: { type: String, enum: ["returned", "produced", null], default: null },
+      kitIssues: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "KitIssue" }], default: [] },
+      allocations: {
+        type: [
+          {
+            kitIssue: { type: mongoose.Schema.Types.ObjectId, ref: "KitIssue", required: true },
+            quantity: { type: Number, required: true, min: 0 },
+            _id: false,
+          },
+        ],
+        default: [],
+      },
+    },
+
     // Lot code in WW/YY format (ISO week / 2-digit year), stamped on once
     // the tax invoice arrives and this entry is applied to stock — see
     // utils/batchCode.js. Built from the invoice's own invoiceDate, never

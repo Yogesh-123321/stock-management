@@ -5,6 +5,8 @@ import Part from "../models/Part.js";
 import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { bookExistingPart, bookNewPart, BookingError } from "../utils/stockBooking.js";
 import { notifyApprovers } from "../utils/notify.js";
+import { allocateReturn } from "../utils/kitReturn.js";
+import KitIssue from "../models/KitIssue.js";
 
 // GET /api/stock-entries?purchaseOrder=&vendor=&part=&receivingSession=
 export const getStockEntries = asyncHandler(async (req, res) => {
@@ -173,6 +175,23 @@ export const updateStockEntry = asyncHandler(async (req, res) => {
   if (!entry) {
     res.status(404);
     throw new Error("Stock entry not found");
+  }
+
+  // A line of unused kit parts coming back can't be raised past what the kit(s)
+  // it is booked against actually issued (less what has already come back).
+  if (entry.kitLink?.kind === "returned") {
+    const kits = await KitIssue.find({ _id: { $in: entry.kitLink.kitIssues || [] } }).sort({ createdAt: 1 }).lean();
+    try {
+      entry.kitLink.allocations = await allocateReturn({
+        partId: entry.part,
+        kitIssues: kits,
+        qty,
+        excludeEntryId: entry._id,
+      });
+    } catch (err) {
+      res.status(400);
+      throw err;
+    }
   }
 
   if (entry.stockApplied && entry.part) {

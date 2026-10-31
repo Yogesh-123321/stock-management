@@ -3,7 +3,11 @@ import ReceivingSession from "../models/ReceivingSession.js";
 import Vendor from "../models/Vendor.js";
 
 const populateAll = (query) =>
-  query.populate("vendor").populate("purchaseOrderDoc").populate("proformaInvoiceDoc");
+  query
+    .populate("vendor")
+    .populate("purchaseOrderDoc")
+    .populate("proformaInvoiceDoc")
+    .populate("kitIssues", "issueCode kitName kitCode");
 
 // GET /api/receiving-sessions?status=in_progress&vendor=
 export const getReceivingSessions = asyncHandler(async (req, res) => {

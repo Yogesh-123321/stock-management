@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import StepIndicator from "@/components/StepIndicator";
 import VendorStep from "@/pages/receive/VendorStep";
+import KitStep from "@/pages/receive/KitStep";
 import POStep from "@/pages/receive/POStep";
 import PIStep from "@/pages/receive/PIStep";
 import StockEntryStep from "@/pages/receive/StockEntryStep";
@@ -12,8 +13,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import api from "@/lib/api";
 import { CheckCircle2, Clock, MessageSquareText, PauseCircle, Play, Trash2, Plus } from "lucide-react";
 
-const STEPS = ["Vendor", "PO", "PI", "Stock entry", "Tax invoice"];
-const STEP_LABEL = { 1: "Vendor", 2: "Purchase order", 3: "Proforma invoice", 4: "Stock entry", 5: "Tax invoice" };
+const STEPS = ["Vendor & kit", "PO", "PI", "Stock entry", "Tax invoice"];
+const STEP_LABEL = { 1: "Vendor & kit", 2: "Purchase order", 3: "Proforma invoice", 4: "Stock entry", 5: "Tax invoice" };
 
 const fmtWhen = (d) => {
   if (!d) return "";
@@ -40,6 +41,9 @@ export default function ReceiveMaterial() {
   const [sessionId, setSessionId] = useState(null);
   const [step, setStep] = useState(1);
   const [vendor, setVendor] = useState(null);
+  // Right after the vendor is picked: "is this inward stock against an issued
+  // kit?" (still step 1 — no extra step number, so saved deliveries are unaffected).
+  const [kitGate, setKitGate] = useState(false);
   const [purchaseOrderDoc, setPurchaseOrderDoc] = useState(null); // PO upload, or null if skipped
   const [proformaInvoiceDoc, setProformaInvoiceDoc] = useState(null); // PI upload, or null if skipped
   const [stockEntryDone, setStockEntryDone] = useState(false);
@@ -81,6 +85,7 @@ export default function ReceiveMaterial() {
   const resetWizard = () => {
     setSessionId(null);
     setStep(1);
+    setKitGate(false);
     setVendor(null);
     setPurchaseOrderDoc(null);
     setProformaInvoiceDoc(null);
@@ -105,8 +110,10 @@ export default function ReceiveMaterial() {
   const handleVendorReady = async (v) => {
     setVendor(v);
     try {
-      const { data } = await api.post("/receiving-sessions", { vendor: v._id, currentStep: 2 });
+      const { data } = await api.post("/receiving-sessions", { vendor: v._id, currentStep: 1 });
       setSessionId(data._id);
+      setKitGate(true);
+      return;
     } catch (err) {
       toast.error(err.response?.data?.message || "Could not start the receiving session");
     }
@@ -136,6 +143,8 @@ export default function ReceiveMaterial() {
     setStockQuantity(s.stockQuantity || 0);
     setNotes(s.notes || "");
     setStep(Math.min(s.currentStep || 2, 5));
+    // Parked on the kit question (step 1 with a vendor already chosen).
+    setKitGate((s.currentStep || 2) === 1);
     setDone(false);
     setSavedAndExited(false);
     setMode("wizard");
@@ -226,6 +235,11 @@ export default function ReceiveMaterial() {
                           {s.proformaInvoiceDoc ? `PI ${s.proformaInvoiceDoc.documentNumber || "attached"}` : "No PI"} ·{" "}
                           {s.stockEntryDone ? "Stock entered" : "Stock pending"}
                         </p>
+                        {s.againstKit && (s.kitIssues || []).length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Against kit: {s.kitIssues.map((k) => k.issueCode || k.kitName).join(", ")}
+                          </p>
+                        )}
                         {s.notes && (
                           <p className="mt-1.5 flex items-start gap-1.5 rounded bg-muted/50 px-2 py-1 text-xs text-foreground/80">
                             <MessageSquareText className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
@@ -285,12 +299,32 @@ export default function ReceiveMaterial() {
         <>
           <StepIndicator steps={STEPS} currentStep={step} />
 
-          {step === 1 && <VendorStep onVendorReady={handleVendorReady} />}
+          {step === 1 && !(kitGate && vendor) && <VendorStep onVendorReady={handleVendorReady} />}
+
+          {step === 1 && kitGate && vendor && (
+            <KitStep
+              vendor={vendor}
+              sessionId={sessionId}
+              onDone={() => {
+                setKitGate(false);
+                goToStep(2);
+              }}
+              onSkip={() => {
+                setKitGate(false);
+                goToStep(2);
+              }}
+              onChangeVendor={() => setKitGate(false)}
+            />
+          )}
 
           {step === 2 && vendor && (
             <POStep
               vendor={vendor}
-              onBack={() => goToStep(1)}
+              onBack={() => {
+                // Back to the kit question (it has a "Change vendor" button).
+                setKitGate(Boolean(sessionId));
+                goToStep(1);
+              }}
               onUploaded={(po) => {
                 setPurchaseOrderDoc(po);
                 goToStep(3, { purchaseOrderDoc: po._id, poSkipped: false });

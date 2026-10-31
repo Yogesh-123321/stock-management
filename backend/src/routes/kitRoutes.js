@@ -21,6 +21,7 @@ import {
   deleteKitDraft,
   issueKitDraft,
 } from "../controllers/kitController.js";
+import { getReturnableKits, bookKitReturn } from "../controllers/kitReturnController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadKitSheet } from "../middleware/upload.js";
 
@@ -28,6 +29,11 @@ const router = express.Router();
 
 // Declared before "/:id" so they're never swallowed by the id route.
 router.get("/issues", getKitIssues);
+// Receive material, "against an issued kit": the kits issued to a vendor with
+// how much of each part can still come back, and booking the returned /
+// newly-produced parts as inward lines. Needs the same right as receiving.
+router.get("/returnable", protect, requirePermission("receive.manage"), getReturnableKits);
+router.post("/return-lines", protect, requirePermission("receive.manage"), bookKitReturn);
 // Excel download of ONE issued kit (who it went to, who issued it, every
 // material) — a per-kit slip, never a dump of all kits.
 router.get("/issues/:id/export", protect, exportKitIssueById);
