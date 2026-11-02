@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
+import logo from "@/assets/technotrendz-logo.png";
 import { ScrollText } from "lucide-react";
 /** `permission: null` = visible to everyone who is signed in. */
 // Kept in alphabetical order by label — add new entries in their
@@ -158,13 +159,13 @@ export default function Layout() {
   return (
     <div className="app-shell">
       <aside className="hidden md:flex w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-        <div className="flex items-center gap-2.5 px-5 py-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-active/90">
-            <Boxes className="h-4.5 w-4.5 text-white" strokeWidth={2.25} />
-          </div>
-          <div className="leading-tight">
-            <p className="font-display text-sm font-semibold text-white">TISPL</p>
-            <p className="text-[11px] tracking-wide text-sidebar-muted">Inventory Receiving</p>
+        <div className="px-4 py-5">
+          <div className="rounded-md bg-white p-2.5">
+            <img
+              src={logo}
+              alt="Technotrendz Innovative Solutions Pvt. Ltd."
+              className="block h-auto w-full"
+            />
           </div>
         </div>
 
@@ -197,8 +198,11 @@ export default function Layout() {
       <div className="app-main">
         <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-card/95 px-5 py-2.5 backdrop-blur">
           <div className="flex items-center gap-2 md:hidden">
-            <Boxes className="h-5 w-5" />
-            <span className="font-display text-sm font-semibold">TISPL Inventory</span>
+            <img
+              src={logo}
+              alt="Technotrendz Innovative Solutions Pvt. Ltd."
+              className="h-8 w-auto"
+            />
           </div>
           <div className="hidden text-xs text-muted-foreground md:block">
             Signed in as <span className="font-medium text-foreground">{user?.name}</span>
