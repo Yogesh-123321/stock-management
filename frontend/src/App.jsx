@@ -20,6 +20,9 @@ import ActivityLog from "@/pages/ActivityLog";
 const guard = (permission, element) => (
   <RequirePermission permission={permission}>{element}</RequirePermission>
 );
+const guardAny = (anyOf, element) => (
+  <RequirePermission anyOf={anyOf}>{element}</RequirePermission>
+);
 
 export default function App() {
   return (
@@ -46,7 +49,7 @@ export default function App() {
           {/* IQC stock now lives inside Parts master (MISC stock column) — keep old links working. */}
           <Route path="/iqc-stock" element={<Navigate to="/parts" replace />} />
           <Route path="/kits" element={<Navigate to="/templates?tab=kit" replace />} />
-          <Route path="/issue-kit" element={guard("kit.issue", <IssueKit />)} />
+          <Route path="/issue-kit" element={guardAny(["kit.issue", "kit.save"], <IssueKit />)} />
           <Route path="/documents" element={guard("documents.view", <Documents />)} />
           <Route path="/purchase-orders" element={<Navigate to="/documents" replace />} />
           <Route path="/pi-generator" element={guard("pi.create", <PiGenerator />)} />

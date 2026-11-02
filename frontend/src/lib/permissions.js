@@ -31,6 +31,7 @@ export const PERMISSIONS = [
   { key: "documents.view", group: "Operations", label: "View PO / PI / invoice documents" },
   { key: "kit.manage", group: "Kits", label: "Create / edit kit templates", adminOnly: true },
   { key: "kit.issue", group: "Kits", label: "Issue kits to a vendor" },
+  { key: "kit.save", group: "Kits", label: "Save & view kits only (cannot issue)" },
   {
     key: "iqc.manage",
     group: "Quality",

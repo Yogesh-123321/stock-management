@@ -769,7 +769,16 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
  * progress — nothing here has touched stock yet). Replaces the two
  * previously-separate cards with a single tabbed table.
  * ------------------------------------------------------------------ */
-function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, onChanged, onCount }) {
+function KitsPanel({
+  reloadKey,
+  canManage,
+  canIssue = true,
+  onEdited,
+  activeDraftId,
+  onResume,
+  onChanged,
+  onCount,
+}) {
   const [tab, setTab] = useState("issued");
 
   // ---- Issued kits state ----
@@ -1073,8 +1082,9 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                 {loadingDrafts && <TableEmpty colSpan={6}>Loading…</TableEmpty>}
                 {!loadingDrafts && drafts.length === 0 && (
                   <TableEmpty colSpan={6}>
-                    No saved kits — use "Save for later" above to keep progress on a kit you're not ready
-                    to issue yet.
+                    {canIssue
+                      ? 'No saved kits — use "Save for later" above to keep progress on a kit you\'re not ready to issue yet.'
+                      : 'No saved kits yet — use "Save kit" above to save one.'}
                   </TableEmpty>
                 )}
                 {!loadingDrafts &&
@@ -1133,16 +1143,18 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
                           >
                             <FilePenLine className="h-3.5 w-3.5" />
                           </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            title="Issue now, using what's saved"
-                            onClick={() => issueNow(d)}
-                            disabled={busyDraftId !== null}
-                          >
-                            <PlayCircle className="h-3.5 w-3.5 text-success" />
-                          </Button>
+                          {canIssue && (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title="Issue now, using what's saved"
+                              onClick={() => issueNow(d)}
+                              disabled={busyDraftId !== null}
+                            >
+                              <PlayCircle className="h-3.5 w-3.5 text-success" />
+                            </Button>
+                          )}
                           <Button
                             type="button"
                             size="icon"
@@ -1161,7 +1173,8 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
             </Table>
             <p className="mt-2 text-xs text-muted-foreground">
               A saved kit can be updated any number of times — each save just overwrites it in place,
-              since nothing is deducted from stock until it's actually issued.
+              since nothing is deducted from stock until it's actually issued
+              {canIssue ? "." : " — and only someone with the issue-kit right can issue it."}
             </p>
           </TabsContent>
         </Tabs>
@@ -1204,6 +1217,9 @@ function KitsPanel({ reloadKey, canManage, onEdited, activeDraftId, onResume, on
 export default function IssueKit() {
   const { can } = useAuth();
   const canManage = can?.("kit.manage");
+  // Save-only users (kit.save without kit.issue) can save and view kits but
+  // never issue them — the backend enforces the same on the issue routes.
+  const canIssue = can?.("kit.issue");
   // Issuing R&D stock is admin-only (part.approve) — same right the
   // backend checks on PATCH /parts/:id/rnd-stock — so only they see that tab.
   const canIssueRnd = can?.("part.approve");
@@ -1440,6 +1456,10 @@ export default function IssueKit() {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!canIssue) {
+      toast.error("You can save kits but not issue them — ask someone with the issue-kit right");
+      return;
+    }
     if (!template) {
       toast.error("Choose a kit template first");
       return;
@@ -1522,15 +1542,15 @@ export default function IssueKit() {
   const kitIssueSection = (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Pick a kit template, enter the quantity, and it's checked against live stock before anything
-        is deducted. Issuing can take a while — use "Save for later" to keep your progress and come
-        back to it, then issue it once everything's ready.
+        {canIssue
+          ? 'Pick a kit template, enter the quantity, and it\'s checked against live stock before anything is deducted. Issuing can take a while — use "Save for later" to keep your progress and come back to it, then issue it once everything\'s ready.'
+          : "Pick a kit template, enter the quantity and save it. You can save and view kits here; issuing a kit to a vendor needs the issue-kit right, so someone with that right will issue your saved kit."}
       </p>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base font-display flex items-center gap-2">
-            Issue a kit
+            {canIssue ? "Issue a kit" : "Save a kit"}
             {draftId && (
               <Badge variant="warning" className="gap-1">
                 <FolderClock className="h-3 w-3" />
@@ -1539,9 +1559,9 @@ export default function IssueKit() {
             )}
           </CardTitle>
           <CardDescription>
-            A short kit is still issued — whatever stock is available gets deducted, and any
-            shortfall is logged against the kit's issue history for follow-up. Not ready yet? Save it —
-            nothing is deducted from stock until you actually issue it.
+            {canIssue
+              ? "A short kit is still issued — whatever stock is available gets deducted, and any shortfall is logged against the kit's issue history for follow-up. Not ready yet? Save it — nothing is deducted from stock until you actually issue it."
+              : "Saving a kit never deducts anything from stock."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1764,12 +1784,20 @@ export default function IssueKit() {
                 onClick={saveDraft}
               >
                 <Save className="mr-1.5 h-4 w-4" />
-                {savingDraft ? "Saving…" : draftId ? "Update saved kit" : "Save for later"}
+                {savingDraft
+                  ? "Saving…"
+                  : draftId
+                    ? "Update saved kit"
+                    : canIssue
+                      ? "Save for later"
+                      : "Save kit"}
               </Button>
-              <Button type="submit" disabled={submitting || savingDraft || !template}>
-                <Send className="mr-1.5 h-4 w-4" />
-                {submitting ? "Issuing…" : "Issue kit"}
-              </Button>
+              {canIssue && (
+                <Button type="submit" disabled={submitting || savingDraft || !template}>
+                  <Send className="mr-1.5 h-4 w-4" />
+                  {submitting ? "Issuing…" : "Issue kit"}
+                </Button>
+              )}
             </div>
           </form>
         </CardContent>
@@ -1778,6 +1806,7 @@ export default function IssueKit() {
       <KitsPanel
         reloadKey={reloadKey}
         canManage={canManage}
+        canIssue={canIssue}
         onEdited={() => setReloadKey((k) => k + 1)}
         activeDraftId={draftId}
         onResume={resumeDraft}
@@ -1792,7 +1821,7 @@ export default function IssueKit() {
       <div>
         <h1 className="font-display text-2xl font-semibold flex items-center gap-2">
           <PackageOpen className="h-5 w-5" />
-          {canIssueRnd ? "Issue kit & R&D stock" : "Issue kit"}
+          {canIssueRnd ? "Issue kit & R&D stock" : canIssue ? "Issue kit" : "Saved kits"}
           {draftCount > 0 && (
             <Badge variant="warning" className="gap-1">
               <FolderClock className="h-3 w-3" />

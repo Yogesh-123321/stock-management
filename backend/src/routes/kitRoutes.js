@@ -64,22 +64,23 @@ router.delete(
 );
 
 // Saved (draft) kit issues — declared before "/:id" for the same reason
-// as "/issues" above. Saving/updating/issuing a draft needs the same
-// permission as issuing a kit directly; reading the list is open to
-// anyone signed in, same as the issued-kits history.
+// as "/issues" above. Saving / updating / discarding a draft needs
+// "kit.issue" OR "kit.save" (save-only users); actually issuing a draft
+// still needs "kit.issue". Reading the list is open to anyone signed in,
+// same as the issued-kits history.
 router.get("/drafts", getKitDrafts);
 router.get("/drafts/:draftId", getKitDraftById);
-router.post("/:id/draft", protect, requirePermission("kit.issue"), saveKitDraft);
+router.post("/:id/draft", protect, requirePermission("kit.issue", "kit.save"), saveKitDraft);
 router.patch(
   "/drafts/:draftId",
   protect,
-  requirePermission("kit.issue", "kit.manage"),
+  requirePermission("kit.issue", "kit.save", "kit.manage"),
   updateKitDraft
 );
 router.delete(
   "/drafts/:draftId",
   protect,
-  requirePermission("kit.issue", "kit.manage"),
+  requirePermission("kit.issue", "kit.save", "kit.manage"),
   deleteKitDraft
 );
 router.post("/drafts/:draftId/issue", protect, requirePermission("kit.issue"), issueKitDraft);

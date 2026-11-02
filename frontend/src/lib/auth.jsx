@@ -130,10 +130,11 @@ export function RequireAuth({ children }) {
 }
 
 /** Wrap a route that needs a specific permission. */
-export function RequirePermission({ permission, children }) {
-  const { can, loading } = useAuth();
+export function RequirePermission({ permission, anyOf, children }) {
+  const { can, canAny, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!can(permission)) {
+  const allowed = anyOf ? canAny(...anyOf) : can(permission);
+  if (!allowed) {
     return (
       <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
         <p className="font-display text-base font-semibold">No access</p>

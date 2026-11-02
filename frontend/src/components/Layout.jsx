@@ -37,11 +37,13 @@ const navItems = [
     to: "/issue-kit",
     label: "Issue kit",
     icon: PackageOpen,
-    permission: "kit.issue",
+    anyOf: ["kit.issue", "kit.save"],
     // Admins can also issue R&D stock from this page (second tab), so
     // their sidebar entry says so.
     altLabel: "Issue kit & R&D stock",
     altPermission: "part.approve",
+    // Users who may only save / view kits (no kit.issue) see this instead.
+    saveOnlyLabel: "Saved kits",
   },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
@@ -96,7 +98,8 @@ export default function Layout() {
 
   const visible = navItems
     .filter((i) => (i.anyOf ? canAny(...i.anyOf) : !i.permission || can(i.permission)))
-    .map((i) => (i.altLabel && can(i.altPermission) ? { ...i, label: i.altLabel } : i));
+    .map((i) => (i.altLabel && can(i.altPermission) ? { ...i, label: i.altLabel } : i))
+    .map((i) => (i.saveOnlyLabel && !can("kit.issue") ? { ...i, label: i.saveOnlyLabel } : i));
 
   const onSignOut = () => {
     signOut();
