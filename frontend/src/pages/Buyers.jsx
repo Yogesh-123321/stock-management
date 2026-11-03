@@ -15,12 +15,20 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmp
 import BuyerRegistrationForm from "@/components/BuyerRegistrationForm";
 import PartyDocuments from "@/components/PartyDocuments";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { Search, Eye, Download, UserPlus, Pencil, Check, X } from "lucide-react";
 
 const statusVariant = { pending: "warning", approved: "success", rejected: "destructive" };
 
 export default function Buyers() {
   const [buyers, setBuyers] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedBuyers = apply(buyers, {
+    company: (b) => b.companyName,
+    gst: (b) => b.taxRegistrationNo,
+    nature: (b) => b.natureOfCompany,
+    status: (b) => b.status,
+  });
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -110,10 +118,10 @@ export default function Buyers() {
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[32%]">Company</TableHead>
-                <TableHead className="w-[22%]">GST no.</TableHead>
-                <TableHead className="w-[16%]">Nature</TableHead>
-                <TableHead className="w-[12%]">Status</TableHead>
+                <SortableHead label="Company" sortKey="company" sort={sort} onSort={toggle} className="w-[32%]" />
+                <SortableHead label="GST no." sortKey="gst" sort={sort} onSort={toggle} className="w-[22%]" />
+                <SortableHead label="Nature" sortKey="nature" sort={sort} onSort={toggle} className="w-[16%]" />
+                <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="w-[12%]" />
                 <TableHead className="w-[18%] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -131,7 +139,7 @@ export default function Buyers() {
                 </TableEmpty>
               )}
               {!loading &&
-                buyers.map((b) => (
+                sortedBuyers.map((b) => (
                   <TableRow key={b._id}>
                     <TableCell className="font-medium min-w-0">
                       <div className="flex items-center gap-2 min-w-0">

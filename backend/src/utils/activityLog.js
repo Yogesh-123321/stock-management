@@ -1,4 +1,5 @@
 import ActivityLog from "../models/ActivityLog.js";
+import { resolveRequestUser } from "../middleware/auth.js";
 
 /** Fields that must never end up in the log. */
 const REDACTED = [
@@ -54,7 +55,7 @@ export function safeMeta(input, depth = 0) {
  */
 export async function logActivity(req, entry = {}) {
   try {
-    const user = req?.user || null;
+    const user = await resolveRequestUser(req);
     await ActivityLog.create({
       user: user?._id || null,
       userName: user?.name || user?.username || entry.userName || "System",

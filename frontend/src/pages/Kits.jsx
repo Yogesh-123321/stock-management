@@ -16,6 +16,7 @@ import {
   TableEmpty,
 } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import KitImportPanel from "@/pages/kitImportPanel";
 import {
   Layers,
@@ -539,6 +540,15 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
 function TemplateIssuesDialog({ template, onClose }) {
   const [loading, setLoading] = useState(true);
   const [issues, setIssues] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedIssues = apply(issues, {
+    date: (i) => (i.createdAt ? new Date(i.createdAt).getTime() : null),
+    code: (i) => i.issueCode,
+    vendor: (i) => i.vendor?.companyName,
+    qty: (i) => Number(i.quantity),
+    issuedBy: (i) => i.issuedBy,
+    status: (i) => (i.lines || []).reduce((n, l) => n + ((l.qtyShort || 0) > 0 ? 1 : 0), 0),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -579,16 +589,16 @@ function TemplateIssuesDialog({ template, onClose }) {
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[90px]">Date</TableHead>
-                  <TableHead className="w-[100px]">Code</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="w-[60px] text-right">Qty</TableHead>
-                  <TableHead className="w-[110px]">Issued by</TableHead>
-                  <TableHead className="w-[130px]">Status</TableHead>
+                  <SortableHead label="Date" sortKey="date" sort={sort} onSort={toggle} className="w-[90px]" />
+                  <SortableHead label="Code" sortKey="code" sort={sort} onSort={toggle} className="w-[100px]" />
+                  <SortableHead label="Vendor" sortKey="vendor" sort={sort} onSort={toggle} />
+                  <SortableHead label="Qty" sortKey="qty" sort={sort} onSort={toggle} className="w-[60px]" align="right" />
+                  <SortableHead label="Issued by" sortKey="issuedBy" sort={sort} onSort={toggle} className="w-[110px]" />
+                  <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="w-[130px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {issues.map((iss) => {
+                {sortedIssues.map((iss) => {
                   const shortLines = (iss.lines || []).filter((l) => (l.qtyShort || 0) > 0);
                   return (
                     <TableRow key={iss._id}>
@@ -675,6 +685,17 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
   }, [template._id]);
 
   const items = kit?.items || [];
+  const { sort, toggle, apply } = useSort();
+  const sortedItems = apply(items, {
+    ref: (it) => it.referenceDesignator,
+    value: (it) => it.value,
+    partNo: (it) => it.ttUniquePartNumber,
+    description: (it) => it.matchedPart?.itemDescription,
+    qty: (it) => Number(it.qtyPerKit),
+    unit: (it) => it.matchedPart?.unit,
+    stock: (it) => (it.matchedPart ? Number(it.matchedPart.quantityInStock) : null),
+    dnp: (it) => (it.dnp ? 1 : 0),
+  });
   const issuableCount = items.filter((it) => !it.dnp).length;
 
   return (
@@ -728,16 +749,14 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                   </colgroup>
                   <thead className="bg-secondary/70">
                     <tr className="border-b border-border">
-                      {["Ref.", "Value", "TT part #", "Description", "Qty/kit", "Unit", "In stock", "DNP"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground break-words"
-                          >
-                            {h}
-                          </th>
-                        )
-                      )}
+                                            <SortableHead label="Ref." sortKey="ref" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
+                      <SortableHead label="Value" sortKey="value" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
+                      <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
+                      <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
+                      <SortableHead label="Qty/kit" sortKey="qty" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" align="right" />
+                      <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
+                      <SortableHead label="In stock" sortKey="stock" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" align="right" />
+                      <SortableHead label="DNP" sortKey="dnp" sort={sort} onSort={toggle} className="break-words h-auto py-1.5" />
                     </tr>
                   </thead>
                   <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
@@ -748,7 +767,7 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
                         </td>
                       </tr>
                     )}
-                    {items.map((it, i) => (
+                    {sortedItems.map((it, i) => (
                       <tr key={it._id || i} className="border-b border-border">
                         <td className="px-2.5 py-1.5 text-xs break-words">{it.referenceDesignator || "—"}</td>
                         <td className="px-2.5 py-1.5 text-xs break-words">{it.value || "—"}</td>
@@ -795,6 +814,13 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
 
 export default function Kits() {
   const [templates, setTemplates] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedTemplates = apply(templates, {
+    kitName: (t) => t.kitName,
+    kitCode: (t) => t.kitCode,
+    revision: (t) => t.revision,
+    items: (t) => Number(t.itemCount ?? 0),
+  });
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // null = closed, {} = new, {...} = edit
@@ -886,10 +912,10 @@ export default function Kits() {
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead>Kit name</TableHead>
-                <TableHead className="w-[190px]">Code</TableHead>
-                <TableHead className="w-[70px]">Rev.</TableHead>
-                <TableHead className="w-[70px] text-right">Items</TableHead>
+                <SortableHead label="Kit name" sortKey="kitName" sort={sort} onSort={toggle} />
+                <SortableHead label="Code" sortKey="kitCode" sort={sort} onSort={toggle} className="w-[190px]" />
+                <SortableHead label="Rev." sortKey="revision" sort={sort} onSort={toggle} className="w-[70px]" />
+                <SortableHead label="Items" sortKey="items" sort={sort} onSort={toggle} className="w-[70px]" align="right" />
                 <TableHead className="w-[190px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -901,7 +927,7 @@ export default function Kits() {
                 </TableEmpty>
               )}
               {!loading &&
-                templates.map((t) => (
+                sortedTemplates.map((t) => (
                   <TableRow
                     key={t._id}
                     className="cursor-pointer hover:bg-secondary/40"

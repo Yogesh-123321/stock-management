@@ -42,8 +42,20 @@ const EMPTY = {
   minAmount: "",
   maxAmount: "",
   search: "",
+  searchMode: "all",
   groupBy: "none",
 };
+
+// Where the keywords are looked for (sent as searchIn; all ticked = everywhere).
+const SEARCH_FIELDS = [
+  ["vendor", "Vendor / GSTIN"],
+  ["invoice", "Invoice no."],
+  ["po", "PO / PI no."],
+  ["utr", "UTR"],
+  ["remarks", "Remarks / paid by"],
+  ["parts", "Parts"],
+];
+const ALL_SEARCH_FIELDS = SEARCH_FIELDS.map(([k]) => k);
 
 const GROUP_LABEL = { vendor: "Vendor", method: "Payment method", month: "Invoice month" };
 
@@ -72,19 +84,33 @@ export default function BillingReport() {
   const [exporting, setExporting] = useState(false);
   const [exportingFull, setExportingFull] = useState(false);
   const [pickedParts, setPickedParts] = useState([]);
+  const [searchIn, setSearchIn] = useState(ALL_SEARCH_FIELDS);
   const detailSort = useSort();
   const groupSort = useSort();
 
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
 
   // Only send filters that have a value.
-  const params = useCallback(
-    () => ({
+  const params = useCallback(() => {
+    const out = {
       ...Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")),
       ...(pickedParts.length > 0 ? { parts: pickedParts.map((p) => p._id).join(",") } : {}),
-    }),
-    [f, pickedParts]
-  );
+    };
+    if (!f.search.trim()) {
+      delete out.search;
+      delete out.searchMode; // nothing to match, so the mode means nothing
+    } else if (searchIn.length > 0 && searchIn.length < ALL_SEARCH_FIELDS.length) {
+      out.searchIn = searchIn.join(",");
+    }
+    return out;
+  }, [f, pickedParts, searchIn]);
+
+  // At least one place must stay ticked — keywords need somewhere to be looked for.
+  const toggleSearchField = (key) =>
+    setSearchIn((cur) => {
+      if (!cur.includes(key)) return [...cur, key];
+      return cur.length > 1 ? cur.filter((k) => k !== key) : cur;
+    });
 
   const run = useCallback(async () => {
     if (f.from && f.to && f.from > f.to) return toast.error("“From” date is after “To” date");
@@ -188,6 +214,7 @@ export default function BillingReport() {
             onClick={() => {
               setF(EMPTY);
               setPickedParts([]);
+              setSearchIn(ALL_SEARCH_FIELDS);
             }}
           >
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset
@@ -277,14 +304,45 @@ export default function BillingReport() {
             <Label>Parts (optional — invoices that include these parts)</Label>
             <ReportPartPicker selected={pickedParts} onChange={setPickedParts} />
           </div>
-          <div className="space-y-1 sm:col-span-2">
-            <Label>Search</Label>
-            <Input
-              value={f.search}
-              onChange={set("search")}
-              onKeyDown={(e) => e.key === "Enter" && run()}
-              placeholder="Vendor, invoice no., PO/PI, UTR"
-            />
+          <div className="space-y-2 sm:col-span-2 lg:col-span-4">
+            <Label>Keywords (optional — only invoices matching these words)</Label>
+            <div className="flex flex-wrap gap-2">
+              <Input
+                className="min-w-[220px] flex-1"
+                value={f.search}
+                onChange={set("search")}
+                onKeyDown={(e) => e.key === "Enter" && run()}
+                placeholder='e.g. cable, "Acme Traders", advance'
+              />
+              <select
+                className={cn(selectClass, "w-auto")}
+                value={f.searchMode}
+                onChange={set("searchMode")}
+                aria-label="Keyword match mode"
+                title="All words: an invoice must match every word. Any word: matching one is enough."
+              >
+                <option value="all">Match all words</option>
+                <option value="any">Match any word</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>Look in:</span>
+              {SEARCH_FIELDS.map(([key, label]) => (
+                <label key={key} className="flex cursor-pointer items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-primary"
+                    checked={searchIn.includes(key)}
+                    onChange={() => toggleSearchField(key)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Separate words with spaces or commas; use "quotes" to match a phrase. Matches anywhere inside a
+              value, ignoring capitals.
+            </p>
           </div>
           <div className="space-y-1 sm:col-span-2">
             <Label>Group summary by</Label>
@@ -296,6 +354,21 @@ export default function BillingReport() {
             </select>
           </div>
         </div>
+
+        {data?.filters?.keywords?.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Showing invoices matching{" "}
+            <span className="font-medium text-foreground">
+              {data.filters.searchMode === "any" ? "any" : "all"} of:{" "}
+              {data.filters.keywords.map((k) => `“${k}”`).join(", ")}
+            </span>
+            {data.filters.searchIn?.length < ALL_SEARCH_FIELDS.length &&
+              ` in ${data.filters.searchIn
+                .map((k) => SEARCH_FIELDS.find(([key]) => key === k)?.[1])
+                .filter(Boolean)
+                .join(", ")}`}
+          </p>
+        )}
 
         {/* ---------------- totals ---------------- */}
         {s && (

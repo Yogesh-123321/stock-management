@@ -17,6 +17,7 @@ import {
   TableEmpty,
 } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import CategorySelect from "@/components/CategorySelect";
 import PriceTrendChart from "@/components/PriceTrendChart";
 import RndStockHover from "@/components/RndStockHover";
@@ -646,6 +647,15 @@ function NewPartRequestDialog({ initialSearch = "", onClose, onCreated }) {
 function MyPartRequests({ reloadKey, onRequestNew }) {
   const [tab, setTab] = useState("pending");
   const [requests, setRequests] = useState([]);
+  const sort = useSort();
+  const sortedRequests = sort.apply(requests, {
+    raised: (r) => (r.createdAt ? new Date(r.createdAt).getTime() : null),
+    part: (r) => r.newPart?.itemDescription,
+    type: (r) => (r.requestType === "alternate_part" ? "Alternate" : "New part"),
+    vendor: (r) => r.vendor?.companyName,
+    qty: (r) => (r.proposedQuantity == null ? null : Number(r.proposedQuantity)),
+    status: (r) => r.status,
+  });
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -709,10 +719,10 @@ function MyPartRequests({ reloadKey, onRequestNew }) {
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[110px]">Raised</TableHead>
-              <TableHead>Proposed part</TableHead>
-              <TableHead className="w-[150px]">Type</TableHead>
-              <TableHead className="w-[220px] text-right">Status</TableHead>
+<SortableHead label="Raised" sortKey="raised" sort={sort.sort} onSort={sort.toggle} className="w-[110px]" />
+              <SortableHead label="Proposed part" sortKey="part" sort={sort.sort} onSort={sort.toggle} />
+              <SortableHead label="Type" sortKey="type" sort={sort.sort} onSort={sort.toggle} className="w-[150px]" />
+              <SortableHead label="Status" sortKey="status" sort={sort.sort} onSort={sort.toggle} className="w-[220px]" align="right" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -723,7 +733,7 @@ function MyPartRequests({ reloadKey, onRequestNew }) {
               </TableEmpty>
             )}
             {!loading &&
-              requests.map((r) => (
+              sortedRequests.map((r) => (
                 <TableRow key={r._id}>
                   <TableCell className="text-xs text-muted-foreground">{fmtDate(r.createdAt)}</TableCell>
                   <TableCell className="overflow-hidden">
@@ -788,6 +798,15 @@ function MyPartRequests({ reloadKey, onRequestNew }) {
 function PartApprovals({ onApproved, canRequest, onRequestNew }) {
   const [tab, setTab] = useState("pending"); // pending | approved | rejected
   const [requests, setRequests] = useState([]);
+  const sort = useSort();
+  const sortedRequests = sort.apply(requests, {
+    raised: (r) => (r.createdAt ? new Date(r.createdAt).getTime() : null),
+    part: (r) => r.newPart?.itemDescription,
+    type: (r) => (r.requestType === "alternate_part" ? "Alternate" : "New part"),
+    vendor: (r) => r.vendor?.companyName,
+    qty: (r) => (r.proposedQuantity == null ? null : Number(r.proposedQuantity)),
+    status: (r) => r.status,
+  });
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [editingReq, setEditingReq] = useState(null);
@@ -898,12 +917,12 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[110px]">Raised</TableHead>
-              <TableHead>Proposed part</TableHead>
-              <TableHead className="w-[150px]">Type</TableHead>
-              <TableHead className="w-[160px]">Vendor</TableHead>
-              <TableHead className="w-[80px] text-right">Qty</TableHead>
-              <TableHead className="w-[190px] text-right">Status</TableHead>
+<SortableHead label="Raised" sortKey="raised" sort={sort.sort} onSort={sort.toggle} className="w-[110px]" />
+              <SortableHead label="Proposed part" sortKey="part" sort={sort.sort} onSort={sort.toggle} />
+              <SortableHead label="Type" sortKey="type" sort={sort.sort} onSort={sort.toggle} className="w-[150px]" />
+              <SortableHead label="Vendor" sortKey="vendor" sort={sort.sort} onSort={sort.toggle} className="w-[160px]" />
+              <SortableHead label="Qty" sortKey="qty" sort={sort.sort} onSort={sort.toggle} className="w-[80px]" align="right" />
+              <SortableHead label="Status" sortKey="status" sort={sort.sort} onSort={sort.toggle} className="w-[190px]" align="right" />
               <TableHead className="w-[60px] text-right">Edit</TableHead>
             </TableRow>
           </TableHeader>
@@ -915,7 +934,7 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
               </TableEmpty>
             )}
             {!loading &&
-              requests.map((r) => (
+              sortedRequests.map((r) => (
                 <TableRow key={r._id}>
                   <TableCell className="text-xs text-muted-foreground">
                     {fmtDate(r.createdAt)}
@@ -991,22 +1010,24 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
                   </TableCell>
                   <TableCell className="text-right">
                     {r.status === "pending" ? (
-                      <div className="flex justify-end gap-1.5">
+                      <div className="flex justify-end gap-1">
                         <Button
                           size="sm"
+                          className="h-7 gap-1 px-2.5 text-xs"
                           disabled={busyId === r._id}
                           onClick={() => review(r, "approve")}
                         >
-                          <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                          <ShieldCheck className="h-3 w-3" />
                           Approve
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
+                          className="h-7 gap-1 px-2.5 text-xs"
                           disabled={busyId === r._id}
                           onClick={() => review(r, "reject")}
                         >
-                          <ShieldX className="h-3.5 w-3.5 mr-1" />
+                          <ShieldX className="h-3 w-3" />
                           Reject
                         </Button>
                       </div>
@@ -1046,6 +1067,7 @@ function PartApprovals({ onApproved, canRequest, onRequestNew }) {
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-7 w-7 p-0"
                       title="Edit this request"
                       disabled={r.status === "consumed"}
                       onClick={() => setEditingReq(r)}
@@ -1547,6 +1569,9 @@ function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
  * ------------------------------------------------------------------ */
 function PartHistoryDialog({ part, onClose, onPartChanged }) {
   const navigate = useNavigate();
+  const stockSort = useSort();
+  const docSort = useSort();
+  const kitSort = useSort();
   const [tab, setTab] = useState("stock"); // "stock" | "documents"
 
   const [loading, setLoading] = useState(true);
@@ -1643,6 +1668,22 @@ useEffect(() => {
   }, [tab, part._id]);
 
   const entries = data?.entries || [];
+  const sortedEntries = stockSort.apply(entries, {
+    date: (e) => (e.date ? new Date(e.date).getTime() : null),
+    party: (e) => e.party?.name,
+    reference: (e) =>
+      e.reference ? `${e.reference.type} ${e.reference.number || ""}`.trim() : e.taxInvoiceNumber,
+    qty: (e) => (e.direction === "out" ? -1 : 1) * Number(e.quantity),
+    price: (e) => {
+      const r = e.price ?? part?.price;
+      return r == null ? null : Number(r);
+    },
+    amount: (e) => {
+      const r = e.price ?? part?.price;
+      return r == null ? null : Number(r) * Number(e.quantity);
+    },
+    balance: (e) => (e.balance == null ? null : Number(e.balance)),
+  });
 
   // Receipt lines ("in") live in the stock-entries collection; kit issue
   // lines ("out") live on a KitIssue document instead, so each entryType
@@ -1994,34 +2035,20 @@ useEffect(() => {
                         </colgroup>
                         <thead className="bg-secondary/70">
                           <tr className="border-b border-border">
-                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Date
-                            </th>
-                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              From / To
-                            </th>
-                            <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Reference
-                            </th>
-                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Qty
-                            </th>
-                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Price
-                            </th>
-                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Amount
-                            </th>
-                            <th className="px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Balance
-                            </th>
+                            <SortableHead label="Date" sortKey="date" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" />
+                            <SortableHead label="From / To" sortKey="party" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" />
+                            <SortableHead label="Reference" sortKey="reference" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" />
+                            <SortableHead label="Qty" sortKey="qty" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" align="right" />
+                            <SortableHead label="Price" sortKey="price" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" align="right" />
+                            <SortableHead label="Amount" sortKey="amount" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" align="right" />
+                            <SortableHead label="Balance" sortKey="balance" sort={stockSort.sort} onSort={stockSort.toggle} className="px-2 py-1.5 h-auto" align="right" />
                             <th className="px-1 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               {" "}
                             </th>
                           </tr>
                         </thead>
                         <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                          {entries.map((e) => (
+                          {sortedEntries.map((e) => (
                             <tr key={e._id} className="border-b border-border">
                               <td className="px-2 py-1.5 align-top text-xs text-muted-foreground">
                                 {fmtDateTime(e.date)}
@@ -2209,25 +2236,21 @@ useEffect(() => {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Date
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Field
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Action
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          File
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          By
-                        </th>
+                        <SortableHead label="Date" sortKey="date" sort={docSort.sort} onSort={docSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="Field" sortKey="field" sort={docSort.sort} onSort={docSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="Action" sortKey="action" sort={docSort.sort} onSort={docSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="File" sortKey="file" sort={docSort.sort} onSort={docSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="By" sortKey="by" sort={docSort.sort} onSort={docSort.toggle} className="px-2.5 py-1.5 h-auto" />
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                      {docEntries.map((e) => (
+                      {docSort.apply(docEntries, {
+                        date: (e) => (e.date ? new Date(e.date).getTime() : null),
+                        field: (e) => e.field,
+                        action: (e) => e.action,
+                        file: (e) => (e.url ? fileNameFromUrl(e.url) : null),
+                        by: (e) => e.changedBy,
+                      }).map((e) => (
                         <tr key={e._id} className="border-b border-border">
                           <td className="px-2.5 py-1.5 align-top text-xs text-muted-foreground">
                             {fmtDateTime(e.date)}
@@ -2306,25 +2329,21 @@ useEffect(() => {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Kit
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Revision
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Ref. designator(s)
-                        </th>
-                        <th className="px-2.5 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Qty / kit
-                        </th>
-                        <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Status
-                        </th>
+                        <SortableHead label="Kit" sortKey="kit" sort={kitSort.sort} onSort={kitSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="Revision" sortKey="revision" sort={kitSort.sort} onSort={kitSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="Ref. designator(s)" sortKey="refs" sort={kitSort.sort} onSort={kitSort.toggle} className="px-2.5 py-1.5 h-auto" />
+                        <SortableHead label="Qty / kit" sortKey="qty" sort={kitSort.sort} onSort={kitSort.toggle} className="px-2.5 py-1.5 h-auto" align="right" />
+                        <SortableHead label="Status" sortKey="status" sort={kitSort.sort} onSort={kitSort.toggle} className="px-2.5 py-1.5 h-auto" />
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                      {kitUsage.map((k) => (
+                      {kitSort.apply(kitUsage, {
+                        kit: (k) => k.kitName,
+                        revision: (k) => k.revision,
+                        refs: (k) => k.referenceDesignators,
+                        qty: (k) => Number(k.qtyPerKit),
+                        status: (k) => (k.isActive ? "Active" : "Inactive"),
+                      }).map((k) => (
                         <tr key={k.kitTemplateId} className="border-b border-border">
                           <td className="px-2.5 py-1.5 align-top">
                             <div className="font-medium">{k.kitName}</div>
@@ -2374,6 +2393,13 @@ useEffect(() => {
  * part number and surfaces any group with more than one TT part number.
  * ------------------------------------------------------------------ */
 function DuplicatePartsDialog({ onClose, onChanged }) {
+  const dupSort = useSort();
+  const dupGetters = {
+    partNo: (p) => p.ttUniquePartNumber,
+    description: (p) => p.itemDescription,
+    vendors: (p) => (p.vendors || []).map((v) => v.companyName).join(" / "),
+    stock: (p) => Number(p.quantityInStock ?? 0),
+  };
   const [criteria, setCriteria] = useState([]);
   const [criterion, setCriterion] = useState("manufacturerPartNumber");
   const [groups, setGroups] = useState([]);
@@ -2539,14 +2565,14 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[140px]">TT part number</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead className="w-[190px]">Vendor(s)</TableHead>
-                        <TableHead className="w-[90px] text-right">Stock qty</TableHead>
+                        <SortableHead label="TT part number" sortKey="partNo" sort={dupSort.sort} onSort={dupSort.toggle} className="w-[140px]" />
+                        <SortableHead label="Description" sortKey="description" sort={dupSort.sort} onSort={dupSort.toggle} />
+                        <SortableHead label="Vendor(s)" sortKey="vendors" sort={dupSort.sort} onSort={dupSort.toggle} className="w-[190px]" />
+                        <SortableHead label="Stock qty" sortKey="stock" sort={dupSort.sort} onSort={dupSort.toggle} className="w-[90px]" align="right" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {g.parts.map((p) => (
+                      {dupSort.apply(g.parts, dupGetters).map((p) => (
                         <TableRow key={p._id}>
                           <TableCell>
                             <span className="id-chip">{p.ttUniquePartNumber}</span>

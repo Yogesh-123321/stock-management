@@ -3,6 +3,7 @@ import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmpty } from "@/components/ui/table";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import api from "@/lib/api";
 import { FileText } from "lucide-react";
 
@@ -17,6 +18,21 @@ export default function PurchaseOrders() {
   const [taxInvoices, setTaxInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const poSort = useSort();
+  const invSort = useSort();
+  const sortedPos = poSort.apply(pos, {
+    vendor: (r) => r.vendor?.companyName,
+    documentType: (r) => r.documentType,
+    documentNumber: (r) => r.documentNumber,
+    received: (r) => (r.receivedDate ? new Date(r.receivedDate).getTime() : null),
+    status: (r) => r.status,
+  });
+  const sortedInvoices = invSort.apply(taxInvoices, {
+    vendor: (r) => r.vendor?.companyName,
+    invoiceNumber: (r) => r.invoiceNumber,
+    invoiceDate: (r) => (r.invoiceDate ? new Date(r.invoiceDate).getTime() : null),
+    against: (r) => `${r.purchaseOrder?.documentType || ""} ${r.purchaseOrder?.documentNumber || ""}`.trim(),
+  });
 
   useEffect(() => {
     (async () => {
@@ -56,11 +72,11 @@ export default function PurchaseOrders() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Document type</TableHead>
-                <TableHead>Document no.</TableHead>
-                <TableHead>Received</TableHead>
-                <TableHead>Status</TableHead>
+                <SortableHead label="Vendor" sortKey="vendor" sort={poSort.sort} onSort={poSort.toggle} />
+                <SortableHead label="Document type" sortKey="documentType" sort={poSort.sort} onSort={poSort.toggle} />
+                <SortableHead label="Document no." sortKey="documentNumber" sort={poSort.sort} onSort={poSort.toggle} />
+                <SortableHead label="Received" sortKey="received" sort={poSort.sort} onSort={poSort.toggle} />
+                <SortableHead label="Status" sortKey="status" sort={poSort.sort} onSort={poSort.toggle} />
                 <TableHead>File</TableHead>
               </TableRow>
             </TableHeader>
@@ -68,7 +84,7 @@ export default function PurchaseOrders() {
               {loading && <TableEmpty colSpan={6}>Loading…</TableEmpty>}
               {!loading && pos.length === 0 && <TableEmpty colSpan={6}>No documents uploaded yet.</TableEmpty>}
               {!loading &&
-                pos.map((po) => (
+                sortedPos.map((po) => (
                   <TableRow key={po._id}>
                     <TableCell className="font-medium">{po.vendor?.companyName || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{po.documentType}</TableCell>
@@ -104,10 +120,10 @@ export default function PurchaseOrders() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Invoice no.</TableHead>
-                <TableHead>Invoice date</TableHead>
-                <TableHead>Against document</TableHead>
+                <SortableHead label="Vendor" sortKey="vendor" sort={invSort.sort} onSort={invSort.toggle} />
+                <SortableHead label="Invoice no." sortKey="invoiceNumber" sort={invSort.sort} onSort={invSort.toggle} />
+                <SortableHead label="Invoice date" sortKey="invoiceDate" sort={invSort.sort} onSort={invSort.toggle} />
+                <SortableHead label="Against document" sortKey="against" sort={invSort.sort} onSort={invSort.toggle} />
                 <TableHead>File</TableHead>
               </TableRow>
             </TableHeader>
@@ -117,7 +133,7 @@ export default function PurchaseOrders() {
                 <TableEmpty colSpan={5}>No tax invoices uploaded yet.</TableEmpty>
               )}
               {!loadingInvoices &&
-                taxInvoices.map((inv) => (
+                sortedInvoices.map((inv) => (
                   <TableRow key={inv._id}>
                     <TableCell className="font-medium">{inv.vendor?.companyName || "—"}</TableCell>
                     <TableCell className="font-mono-tech text-xs">{inv.invoiceNumber || "—"}</TableCell>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import PoPreview from "@/components/PoPreview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -338,6 +339,15 @@ export default function PoGenerator() {
   const [downloading, setDownloading] = useState(false);
   const [generated, setGenerated] = useState(null);
   const [history, setHistory] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedHistory = apply(history, {
+    voucherNo: (r) => r.voucherNo,
+    supplier: (r) => r.supplierName,
+    date: (r) => (r.voucherDate ? new Date(r.voucherDate).getTime() : null),
+    status: (r) => r.status || "open",
+    approval: (r) => r.approvalStatus,
+    total: (r) => Number(r.totalAmount),
+  });
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [copySource, setCopySource] = useState(null);
 
@@ -1129,12 +1139,12 @@ export default function PoGenerator() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Voucher no.</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Approval</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <SortableHead label="Voucher no." sortKey="voucherNo" sort={sort} onSort={toggle} />
+                  <SortableHead label="Supplier" sortKey="supplier" sort={sort} onSort={toggle} />
+                  <SortableHead label="Date" sortKey="date" sort={sort} onSort={toggle} />
+                  <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} />
+                  <SortableHead label="Approval" sortKey="approval" sort={sort} onSort={toggle} />
+                  <SortableHead label="Total" sortKey="total" sort={sort} onSort={toggle} align="right" />
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1144,7 +1154,7 @@ export default function PoGenerator() {
                   <TableEmpty colSpan={7}>No purchase orders generated yet.</TableEmpty>
                 )}
                 {!loadingHistory &&
-                  history.map((po) => (
+                  sortedHistory.map((po) => (
                     <TableRow key={po._id}>
                       <TableCell>
                         <span className="id-chip">{po.voucherNo}</span>

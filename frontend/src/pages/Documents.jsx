@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -103,6 +104,16 @@ function StatusFilter({ value, onChange }) {
 /* ------------------------------------------------------------------ */
 function DocumentTable({ documentType, emptyLabel }) {
   const [rows, setRows] = useState([]);
+  const sort = useSort();
+  const sortedRows = sort.apply(rows, {
+    documentNumber: (r) => r.documentNumber,
+    vendor: (r) => r.vendor?.companyName || r.vendor?.name,
+    received: (r) => {
+      const d = r.receivedDate || r.createdAt;
+      return d ? new Date(d).getTime() : null;
+    },
+    status: (r) => r.lifecycleStatus,
+  });
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -164,10 +175,10 @@ function DocumentTable({ documentType, emptyLabel }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left">
             <tr>
-              <th className="px-3 py-2 font-medium">Document no.</th>
-              <th className="px-3 py-2 font-medium">Vendor</th>
-              <th className="px-3 py-2 font-medium">Received</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+<SortableHead label="Document no." sortKey="documentNumber" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Vendor" sortKey="vendor" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Received" sortKey="received" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Status" sortKey="status" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
               <th className="px-3 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
@@ -185,7 +196,7 @@ function DocumentTable({ documentType, emptyLabel }) {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              sortedRows.map((row) => (
                 <tr key={row._id} className="border-t">
                   <td className="px-3 py-2 font-medium">{row.documentNumber || "—"}</td>
                   <td className="px-3 py-2">{row.vendor?.companyName || row.vendor?.name || "—"}</td>
@@ -267,6 +278,15 @@ function GeneratedPoTable() {
     );
   }, [rows, search]);
 
+  const sort = useSort();
+  const sortedVisible = sort.apply(visible, {
+    voucherNo: (r) => r.voucherNo,
+    supplier: (r) => r.supplierName,
+    date: (r) => (r.voucherDate ? new Date(r.voucherDate).getTime() : null),
+    total: (r) => Number(r.totalAmount),
+    status: (r) => r.status,
+  });
+
   const toggle = async (row) => {
     const next = row.status === "closed" ? "open" : "closed";
     setBusyId(row._id);
@@ -314,11 +334,11 @@ function GeneratedPoTable() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left">
             <tr>
-              <th className="px-3 py-2 font-medium">PO no.</th>
-              <th className="px-3 py-2 font-medium">Supplier</th>
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium text-right">Total</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+<SortableHead label="PO no." sortKey="voucherNo" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Supplier" sortKey="supplier" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Date" sortKey="date" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Total" sortKey="total" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" align="right" />
+              <SortableHead label="Status" sortKey="status" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
               <th className="px-3 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
@@ -336,7 +356,7 @@ function GeneratedPoTable() {
                 </td>
               </tr>
             ) : (
-              visible.map((row, i) => (
+              sortedVisible.map((row, i) => (
                 <tr key={row._id} className={i % 2 ? "border-t bg-muted/30" : "border-t"}>
                   <td className="px-3 py-1.5 font-medium">{row.voucherNo}</td>
                   <td className="px-3 py-1.5">{row.supplierName || "—"}</td>
@@ -383,6 +403,14 @@ function GeneratedPoTable() {
 /* ------------------------------------------------------------------ */
 function GeneratedPiTable() {
   const [rows, setRows] = useState([]);
+  const sort = useSort();
+  const sortedRows = sort.apply(rows, {
+    invoiceNo: (r) => r.invoiceNo,
+    buyer: (r) => r.buyerName,
+    date: (r) => (r.invoiceDate ? new Date(r.invoiceDate).getTime() : null),
+    total: (r) => Number(r.totalAmount),
+    status: (r) => r.status,
+  });
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -454,11 +482,11 @@ function GeneratedPiTable() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left">
             <tr>
-              <th className="px-3 py-2 font-medium">PI no.</th>
-              <th className="px-3 py-2 font-medium">Buyer</th>
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium text-right">Total</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+<SortableHead label="PI no." sortKey="invoiceNo" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Buyer" sortKey="buyer" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Date" sortKey="date" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Total" sortKey="total" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" align="right" />
+              <SortableHead label="Status" sortKey="status" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
               <th className="px-3 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
@@ -476,7 +504,7 @@ function GeneratedPiTable() {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              sortedRows.map((row) => (
                 <tr key={row._id} className="border-t">
                   <td className="px-3 py-2 font-medium">{row.invoiceNo}</td>
                   <td className="px-3 py-2">{row.buyerName}</td>
@@ -587,6 +615,9 @@ function InvoiceStockDialog({ invoice, onClose }) {
   const [matchError, setMatchError] = useState(null);
   const [activeTab, setActiveTab] = useState("matched");
   const [pageFilter, setPageFilter] = useState("all");
+  const matchedSort = useSort();
+  const diffSort = useSort();
+  const entriesSort = useSort();
 
   useEffect(() => {
     if (!invoice?._id) return;
@@ -689,6 +720,39 @@ function InvoiceStockDialog({ invoice, onClose }) {
     (r) => orderOf(r.line)
   );
   const showStockOnly = activeFilter === "all" && unmatchedStockEntries.length > 0;
+
+  // Column sorting happens inside each page group, so the page order stays put.
+  const matchedGetters = {
+    invoiceItem: (m) => m.invoiceLine.description || m.invoiceLine.partNumber,
+    entered: (m) => partDescriptionOf(m.stockEntry.part),
+    invQty: (m) => (m.invoiceLine.quantity == null ? null : Number(m.invoiceLine.quantity)),
+    entQty: (m) => Number(m.stockEntry.quantityReceived),
+    invPrice: (m) => (m.invoiceLine.unitPrice == null ? null : Number(m.invoiceLine.unitPrice)),
+    regPrice: (m) => (m.stockEntry.part?.price == null ? null : Number(m.stockEntry.part.price)),
+    score: (m) => (m.score == null ? null : Number(m.score)),
+  };
+  const diffGetters = {
+    status: (r) => (r.kind === "notEntered" ? "Not entered" : "Doesn't fully agree"),
+    item: (r) =>
+      r.kind === "notEntered"
+        ? r.line.description || r.line.partNumber
+        : r.m.invoiceLine.description,
+    invQty: (r) => {
+      const q = r.kind === "notEntered" ? r.line.quantity : r.m.invoiceLine.quantity;
+      return q == null ? null : Number(q);
+    },
+    entQty: (r) => (r.kind === "notEntered" ? null : Number(r.m.stockEntry.quantityReceived)),
+    detail: (r) =>
+      r.kind === "notEntered" ? "On the invoice, but nothing was entered" : (r.m.differences || []).map((d) => d.field).join(", "),
+  };
+  const entryGetters = {
+    partNo: (e) => partNumberOf(e.part),
+    description: (e) => partDescriptionOf(e.part),
+    qty: (e) => Number(e.quantityReceived),
+    type: (e) => e.matchType,
+    batch: (e) => e.batchCode,
+    bookedOn: (e) => (e.createdAt ? new Date(e.createdAt).getTime() : null),
+  };
 
   const renderDiffRow = (r, idx) => {
     if (r.kind === "notEntered") {
@@ -891,13 +955,13 @@ function InvoiceStockDialog({ invoice, onClose }) {
                     </colgroup>
                     <TableHeader className="[&_th]:[overflow-wrap:anywhere]">
                       <TableRow>
-                        <TableHead>On the invoice</TableHead>
-                        <TableHead>Entered as</TableHead>
-                        <TableHead className="text-right" title="Invoice quantity">Inv. qty</TableHead>
-                        <TableHead className="text-right" title="Entered quantity">Ent. qty</TableHead>
-                        <TableHead className="text-right" title="Invoice price">Inv. price</TableHead>
-                        <TableHead className="text-right" title="Registered price">Reg. price</TableHead>
-                        <TableHead className="text-right" title="Match score">Score</TableHead>
+                        <SortableHead label="On the invoice" sortKey="invoiceItem" sort={matchedSort.sort} onSort={matchedSort.toggle} />
+                        <SortableHead label="Entered as" sortKey="entered" sort={matchedSort.sort} onSort={matchedSort.toggle} />
+                        <SortableHead label="Inv. qty" sortKey="invQty" sort={matchedSort.sort} onSort={matchedSort.toggle} align="right" />
+                        <SortableHead label="Ent. qty" sortKey="entQty" sort={matchedSort.sort} onSort={matchedSort.toggle} align="right" />
+                        <SortableHead label="Inv. price" sortKey="invPrice" sort={matchedSort.sort} onSort={matchedSort.toggle} align="right" />
+                        <SortableHead label="Reg. price" sortKey="regPrice" sort={matchedSort.sort} onSort={matchedSort.toggle} align="right" />
+                        <SortableHead label="Score" sortKey="score" sort={matchedSort.sort} onSort={matchedSort.toggle} align="right" />
                       </TableRow>
                     </TableHeader>
                     {matchedGroups.length === 0 ? (
@@ -912,7 +976,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
                       matchedGroups.map(({ page, items }) => (
                         <TableBody key={page ?? "none"} className="[&_td]:[overflow-wrap:anywhere]">
                           {hasPages && <PageGroupRow page={page} stats={pageStats[page ?? "none"]} colSpan={7} />}
-                          {items.map((m, idx) => {
+                          {matchedSort.apply(items, matchedGetters).map((m, idx) => {
                             const invQty = m.invoiceLine.quantity;
                             const entQty = m.stockEntry.quantityReceived;
                             const qtyMismatch = invQty != null && invQty !== entQty;
@@ -988,11 +1052,11 @@ function InvoiceStockDialog({ invoice, onClose }) {
                     </colgroup>
                     <TableHeader className="[&_th]:[overflow-wrap:anywhere]">
                       <TableRow>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Item</TableHead>
-                        <TableHead className="text-right" title="Invoice quantity">Inv. qty</TableHead>
-                        <TableHead className="text-right" title="Entered quantity">Ent. qty</TableHead>
-                        <TableHead>Detail</TableHead>
+                        <SortableHead label="Status" sortKey="status" sort={diffSort.sort} onSort={diffSort.toggle} />
+                        <SortableHead label="Item" sortKey="item" sort={diffSort.sort} onSort={diffSort.toggle} />
+                        <SortableHead label="Inv. qty" sortKey="invQty" sort={diffSort.sort} onSort={diffSort.toggle} align="right" />
+                        <SortableHead label="Ent. qty" sortKey="entQty" sort={diffSort.sort} onSort={diffSort.toggle} align="right" />
+                        <SortableHead label="Detail" sortKey="detail" sort={diffSort.sort} onSort={diffSort.toggle} />
                       </TableRow>
                     </TableHeader>
                     {diffGroups.length === 0 && !showStockOnly && (
@@ -1007,7 +1071,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
                     {diffGroups.map(({ page, items }) => (
                       <TableBody key={page ?? "none"} className="[&_td]:[overflow-wrap:anywhere]">
                         {hasPages && <PageGroupRow page={page} stats={pageStats[page ?? "none"]} colSpan={5} />}
-                        {items.map((r, idx) => renderDiffRow(r, `${page ?? "none"}-${idx}`))}
+                        {diffSort.apply(items, diffGetters).map((r, idx) => renderDiffRow(r, `${page ?? "none"}-${idx}`))}
                       </TableBody>
                     ))}
                     {showStockOnly && (
@@ -1056,16 +1120,16 @@ function InvoiceStockDialog({ invoice, onClose }) {
                     </colgroup>
                     <TableHeader className="[&_th]:[overflow-wrap:anywhere]">
                       <TableRow>
-                        <TableHead>Part no.</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Batch</TableHead>
-                        <TableHead>Booked on</TableHead>
+                        <SortableHead label="Part no." sortKey="partNo" sort={entriesSort.sort} onSort={entriesSort.toggle} />
+                        <SortableHead label="Description" sortKey="description" sort={entriesSort.sort} onSort={entriesSort.toggle} />
+                        <SortableHead label="Qty" sortKey="qty" sort={entriesSort.sort} onSort={entriesSort.toggle} align="right" />
+                        <SortableHead label="Type" sortKey="type" sort={entriesSort.sort} onSort={entriesSort.toggle} />
+                        <SortableHead label="Batch" sortKey="batch" sort={entriesSort.sort} onSort={entriesSort.toggle} />
+                        <SortableHead label="Booked on" sortKey="bookedOn" sort={entriesSort.sort} onSort={entriesSort.toggle} />
                       </TableRow>
                     </TableHeader>
                     <TableBody className="[&_td]:[overflow-wrap:anywhere]">
-                      {entries.map((e) => (
+                      {entriesSort.apply(entries, entryGetters).map((e) => (
                         <TableRow key={e._id}>
                           <TableCell className="font-medium">
                             {partNumberOf(e.part)}
@@ -1146,6 +1210,21 @@ function BillCell({ row }) {
 
 function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
   const [rows, setRows] = useState([]);
+  const sort = useSort();
+  const sortedRows = sort.apply(rows, {
+    invoiceNumber: (r) => r.invoiceNumber,
+    vendor: (r) => r.vendor?.companyName || r.vendor?.name,
+    against: (r) =>
+      r.purchaseOrder ? `${r.purchaseOrder.documentType} ${r.purchaseOrder.documentNumber || ""}`.trim() : "",
+    date: (r) => {
+      const d = r.invoiceDate || r.createdAt;
+      return d ? new Date(d).getTime() : null;
+    },
+    grandTotal: (r) => {
+      const v = r.grandTotal ?? r.totalBill;
+      return v == null ? null : Number(v);
+    },
+  });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -1291,11 +1370,11 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left">
             <tr>
-              <th className="px-3 py-2 font-medium">Invoice no.</th>
-              <th className="px-3 py-2 font-medium">Vendor</th>
-              <th className="px-3 py-2 font-medium">Against</th>
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium">Grand total</th>
+<SortableHead label="Invoice no." sortKey="invoiceNumber" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Vendor" sortKey="vendor" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Against" sortKey="against" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Date" sortKey="date" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
+              <SortableHead label="Grand total" sortKey="grandTotal" sort={sort.sort} onSort={sort.toggle} className="h-auto px-3 py-2 text-sm font-medium normal-case tracking-normal text-foreground" buttonClassName="normal-case tracking-normal" />
               <th className="px-3 py-2 font-medium text-right">File</th>
             </tr>
           </thead>
@@ -1313,7 +1392,7 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              sortedRows.map((row) => (
                 <tr
                   key={row._id}
                   className="cursor-pointer border-t odd:bg-muted/20 hover:bg-accent/40"

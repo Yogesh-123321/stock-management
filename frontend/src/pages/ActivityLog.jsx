@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import toast from "react-hot-toast";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,16 @@ function Tile({ label, value, sub, tone = "bg-card", icon: Icon }) {
 
 export default function ActivityLog() {
   const [rows, setRows] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  // Sorts the entries on the current page; paging itself stays chronological.
+  const sortedRows = apply(rows, {
+    when: (r) => (r.createdAt ? new Date(r.createdAt).getTime() : null),
+    user: (r) => r.userName,
+    section: (r) => r.entityType,
+    activity: (r) => r.description || r.action,
+    reference: (r) => r.entityLabel,
+    result: (r) => (r.success ? "OK" : `Failed ${r.statusCode || ""}`),
+  });
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [page, setPage] = useState(1);
@@ -317,12 +328,12 @@ export default function ActivityLog() {
           <table className="w-full text-sm">
             <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">When</th>
-                <th className="px-3 py-2 font-medium">User</th>
-                <th className="px-3 py-2 font-medium">Section</th>
-                <th className="px-3 py-2 font-medium">Activity</th>
-                <th className="px-3 py-2 font-medium">Reference</th>
-                <th className="px-3 py-2 font-medium">Result</th>
+                <SortableHead label="When" sortKey="when" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
+                <SortableHead label="User" sortKey="user" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
+                <SortableHead label="Section" sortKey="section" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
+                <SortableHead label="Activity" sortKey="activity" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
+                <SortableHead label="Reference" sortKey="reference" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
+                <SortableHead label="Result" sortKey="result" sort={sort} onSort={toggle} className="h-auto px-3 py-2 text-xs font-medium" />
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -341,7 +352,7 @@ export default function ActivityLog() {
                   </td>
                 </tr>
               ) : null}
-              {rows.map((r, i) => (
+              {sortedRows.map((r, i) => (
                 <tr
                   key={r._id}
                   className={cn(

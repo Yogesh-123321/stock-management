@@ -20,6 +20,7 @@ import {
   TableEmpty,
 } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { useAuth } from "@/lib/auth";
 import {
   PackageOpen,
@@ -247,6 +248,19 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   };
   const setQtyToIssueFor = (code, value) =>
     setIssueQtyOverrides((prev) => ({ ...prev, [code]: value }));
+
+  const { sort, toggle, apply } = useSort();
+  const sortedPreview = apply(preview, {
+    partNo: (p) => p.ttUniquePartNumber,
+    description: (p) => p.itemDescription,
+    qtyPerKit: (p) => Number(p.qtyPerKit),
+    unit: (p) => p.unit,
+    required: (p) => Number(p.required),
+    previouslyIssued: (p) => Number(p.previouslyIssued ?? 0),
+    available: (p) => Number(p.available),
+    issuing: (p) => Number(qtyToIssueFor(p)),
+    status: (p) => (p.ok ? 1 : 0),
+  });
 
   // Picking a mode (re)sets every "Qty issuing": all zero for a few parts,
   // or back to the full-kit defaults (what stock allows) for a complete
@@ -500,28 +514,19 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                 </colgroup>
                 <thead className="bg-secondary/70">
                   <tr className="border-b border-border">
-                    {[
-                      "TT part #",
-                      "Description",
-                      "Qty/kit",
-                      "Unit",
-                      "Required",
-                      isDraft ? "Last saved" : "Prev. issued",
-                      "Available",
-                      "Qty issuing",
-                      "Status",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-1.5 py-1.5 text-left text-[11px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
-                      >
-                        {h}
-                      </th>
-                    ))}
+                    <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label={isDraft ? "Last saved" : "Prev. issued"} sortKey="previouslyIssued" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Available" sortKey="available" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Qty issuing" sortKey="issuing" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                   </tr>
                 </thead>
                 <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                  {preview.map((p) => (
+                  {sortedPreview.map((p) => (
                     <tr key={p.ttUniquePartNumber} className="border-b border-border">
                       <td className="break-all px-1.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
                       <td className="break-words px-1.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
@@ -717,6 +722,17 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
  * ------------------------------------------------------------------ */
 function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
   const lines = issue.lines || [];
+  const { sort, toggle, apply } = useSort();
+  const sortedLines = apply(lines, {
+    partNo: (l) => l.ttUniquePartNumber,
+    description: (l) => l.part?.itemDescription || l.itemDescription,
+    qtyPerKit: (l) => Number(l.qtyPerKit),
+    unit: (l) => l.part?.unit,
+    required: (l) => Number(l.qtyRequired),
+    issued: (l) => Number(l.qtyIssued),
+    batches: (l) => formatBatchBreakdown(l.batchBreakdown),
+    short: (l) => Number(l.qtyShort || 0),
+  });
   const [downloading, setDownloading] = useState(false);
 
   // This issued kit — who it went to, who issued it, every material — as Excel.
@@ -811,14 +827,14 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
             <table className="w-full text-sm">
               <thead className="bg-secondary/70">
                 <tr className="border-b border-border">
-                  {["TT part #", "Description", "Qty/kit", "Unit", "Required", "Issued", "Batches", "Short"].map((h) => (
-                    <th
-                      key={h}
-                      className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
+                  <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Issued" sortKey="issued" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Batches" sortKey="batches" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Short" sortKey="short" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                 </tr>
               </thead>
               <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
@@ -829,7 +845,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     </td>
                   </tr>
                 )}
-                {lines.map((l) => (
+                {sortedLines.map((l) => (
                   <tr key={l._id} className="border-b border-border">
                     <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
                     <td className="px-2.5 py-1.5 text-xs">
@@ -910,6 +926,24 @@ function KitsPanel({
   const [loadingDrafts, setLoadingDrafts] = useState(true);
   const [drafts, setDrafts] = useState([]);
   const [busyDraftId, setBusyDraftId] = useState(null);
+
+  const issueSort = useSort();
+  const sortedIssues = issueSort.apply(issues, {
+    date: (i) => (i.createdAt ? new Date(i.createdAt).getTime() : null),
+    kit: (i) => i.kitName,
+    code: (i) => i.issueCode,
+    vendor: (i) => i.vendor?.companyName,
+    qty: (i) => Number(i.quantity),
+    issuedBy: (i) => i.issuedBy,
+  });
+  const draftSort = useSort();
+  const sortedDrafts = draftSort.apply(drafts, {
+    date: (d) => (d.updatedAt ? new Date(d.updatedAt).getTime() : null),
+    kit: (d) => d.kitName,
+    vendor: (d) => d.vendor?.companyName,
+    qty: (d) => Number(d.quantity),
+    savedBy: (d) => d.issuedBy,
+  });
 
   const loadIssues = useCallback(async () => {
     setLoadingIssues(true);
@@ -1061,12 +1095,12 @@ function KitsPanel({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[110px]">Date</TableHead>
-                  <TableHead>Kit</TableHead>
-                  <TableHead className="w-[170px]">Code</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="w-[60px] text-right">Qty</TableHead>
-                  <TableHead className="w-[130px]">Issued by</TableHead>
+                  <SortableHead label="Date" sortKey="date" sort={issueSort.sort} onSort={issueSort.toggle} className="w-[110px]" />
+                  <SortableHead label="Kit" sortKey="kit" sort={issueSort.sort} onSort={issueSort.toggle} />
+                  <SortableHead label="Code" sortKey="code" sort={issueSort.sort} onSort={issueSort.toggle} className="w-[170px]" />
+                  <SortableHead label="Vendor" sortKey="vendor" sort={issueSort.sort} onSort={issueSort.toggle} />
+                  <SortableHead label="Qty" sortKey="qty" sort={issueSort.sort} onSort={issueSort.toggle} className="w-[60px]" align="right" />
+                  <SortableHead label="Issued by" sortKey="issuedBy" sort={issueSort.sort} onSort={issueSort.toggle} className="w-[130px]" />
                   <TableHead className="w-[60px] text-center">Excel</TableHead>
                   {canManage && <TableHead className="w-[100px] text-right">Actions</TableHead>}
                 </TableRow>
@@ -1077,7 +1111,7 @@ function KitsPanel({
                   <TableEmpty colSpan={canManage ? 8 : 7}>No kits issued yet.</TableEmpty>
                 )}
                 {!loadingIssues &&
-                  issues.map((iss) => (
+                  sortedIssues.map((iss) => (
                     <TableRow
                       key={iss._id}
                       className="cursor-pointer hover:bg-secondary/40"
@@ -1187,11 +1221,11 @@ function KitsPanel({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[110px]">Last saved</TableHead>
-                  <TableHead>Kit</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="w-[60px] text-right">Qty</TableHead>
-                  <TableHead className="w-[130px]">Saved by</TableHead>
+                  <SortableHead label="Last saved" sortKey="date" sort={draftSort.sort} onSort={draftSort.toggle} className="w-[110px]" />
+                  <SortableHead label="Kit" sortKey="kit" sort={draftSort.sort} onSort={draftSort.toggle} />
+                  <SortableHead label="Vendor" sortKey="vendor" sort={draftSort.sort} onSort={draftSort.toggle} />
+                  <SortableHead label="Qty" sortKey="qty" sort={draftSort.sort} onSort={draftSort.toggle} className="w-[60px]" align="right" />
+                  <SortableHead label="Saved by" sortKey="savedBy" sort={draftSort.sort} onSort={draftSort.toggle} className="w-[130px]" />
                   <TableHead className="w-[150px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1205,7 +1239,7 @@ function KitsPanel({
                   </TableEmpty>
                 )}
                 {!loadingDrafts &&
-                  drafts.map((d) => (
+                  sortedDrafts.map((d) => (
                     <TableRow key={d._id} className={d._id === activeDraftId ? "bg-secondary/40" : ""}>
                       <TableCell className="text-xs text-muted-foreground">
                         {fmtDateTime(d.updatedAt)}
@@ -1476,6 +1510,19 @@ export default function IssueKit() {
   const setQtyToIssueFor = (ttUniquePartNumber, value) => {
     setIssueQtyOverrides((prev) => ({ ...prev, [ttUniquePartNumber]: value }));
   };
+
+  const { sort, toggle, apply } = useSort();
+  const sortedPreview = apply(preview, {
+    partNo: (p) => p.ttUniquePartNumber,
+    description: (p) => p.matchedPart?.itemDescription,
+    qtyPerKit: (p) => Number(p.qtyPerKit),
+    unit: (p) => p.matchedPart?.unit,
+    required: (p) => Number(p.required),
+    available: (p) => Number(p.available),
+    issuing: (p) => Number(qtyToIssueFor(p)),
+    batches: (p) => formatBatchBreakdown(previewBatchBreakdown(p.batches, qtyToIssueFor(p))),
+    status: (p) => (p.ok ? 1 : 0),
+  });
 
   const resetAfterIssue = () => {
     setQuantity("1");
@@ -1790,20 +1837,19 @@ export default function IssueKit() {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/70">
                       <tr className="border-b border-border">
-                        {["TT part #", "Description", "Qty/kit", "Unit", "Required", "Available", "Qty issuing", "Batches", "Status"].map(
-                          (h) => (
-                            <th
-                              key={h}
-                              className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
-                            >
-                              {h}
-                            </th>
-                          )
-                        )}
+                        <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Available" sortKey="available" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Qty issuing" sortKey="issuing" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Batches" sortKey="batches" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                      {preview.map((p) => (
+                      {sortedPreview.map((p) => (
                         <tr key={p._id} className="border-b border-border">
                           <td className="px-2.5 py-1.5 text-xs font-mono-tech">
                             {p.ttUniquePartNumber}

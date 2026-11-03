@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { fetchReceivedTotal } from "@/lib/receivedTotal";
 import { useAutoExtractOnUpload } from "@/lib/useAutoExtractOnUpload";
 import { findMismatches } from "@/lib/documentVerify";
@@ -204,6 +205,12 @@ export default function TaxInvoiceStep({
   // as an editable list so a wrong quantity can be fixed, or a line
   // dropped, before the invoice is uploaded and they move on to IQC stock.
   const [sessionEntries, setSessionEntries] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedSessionEntries = apply(sessionEntries, {
+    partNo: (e) => e.part?.ttUniquePartNumber,
+    description: (e) => e.part?.itemDescription,
+    qty: (e) => Number(e.quantityReceived),
+  });
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [rowBusyId, setRowBusyId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -476,14 +483,14 @@ export default function TaxInvoiceStep({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[150px]">Part no.</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="w-[110px] text-right">Qty</TableHead>
+                  <SortableHead label="Part no." sortKey="partNo" sort={sort} onSort={toggle} className="w-[150px]" />
+                  <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} />
+                  <SortableHead label="Qty" sortKey="qty" sort={sort} onSort={toggle} className="w-[110px]" align="right" />
                   <TableHead className="w-[90px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessionEntries.map((e) => {
+                {sortedSessionEntries.map((e) => {
                   const editable = !e.stockApplied && e._id;
                   const isEditing = editingId === e._id;
                   const isBusy = rowBusyId === e._id;

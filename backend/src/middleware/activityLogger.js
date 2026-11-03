@@ -1,5 +1,7 @@
 import ActivityLog from "../models/ActivityLog.js";
+import User from "../models/User.js";
 import { safeMeta, clientIp } from "../utils/activityLog.js";
+import { resolveRequestUser } from "./auth.js";
 
 /**
  * Automatic audit trail.
@@ -120,7 +122,7 @@ export function activityLogger(options = {}) {
 
     if (!shouldLog) return next();
 
-    res.on("finish", () => {
+    res.on("finish", async () => {
       // Snapshot the body here, once the request has fully run its course —
       // not before `next()`. Taking it earlier missed every multipart/
       // form-data request (vendor/buyer docs, kit & stock imports, IQC
@@ -128,15 +130,25 @@ export function activityLogger(options = {}) {
       // further down the chain, well after this middleware first runs.
       const bodySnapshot = safeMeta(req.body || {});
       const entityType = ENTITY_BY_SEGMENT[segment] || "other";
-      const user = req.user || null;
+      // Who did it: the user a route already attached, else whoever the bearer
+      // token names (covers routes that don't use `protect`), else — for a
+      // sign-in — the account the username belongs to.
+      let user = await resolveRequestUser(req);
+      if (!user && segment === "auth" && req.body?.username) {
+        try {
+          user = await User.findOne({ username: String(req.body.username).trim().toLowerCase() });
+        } catch {
+          /* leave unattributed */
+        }
+      }
       const success = res.statusCode < 400;
 
       ActivityLog.create({
         user: user?._id || null,
-        userName: user?.name || user?.username || "Anonymous",
+        userName: user?.name || user?.username || "Unknown (not signed in)",
         userRole: user?.role || "",
         action: isDownload ? `${segment}.download` : actionKey(req, segment),
-        description: `${user?.name || user?.username || "Someone"} ${
+        description: `${user?.name || user?.username || "A visitor who was not signed in"} ${
           isDownload ? `downloaded a ${LABEL[entityType]}` : describe(req, segment, entityType)
         }${success ? "" : " — failed"}`,
         entityType,

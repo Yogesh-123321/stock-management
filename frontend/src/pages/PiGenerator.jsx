@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmpty } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import PiPreview from "@/components/PiPreview";
 import { Plus, Trash2, FileText, Download, RotateCcw, Search, Copy } from "lucide-react";
 
@@ -80,6 +81,14 @@ export default function PiGenerator() {
   const [downloading, setDownloading] = useState(false);
 
   const [history, setHistory] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedHistory = apply(history, {
+    invoiceNo: (r) => r.invoiceNo,
+    buyer: (r) => r.buyerName,
+    date: (r) => (r.invoiceDate ? new Date(r.invoiceDate).getTime() : null),
+    approval: (r) => r.approvalStatus,
+    total: (r) => Number(r.totalAmount),
+  });
   const [loadingHistory, setLoadingHistory] = useState(false);
   // Set when the form was filled from an existing PI — the number then carries
   // a revision letter (07 → 07A) instead of taking the next series number.
@@ -712,11 +721,11 @@ export default function PiGenerator() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Invoice no.</TableHead>
-                  <TableHead>Buyer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Approval</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <SortableHead label="Invoice no." sortKey="invoiceNo" sort={sort} onSort={toggle} />
+                  <SortableHead label="Buyer" sortKey="buyer" sort={sort} onSort={toggle} />
+                  <SortableHead label="Date" sortKey="date" sort={sort} onSort={toggle} />
+                  <SortableHead label="Approval" sortKey="approval" sort={sort} onSort={toggle} />
+                  <SortableHead label="Total" sortKey="total" sort={sort} onSort={toggle} align="right" />
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -724,7 +733,7 @@ export default function PiGenerator() {
                 {loadingHistory && <TableEmpty colSpan={6}>Loading…</TableEmpty>}
                 {!loadingHistory && history.length === 0 && <TableEmpty colSpan={6}>No PIs generated yet.</TableEmpty>}
                 {!loadingHistory &&
-                  history.map((pi) => (
+                  sortedHistory.map((pi) => (
                     <TableRow key={pi._id}>
                       <TableCell>
                         <span className="id-chip">{pi.invoiceNo}</span>

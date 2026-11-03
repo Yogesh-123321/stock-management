@@ -90,7 +90,7 @@ export default function PiPreview({ pi }) {
   const label = taxLabel(pi);
 
   return (
-    <article className="mx-auto min-h-[1056px] w-[816px] shrink-0 bg-white px-[52px] pb-[54px] pt-[70px] font-[Arial,sans-serif] text-[9px] leading-[1.25] text-black shadow-sm print:min-h-0 print:w-full print:px-0 print:py-0 print:shadow-none">
+    <article className="keep-white mx-auto min-h-[1056px] w-[816px] shrink-0 bg-white px-[52px] pb-[54px] pt-[70px] font-[Arial,sans-serif] text-[9px] leading-[1.25] text-black shadow-sm print:min-h-0 print:w-full print:px-0 print:py-0 print:shadow-none">
       <div className="border border-black">
         <header className="relative flex h-[92px] items-center border-b border-black px-3">
           <img src={logo} alt="Technotrendz Innovative Solutions" className="h-[54px] w-[54px] object-contain" />

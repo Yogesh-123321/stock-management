@@ -93,7 +93,7 @@ export default function PoPreview({ po }) {
     .join(", ");
 
   return (
-    <article className="mx-auto w-[816px] shrink-0 bg-white p-[28px] font-[Arial,sans-serif] text-[9px] leading-[1.2] text-black shadow-sm print:w-full print:p-0 print:shadow-none">
+    <article className="keep-white mx-auto w-[816px] shrink-0 bg-white p-[28px] font-[Arial,sans-serif] text-[9px] leading-[1.2] text-black shadow-sm print:w-full print:p-0 print:shadow-none">
       <h2 className="pb-1 text-center text-[15px] font-bold">PURCHASE ORDER</h2>
 
       <div className="border border-black">

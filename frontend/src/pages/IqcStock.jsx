@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { useAuth } from "@/lib/auth";
 import IqcReportForm from "@/components/IqcReportForm";
 import IqcReferenceViewer from "@/components/IqcReferenceViewer";
@@ -295,6 +296,16 @@ function InvoiceHeader({ group, selectable = false, allSelected = false, onToggl
 */
 export default function IqcStock({ onClose, onChanged }) {
   const [tab, setTab] = useState("in_iqc_stock");
+  const { sort, toggle, apply } = useSort();
+  const entryGetters = {
+    partNo: (e) => e.part?.ttUniquePartNumber,
+    mfrPartNo: (e) => e.part?.manufacturerPartNumber,
+    description: (e) => e.part?.itemDescription,
+    qty: (e) => Number(e.quantityReceived),
+    reason: (e) => e.iqcReport?.rejectionReason,
+    inspectedBy: (e) => e.iqcReport?.inspectedBy,
+    inspectedOn: (e) => (e.iqcReport?.inspectedAt ? new Date(e.iqcReport.inspectedAt).getTime() : null),
+  };
   const [entries, setEntries] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -547,17 +558,17 @@ export default function IqcStock({ onClose, onChanged }) {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Part no.</TableHead>
-                            <TableHead>Mfr. part no.</TableHead>
-                            <TableHead>Description</TableHead>
-                            <TableHead className="text-right">Qty</TableHead>
-                            {tab === "rejected" && <TableHead>Reason</TableHead>}
-                            <TableHead>Inspected by</TableHead>
-                            <TableHead>Inspected on</TableHead>
+                            <SortableHead label="Part no." sortKey="partNo" sort={sort} onSort={toggle} />
+                            <SortableHead label="Mfr. part no." sortKey="mfrPartNo" sort={sort} onSort={toggle} />
+                            <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} />
+                            <SortableHead label="Qty" sortKey="qty" sort={sort} onSort={toggle} align="right" />
+                            {tab === "rejected" && <SortableHead label="Reason" sortKey="reason" sort={sort} onSort={toggle} />}
+                            <SortableHead label="Inspected by" sortKey="inspectedBy" sort={sort} onSort={toggle} />
+                            <SortableHead label="Inspected on" sortKey="inspectedOn" sort={sort} onSort={toggle} />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {g.entries.map((e) => (
+                          {apply(g.entries, entryGetters).map((e) => (
                             <TableRow key={e._id}>
                               <TableCell className="font-mono text-xs">
                                 {e.part?.ttUniquePartNumber}

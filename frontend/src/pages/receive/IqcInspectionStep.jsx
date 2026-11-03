@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import api from "@/lib/api";
 import IqcReportForm from "@/components/IqcReportForm";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { ClipboardList, ClipboardCheck, XCircle } from "lucide-react";
 
 const TABS = [
@@ -15,6 +16,14 @@ const TABS = [
 export default function IqcStock() {
   const [tab, setTab] = useState("in_iqc_stock");
   const [entries, setEntries] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedEntries = apply(entries, {
+    partNo: (e) => e.part?.ttUniquePartNumber,
+    description: (e) => e.part?.itemDescription,
+    vendor: (e) => e.vendor?.companyName,
+    qty: (e) => Number(e.quantityReceived),
+    inspectedBy: (e) => e.iqcReport?.inspectedBy,
+  });
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openEntryId, setOpenEntryId] = useState(null);
@@ -79,15 +88,15 @@ export default function IqcStock() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Part no.</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Inspected by</TableHead>
+                  <SortableHead label="Part no." sortKey="partNo" sort={sort} onSort={toggle} />
+                  <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} />
+                  <SortableHead label="Vendor" sortKey="vendor" sort={sort} onSort={toggle} />
+                  <SortableHead label="Qty" sortKey="qty" sort={sort} onSort={toggle} align="right" />
+                  <SortableHead label="Inspected by" sortKey="inspectedBy" sort={sort} onSort={toggle} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {entries.map((e) => (
+                {sortedEntries.map((e) => (
                   <TableRow key={e._id}>
                     <TableCell className="font-mono text-xs">{e.part?.ttUniquePartNumber}</TableCell>
                     <TableCell className="truncate max-w-[240px]" title={e.part?.itemDescription}>

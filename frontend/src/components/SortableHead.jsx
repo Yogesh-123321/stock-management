@@ -49,7 +49,7 @@ export function useSort() {
   return { sort, toggle, apply };
 }
 
-export function SortableHead({ label, sortKey, sort, onSort, className, align = "left" }) {
+export function SortableHead({ label, sortKey, sort, onSort, className, buttonClassName, align = "left" }) {
   const active = sort?.key === sortKey;
   const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
 
@@ -64,8 +64,8 @@ export function SortableHead({ label, sortKey, sort, onSort, className, align = 
         title={`Sort by ${label.toLowerCase()}`}
         className={cn(
           "inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground",
-          align === "right" && "flex-row-reverse",
-          active && "text-foreground"
+          active && "text-foreground",
+          buttonClassName
         )}
       >
         {label}

@@ -488,9 +488,96 @@ const endOfDay = (s) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+/*
+  Keyword matching for the report.
+    search=<words>      spaces or commas separate words; "quoted text" (straight
+                        or curly quotes) stays one phrase. Up to 8 terms.
+    searchMode=all|any  all (default): an invoice must match EVERY term;
+                        any: matching one term is enough.
+    searchIn=a,b,c      where to look (default: all of them) —
+                        vendor (name / GSTIN), invoice (invoice no.),
+                        po (PO / PI no.), utr, remarks (payment remarks and
+                        who paid), parts (part no. / description / MPN of the
+                        parts received against the invoice).
+  A term matches anywhere inside a value, ignoring case.
+*/
+const KEYWORD_FIELDS = ["vendor", "invoice", "po", "utr", "remarks", "parts"];
+const MAX_KEYWORDS = 8;
+
+function parseKeywords(raw) {
+  const terms = [];
+  const re = /["\u201c]([^"\u201d]+)["\u201d]|([^\s,]+)/g;
+  let m;
+  while ((m = re.exec(String(raw || "")))) {
+    const t = (m[1] || m[2] || "").trim();
+    if (t) terms.push(t);
+  }
+  const seen = new Set();
+  return terms
+    .filter((t) => {
+      const k = t.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, MAX_KEYWORDS);
+}
+
+function keywordOptions(query) {
+  const requested = String(query.searchIn || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => KEYWORD_FIELDS.includes(x));
+  return {
+    terms: parseKeywords(query.search),
+    mode: query.searchMode === "any" ? "any" : "all",
+    fields: requested.length ? requested : KEYWORD_FIELDS,
+  };
+}
+
+// One Mongo condition per term: the invoice matches the term if ANY of the
+// chosen fields contains it.
+async function keywordClause(term, fields) {
+  const has = (f) => fields.includes(f);
+  const rx = { $regex: escapeRegex(term), $options: "i" };
+  const or = [];
+  if (has("invoice")) or.push({ invoiceNumber: rx });
+  if (has("utr")) or.push({ "payment.utrNumber": rx }, { "payment.installments.utrNumber": rx });
+  if (has("remarks"))
+    or.push(
+      { "payment.remarks": rx },
+      { "payment.installments.remarks": rx },
+      { "payment.paidByName": rx },
+      { "payment.installments.paidByName": rx }
+    );
+
+  const [vendors, docs, partDocs] = await Promise.all([
+    has("vendor") ? Vendor.find({ $or: [{ companyName: rx }, { taxRegistrationNo: rx }] }, "_id").lean() : [],
+    has("po") ? PurchaseOrder.find({ documentNumber: rx }, "_id").lean() : [],
+    has("parts")
+      ? Part.find(
+          { $or: [{ ttUniquePartNumber: rx }, { itemDescription: rx }, { manufacturerPartNumber: rx }] },
+          "_id"
+        ).lean()
+      : [],
+  ]);
+  if (vendors.length) or.push({ vendor: { $in: vendors.map((v) => v._id) } });
+  if (docs.length) or.push({ purchaseOrder: { $in: docs.map((d) => d._id) } });
+  if (partDocs.length) {
+    const invoiceIds = await StockEntry.distinct("appliedVia", {
+      part: { $in: partDocs.map((p) => p._id) },
+      appliedVia: { $ne: null },
+    });
+    if (invoiceIds.length) or.push({ _id: { $in: invoiceIds } });
+  }
+  // Nothing can match this term in the chosen fields.
+  return or.length ? { $or: or } : { _id: { $in: [] } };
+}
+
 // Builds the report from query params:
 //   status=all|paid|unpaid  dateField=invoice|payment  from=YYYY-MM-DD  to=YYYY-MM-DD
-//   vendor=<id>  method=<payment method>  minAmount  maxAmount  search  groupBy=none|vendor|method|month
+//   vendor=<id>  method=<payment method>  minAmount  maxAmount  groupBy=none|vendor|method|month
+//   search / searchMode / searchIn  (keyword matching — see above)
 async function buildReport(query) {
   const status = ["paid", "unpaid", "partial"].includes(query.status) ? query.status : "all";
   const dateField = query.dateField === "payment" ? "payment" : "invoice";
@@ -538,21 +625,10 @@ async function buildReport(query) {
   if (min !== null && !Number.isNaN(min)) and.push({ $expr: { $gte: [AMOUNT_EXPR, min] } });
   if (max !== null && !Number.isNaN(max)) and.push({ $expr: { $lte: [AMOUNT_EXPR, max] } });
 
-  const q = String(query.search || "").trim();
-  if (q) {
-    const rx = { $regex: escapeRegex(q), $options: "i" };
-    const [vendors, docs] = await Promise.all([
-      Vendor.find({ $or: [{ companyName: rx }, { taxRegistrationNo: rx }] }, "_id").lean(),
-      PurchaseOrder.find({ documentNumber: rx }, "_id").lean(),
-    ]);
-    and.push({
-      $or: [
-        { invoiceNumber: rx },
-        { "payment.utrNumber": rx },
-        ...(vendors.length ? [{ vendor: { $in: vendors.map((v) => v._id) } }] : []),
-        ...(docs.length ? [{ purchaseOrder: { $in: docs.map((d) => d._id) } }] : []),
-      ],
-    });
+  const kw = keywordOptions(query);
+  if (kw.terms.length) {
+    const clauses = await Promise.all(kw.terms.map((t) => keywordClause(t, kw.fields)));
+    and.push(kw.mode === "any" ? { $or: clauses } : { $and: clauses });
   }
 
   const filter = and.length ? { $and: and } : {};
@@ -643,7 +719,14 @@ async function buildReport(query) {
       .sort((a, b) => (groupBy === "month" ? b.key.localeCompare(a.key) : b.amount - a.amount));
   }
 
-  return { rows, summary, groups, groupBy, partIds, filters: { status, dateField, groupBy } };
+  return {
+    rows,
+    summary,
+    groups,
+    groupBy,
+    partIds,
+    filters: { status, dateField, groupBy, keywords: kw.terms, searchMode: kw.mode, searchIn: kw.fields },
+  };
 }
 
 // GET /api/billing/report
@@ -966,6 +1049,7 @@ export const exportFullReport = asyncHandler(async (req, res) => {
   const nf = wb.addWorksheet("Report filters");
   nf.columns = [{ width: 24 }, { width: 80 }];
   const q = req.query;
+  const kwf = keywordOptions(q);
   let partLabel = "All parts";
   if (partSet.size) {
     const found = await Part.find({ _id: { $in: [...partSet] } }).select("ttUniquePartNumber").lean();
@@ -980,7 +1064,9 @@ export const exportFullReport = asyncHandler(async (req, res) => {
     ["Vendor filter", q.vendor ? "Selected vendor" : "All vendors"],
     ["Payment method", q.method || "Any"],
     ["Amount range", `${q.minAmount || "—"} to ${q.maxAmount || "—"}`],
-    ["Search", q.search || "—"],
+    ["Keywords", kwf.terms.length ? kwf.terms.join(", ") : "—"],
+    ["Keyword match", kwf.terms.length ? (kwf.mode === "any" ? "Any word" : "All words") : "—"],
+    ["Keywords looked up in", kwf.terms.length ? kwf.fields.join(", ") : "—"],
     ["Parts", partLabel],
     ["Invoices", summary.count],
     ["How to read", "Payment trail has one row per received line. The invoice amounts and payment details appear on the first row of each invoice only, so the columns can be summed. With parts picked, only those parts' lines are listed (invoice amounts are still for the whole invoice)."],

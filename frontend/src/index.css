@@ -61,6 +61,58 @@
   }
 }
 
+/* Dark theme — same tokens, darker values. Toggled by the `dark` class on <html>
+   (see lib/theme.jsx). */
+@layer base {
+  .dark {
+    --background: 222 28% 8%;
+    --foreground: 220 20% 92%;
+    --card: 222 24% 12%;
+    --card-foreground: 220 20% 92%;
+    --popover: 222 24% 12%;
+    --popover-foreground: 220 20% 92%;
+
+    --primary: 209 62% 46%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222 18% 18%;
+    --secondary-foreground: 220 20% 92%;
+
+    --muted: 222 18% 18%;
+    --muted-foreground: 220 10% 66%;
+
+    --accent: 32 87% 46%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 65% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 148 55% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 222 16% 23%;
+    --input: 222 16% 23%;
+    --ring: 209 70% 60%;
+
+    --sidebar: 222 35% 5%;
+    --sidebar-foreground: 220 20% 88%;
+    --sidebar-muted: 220 12% 60%;
+    --sidebar-active: 32 87% 48%;
+  }
+
+  /* Printed-document previews (PO / PI) and the sidebar logo stay on white paper. */
+  .keep-white {
+    --background: 220 20% 97%;
+    --foreground: 222 47% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 10%;
+    --muted: 220 16% 93%;
+    --muted-foreground: 220 9% 42%;
+    --border: 220 14% 89%;
+    color-scheme: light;
+  }
+}
+
 * {
   border-color: hsl(var(--border));
   box-sizing: border-box;
@@ -92,7 +144,7 @@ h1, h2, h3, h4, .font-display {
   font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 0.8rem;
   letter-spacing: 0.03em;
-  background: hsl(220 20% 97%);
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
@@ -122,6 +174,44 @@ h1, h2, h3, h4, .font-display {
   width: 8px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: hsl(220 14% 82%);
+  background: hsl(var(--muted-foreground) / 0.35);
   border-radius: 999px;
 }
+
+/*
+  Dark-mode remaps for the hard-coded Tailwind palette colours used for status
+  tints (amber = pending, emerald = ok, rose/red = problem, sky/violet = info).
+  Light tints become low-opacity washes and the dark text shades become light
+  ones, so every status badge/banner stays readable without editing each page.
+*/
+.dark .bg-white:not(.keep-white) { background-color: hsl(var(--card)); }
+.dark .bg-white\/60 { background-color: hsl(var(--card) / 0.6); }
+.dark .bg-white\/70 { background-color: hsl(var(--card) / 0.7); }
+.dark [class*="bg-[hsl(220_20%_97%)]"] { background-color: hsl(var(--background)); }
+
+.dark .bg-slate-50, .dark .bg-slate-100, .dark .bg-slate-200 { background-color: hsl(var(--muted)); }
+.dark .text-slate-600, .dark .text-slate-700 { color: hsl(var(--muted-foreground)); }
+.dark .text-slate-900 { color: hsl(var(--foreground)); }
+.dark .border-slate-300 { border-color: hsl(var(--border)); }
+
+.dark .bg-amber-50, .dark .bg-amber-100 { background-color: hsl(38 92% 50% / 0.14); }
+.dark .border-amber-200, .dark .border-amber-300 { border-color: hsl(38 80% 55% / 0.35); }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900, .dark .text-amber-800\/80 { color: hsl(38 92% 68%); }
+
+.dark .bg-emerald-50, .dark .bg-emerald-100, .dark .bg-emerald-50\/60 { background-color: hsl(150 60% 45% / 0.15); }
+.dark .border-emerald-200, .dark .border-emerald-300 { border-color: hsl(150 55% 50% / 0.35); }
+.dark .text-emerald-600, .dark .text-emerald-700, .dark .text-emerald-800, .dark .text-emerald-900 { color: hsl(150 55% 62%); }
+
+.dark .bg-rose-50, .dark .bg-rose-100, .dark .bg-red-50, .dark .bg-red-100 { background-color: hsl(0 80% 60% / 0.15); }
+.dark .border-rose-200, .dark .border-red-300, .dark .border-red-400 { border-color: hsl(0 70% 60% / 0.4); }
+.dark .text-rose-600, .dark .text-rose-700, .dark .text-rose-800, .dark .text-red-500, .dark .text-red-600, .dark .text-red-700, .dark .text-red-800, .dark .text-red-900 { color: hsl(0 85% 72%); }
+
+.dark .bg-sky-50, .dark .bg-sky-100, .dark .bg-blue-100, .dark .bg-cyan-100 { background-color: hsl(200 85% 55% / 0.15); }
+.dark .border-sky-300 { border-color: hsl(200 80% 60% / 0.4); }
+.dark .text-sky-600, .dark .text-sky-700, .dark .text-sky-800, .dark .text-sky-900, .dark .text-blue-700, .dark .text-cyan-700 { color: hsl(200 85% 72%); }
+
+.dark .bg-violet-100, .dark .bg-indigo-100 { background-color: hsl(260 80% 65% / 0.16); }
+.dark .text-violet-700, .dark .text-indigo-700, .dark .text-purple-600 { color: hsl(260 85% 79%); }
+
+.dark .bg-teal-100 { background-color: hsl(175 70% 45% / 0.15); }
+.dark .text-teal-700 { color: hsl(175 65% 62%); }

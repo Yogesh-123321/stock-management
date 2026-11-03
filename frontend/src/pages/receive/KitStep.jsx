@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { PackageOpen, PackagePlus, Plus, Search, Trash2, Loader2, ArrowRight, ArrowLeft, Boxes, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,6 +138,18 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
     }
     return [...map.values()].sort((a, b) => a.part.ttUniquePartNumber.localeCompare(b.part.ttUniquePartNumber));
   }, [kits, selected]);
+
+  const { sort, toggle, apply } = useSort();
+  const sortedPartRows = apply(partRows, {
+    part: (r) => r.part.ttUniquePartNumber,
+    issued: (r) => Number(r.issued),
+    returned: (r) => Number(r.returned),
+    returnable: (r) => Number(r.returnable),
+    now: (r) => {
+      const v = returnQty[r.part._id];
+      return v === undefined || v === "" ? null : Number(v);
+    },
+  });
 
   const fillAll = () =>
     setReturnQty(Object.fromEntries(partRows.filter((r) => r.returnable > 0).map((r) => [r.part._id, String(r3(r.returnable))])));
@@ -308,15 +321,15 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Part</TableHead>
-                  <TableHead className="w-[90px] text-right">Issued</TableHead>
-                  <TableHead className="w-[110px] text-right">Already returned</TableHead>
-                  <TableHead className="w-[100px] text-right">Can return</TableHead>
-                  <TableHead className="w-[130px] text-right">Returned now</TableHead>
+                  <SortableHead label="Part" sortKey="part" sort={sort} onSort={toggle} />
+                  <SortableHead label="Issued" sortKey="issued" sort={sort} onSort={toggle} className="w-[90px]" align="right" />
+                  <SortableHead label="Already returned" sortKey="returned" sort={sort} onSort={toggle} className="w-[110px]" align="right" />
+                  <SortableHead label="Can return" sortKey="returnable" sort={sort} onSort={toggle} className="w-[100px]" align="right" />
+                  <SortableHead label="Returned now" sortKey="now" sort={sort} onSort={toggle} className="w-[130px]" align="right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {partRows.map((r) => {
+                {sortedPartRows.map((r) => {
                   const v = returnQty[r.part._id] ?? "";
                   const bad = num(v) > r.returnable + 0.0005;
                   return (

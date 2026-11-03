@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import api from "@/lib/api";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { fetchReceivedTotal } from "@/lib/receivedTotal";
 import ExcelImportPanel from "@/pages/receive/ExcelImportPanel";
 import PartDuplicateCheck from "@/components/PartDuplicateCheck";
@@ -166,8 +167,16 @@ function AiSuggestedWarnings({ warnings, loading }) {
 function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
+  const { sort, toggle, apply } = useSort();
 
   if (entries.length === 0) return null;
+
+  const sortedEntries = apply(entries, {
+    partNo: (e) => e.part?.ttUniquePartNumber,
+    description: (e) => e.part?.itemDescription,
+    qty: (e) => Number(e.quantityReceived),
+    status: (e) => (e.stockApplied ? Number(e.part?.quantityInStock ?? 0) : -1),
+  });
 
   const startEdit = (e) => {
     setEditingId(e._id);
@@ -284,15 +293,15 @@ function SessionLog({ entries, view, onEditQty, onDelete, busyId }) {
       <TableHeader>
         <TableRow>
           <TableHead className="w-[64px]">Photo</TableHead>
-          <TableHead className="w-[150px]">Part no.</TableHead>
-          <TableHead>Description</TableHead>
-          <TableHead className="w-[110px] text-right">Qty</TableHead>
-          <TableHead className="w-[140px] text-right">Stock status</TableHead>
+          <SortableHead label="Part no." sortKey="partNo" sort={sort} onSort={toggle} className="w-[150px]" />
+          <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} />
+          <SortableHead label="Qty" sortKey="qty" sort={sort} onSort={toggle} className="w-[110px]" align="right" />
+          <SortableHead label="Stock status" sortKey="status" sort={sort} onSort={toggle} className="w-[140px]" align="right" />
           <TableHead className="w-[90px] text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {entries.map((e, i) => {
+        {sortedEntries.map((e, i) => {
           const editable = !e.stockApplied && e._id;
           const isEditing = editingId === e._id;
           const isBusy = busyId === e._id;

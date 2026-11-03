@@ -22,6 +22,7 @@ import {
   Wallet,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
+import ThemeToggle from "@/components/ThemeToggle";
 import { useAuth } from "@/lib/auth";
 import logo from "@/assets/technotrendz-logo.png";
 import { ScrollText } from "lucide-react";
@@ -163,7 +164,7 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="hidden md:flex w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
         <div className="px-4 py-5">
-          <div className="rounded-md bg-white p-2.5">
+          <div className="keep-white rounded-md bg-white p-2.5">
             <img
               src={logo}
               alt="Technotrendz Innovative Solutions Pvt. Ltd."
@@ -200,7 +201,7 @@ export default function Layout() {
 
       <div className="app-main">
         <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-card/95 px-5 py-2.5 backdrop-blur">
-          <div className="flex items-center gap-2 md:hidden">
+          <div className="keep-white flex items-center gap-2 rounded bg-white px-1.5 py-0.5 md:hidden">
             <img
               src={logo}
               alt="Technotrendz Innovative Solutions Pvt. Ltd."
@@ -211,6 +212,7 @@ export default function Layout() {
             Signed in as <span className="font-medium text-foreground">{user?.name}</span>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <NotificationBell />
             <button
               type="button"

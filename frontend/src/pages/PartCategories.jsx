@@ -16,6 +16,7 @@ import {
   TableEmpty,
 } from "@/components/ui/table";
 import FieldError from "@/components/FieldError";
+import { SortableHead, useSort } from "@/components/SortableHead";
 import { useFormValidation } from "@/lib/useFormValidation";
 
 const CATEGORY_SCHEMA = {
@@ -41,6 +42,12 @@ const fmtDate = (d) =>
 */
 export default function PartCategories() {
   const [categories, setCategories] = useState([]);
+  const { sort, toggle, apply } = useSort();
+  const sortedCategories = apply(categories, {
+    code: (c) => c.code,
+    description: (c) => c.description,
+    added: (c) => (c.createdAt ? new Date(c.createdAt).getTime() : null),
+  });
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ code: "", description: "" });
   const [saving, setSaving] = useState(false);
@@ -198,9 +205,9 @@ export default function PartCategories() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[110px]">Code</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead className="w-[130px]">Added</TableHead>
+                <SortableHead label="Code" sortKey="code" sort={sort} onSort={toggle} className="w-[110px]" />
+                <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} />
+                <SortableHead label="Added" sortKey="added" sort={sort} onSort={toggle} className="w-[130px]" />
                 <TableHead className="w-[90px]" />
               </TableRow>
             </TableHeader>
@@ -210,7 +217,7 @@ export default function PartCategories() {
                 <TableEmpty colSpan={4}>No categories yet — add one above.</TableEmpty>
               )}
               {!loading &&
-                categories.map((c) => {
+                sortedCategories.map((c) => {
                   const isEditing = editingId === c._id;
                   return (
                     <TableRow key={c._id}>

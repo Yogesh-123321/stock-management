@@ -72,3 +72,21 @@ export function requirePermission(...permissions) {
     next();
   };
 }
+
+/**
+ * Best-effort "who is calling": the user already attached by `protect` /
+ * `attachUser`, otherwise the user named by the bearer token, otherwise null.
+ * Never throws and never rejects the request — used by the activity log so
+ * routes that skip `protect` are still attributed to the real person.
+ */
+export async function resolveRequestUser(req) {
+  if (req?.user) return req.user;
+  try {
+    const header = req?.headers?.authorization || "";
+    if (!header.startsWith("Bearer ")) return null;
+    const decoded = jwt.verify(header.slice(7), SECRET());
+    return (await User.findById(decoded.sub)) || null;
+  } catch {
+    return null;
+  }
+}
