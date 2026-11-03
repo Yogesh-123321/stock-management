@@ -148,11 +148,21 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   const [issueCode, setIssueCode] = useState(isDraft ? issue.issueCode || "" : "");
   const [codeCustom, setCodeCustom] = useState(isDraft && !!issue.issueCode);
   const [codeRefresh, setCodeRefresh] = useState(0);
+  // What this edit is for — asked when a NEW edit is opened:
+  //   "partial" -> issue only a few parts (every "Qty issuing" starts at 0)
+  //   "full"    -> re-issue the complete kit
+  // A saved edit being resumed keeps what it was saved with (older saved
+  // edits, which had no mode, behave as "full").
+  const [editMode, setEditMode] = useState(isDraft ? issue.editMode || "full" : null);
+  // A saved edit resumes with the quantities it was saved with; a new edit
+  // starts empty and is filled in once the mode is chosen (see chooseMode).
   const [issueQtyOverrides, setIssueQtyOverrides] = useState(() => {
     const init = {};
-    (issue.lines || []).forEach((l) => {
-      init[l.ttUniquePartNumber] = String(l.qtyIssued);
-    });
+    if (isDraft) {
+      (issue.lines || []).forEach((l) => {
+        init[l.ttUniquePartNumber] = String(l.qtyIssued);
+      });
+    }
     return init;
   });
   // Parts added on this edit that weren't part of the original issue.
@@ -238,14 +248,43 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   const setQtyToIssueFor = (code, value) =>
     setIssueQtyOverrides((prev) => ({ ...prev, [code]: value }));
 
+  // Picking a mode (re)sets every "Qty issuing": all zero for a few parts,
+  // or back to the full-kit defaults (what stock allows) for a complete
+  // re-issue. Parts added on this edit are left alone.
+  const chooseMode = (mode) => {
+    setEditMode(mode);
+    if (mode === "partial") {
+      const zeros = {};
+      (issue.lines || []).forEach((l) => {
+        zeros[l.ttUniquePartNumber] = "0";
+      });
+      setIssueQtyOverrides(zeros);
+    } else {
+      setIssueQtyOverrides({});
+    }
+  };
+  const isPartial = editMode === "partial";
+
+  // Parts getting a quantity > 0 in this edit (original lines + added parts).
+  const partsIssuingCount =
+    preview.filter((p) => qtyToIssueFor(p) > 0).length + extraLines.filter((l) => Number(l.qty) > 0).length;
+
   const submit = async (e) => {
     e.preventDefault();
+    if (!editMode) {
+      toast.error("Choose whether to re-issue the complete kit or only a few parts");
+      return;
+    }
     if (!qtyNum || qtyNum < 1) {
       toast.error("Quantity must be a whole number of at least 1");
       return;
     }
     if (!vendor) {
       toast.error("Select the vendor this kit is being issued to");
+      return;
+    }
+    if (isPartial && partsIssuingCount === 0) {
+      toast.error("Enter a quantity for at least one part — or choose to re-issue the complete kit");
       return;
     }
 
@@ -292,6 +331,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         remarks,
         lines: linesPayload,
         extraItems: extraItemsPayload,
+        editMode,
         // "" = let the server pick the next -A / -B when it is issued
         issueCode: codeCustom ? issueCode.trim() : "",
       };
@@ -331,6 +371,55 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         </div>
 
         <form id="edit-kit-issue-form" onSubmit={submit} className="flex-1 overflow-y-auto px-5 py-4">
+          {!editMode && (
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold">What do you want to issue in this edit?</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  <span className="font-mono-tech">{sourceLabel}</span> has already been issued. Pick one — you can
+                  change it afterwards.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => chooseMode("partial")}
+                  className="rounded-lg border border-border p-4 text-left transition-colors hover:border-accent hover:bg-accent/5"
+                >
+                  <p className="text-sm font-semibold">Just a few parts</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Every quantity starts at 0. Fill in only the parts you're sending now, or add new parts.
+                    Parts you leave at 0 stay as already issued — they aren't counted as short.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseMode("full")}
+                  className="rounded-lg border border-border p-4 text-left transition-colors hover:border-accent hover:bg-accent/5"
+                >
+                  <p className="text-sm font-semibold">Re-issue the complete kit</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Every part is pre-filled with the full kit quantity (as far as stock allows) and deducted
+                    again from stock, on top of what was issued before.
+                  </p>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className={editMode ? undefined : "hidden"}>
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline">{isPartial ? "Issuing just a few parts" : "Re-issuing the complete kit"}</Badge>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={() => chooseMode(isPartial ? "full" : "partial")}
+            >
+              {isPartial ? "Re-issue the complete kit instead" : "Issue just a few parts instead"}
+            </Button>
+          </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="sm:col-span-2">
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -378,7 +467,12 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 
           <div className="mt-4 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              {hasShortfall ? (
+              {isPartial ? (
+                <Badge variant="secondary" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Issuing {partsIssuingCount} part(s) only — everything else stays as already issued
+                </Badge>
+              ) : hasShortfall ? (
                 <Badge variant="destructive" className="gap-1">
                   <AlertTriangle className="h-3 w-3" />
                   Short on stock for {qtyNum || 0} kit(s) — will issue with shortfall logged
@@ -450,7 +544,29 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                         />
                       </td>
                       <td className="px-1.5 py-1.5">
-                        {p.ok ? (
+                        {isPartial ? (
+                          (() => {
+                            const issuing = qtyToIssueFor(p);
+                            // Still missing once earlier issues + this one are counted.
+                            const stillShort = r4(Math.max(0, p.required - (p.previouslyIssued || 0) - issuing));
+                            if (stillShort > 0) {
+                              return (
+                                <Badge variant="destructive" className="gap-1">
+                                  <XCircle className="h-3 w-3" />
+                                  Short {stillShort}
+                                </Badge>
+                              );
+                            }
+                            return issuing > 0 ? (
+                              <Badge variant="success" className="gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                OK
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">Not issuing</span>
+                            );
+                          })()
+                        ) : p.ok ? (
                           <Badge variant="success" className="gap-1">
                             <CheckCircle2 className="h-3 w-3" />
                             OK
@@ -577,13 +693,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
               )}
             </div>
           </div>
+          </div>
         </form>
 
         <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" form="edit-kit-issue-form" disabled={submitting}>
+          <Button type="submit" form="edit-kit-issue-form" disabled={submitting || !editMode}>
             <Save className="mr-1.5 h-4 w-4" />
             {submitting ? "Saving…" : isDraft ? "Save changes" : "Save edited kit"}
           </Button>

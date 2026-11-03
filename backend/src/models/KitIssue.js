@@ -80,6 +80,14 @@ const kitIssueSchema = new mongoose.Schema(
     rootIssue: { type: mongoose.Schema.Types.ObjectId, ref: "KitIssue", default: null },
     editedFrom: { type: mongoose.Schema.Types.ObjectId, ref: "KitIssue", default: null },
     editIndex: { type: Number, default: 0 },
+    // What an EDIT of an issued kit is for, picked when the edit is started:
+    //   "partial" - issue only the parts the person fills in. Parts left at 0
+    //               are not "short": earlier entries of the chain already
+    //               issued them (see previousTotalsFor in kitController).
+    //   "full"    - re-issue the complete kit; shortages are measured
+    //               against the whole kit, same as a first issue.
+    // "" = not an edit, or saved before this option existed (treated as full).
+    editMode: { type: String, enum: ["", "full", "partial"], default: "" },
 
     // Not `required` at the schema level (a fresh draft may not have these
     // filled in yet) — the controllers enforce both being present the

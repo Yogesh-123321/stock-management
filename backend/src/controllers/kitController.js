@@ -68,7 +68,7 @@ async function resolvePartsByCode(items) {
   than what's on hand — which throws a validation error, .status 400, if
   violated).
 */
-async function resolveAndDeductLines(items, qty, overrideLines) {
+async function resolveAndDeductLines(items, qty, overrideLines, previousByCode = null) {
   const byCode = await resolvePartsByCode(items);
 
   // Optional per-item overrides from the user: the actual quantity being
@@ -110,7 +110,10 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
     } else {
       toDeduct = Math.min(available, required);
     }
-    const short = qr(Math.max(0, required - toDeduct));
+    // previousByCode is only passed for a PARTIAL edit: what the earlier
+    // entries of the chain already issued counts towards the requirement.
+    const alreadyIssued = previousByCode ? previousByCode.get(item.ttUniquePartNumber) || 0 : 0;
+    const short = qr(Math.max(0, required - alreadyIssued - toDeduct));
 
     if (short > 0) {
       shortages.push({
@@ -159,7 +162,7 @@ async function resolveAndDeductLines(items, qty, overrideLines) {
   it's just reported back as a shortage for the UI to show, same shape as
   a real shortage.
 */
-async function resolveDraftLines(items, qty, overrideLines) {
+async function resolveDraftLines(items, qty, overrideLines, previousByCode = null) {
   const byCode = await resolvePartsByCode(items);
 
   const overrideByCode = new Map();
@@ -183,7 +186,8 @@ async function resolveDraftLines(items, qty, overrideLines) {
     const planned = overrideByCode.has(item.ttUniquePartNumber)
       ? overrideByCode.get(item.ttUniquePartNumber)
       : Math.min(available, required);
-    const short = qr(Math.max(0, required - planned));
+    const alreadyIssued = previousByCode ? previousByCode.get(item.ttUniquePartNumber) || 0 : 0;
+    const short = qr(Math.max(0, required - alreadyIssued - planned));
 
     if (short > 0) {
       shortages.push({
@@ -230,6 +234,36 @@ const linesPayloadFrom = (resolvedLines) =>
     batchBreakdown: batchBreakdown || [],
   }));
 
+// Per-part totals already issued across the edit chain up to (and including)
+// the issued entry `baseId` — the same totals getKitIssueChainTotals shows as
+// "Prev. issued". Used to measure shortages of a PARTIAL edit. Map of
+// ttUniquePartNumber -> qty; empty when the entry can't be found.
+async function previousTotalsFor(baseId) {
+  const totals = new Map();
+  if (!baseId) return totals;
+  const baseDoc = await KitIssue.findById(baseId).select("rootIssue editIndex");
+  if (!baseDoc) return totals;
+  const rootId = baseDoc.rootIssue || baseDoc._id;
+  const chain = await KitIssue.find({
+    $or: [{ _id: rootId }, { rootIssue: rootId }],
+    status: "issued",
+    editIndex: { $lte: baseDoc.editIndex || 0 },
+  })
+    .select("lines.ttUniquePartNumber lines.qtyIssued")
+    .lean();
+  for (const doc of chain) {
+    for (const line of doc.lines || []) {
+      if (!line.ttUniquePartNumber) continue;
+      totals.set(line.ttUniquePartNumber, (totals.get(line.ttUniquePartNumber) || 0) + (line.qtyIssued || 0));
+    }
+  }
+  return totals;
+}
+
+// "partial" | "full" from a request body; anything else -> "full" (the
+// behaviour edits always had), so older clients keep working.
+const cleanEditMode = (v) => (v === "partial" ? "partial" : "full");
+
 // Base-26 uppercase letter suffix used for the kit-issue edit series:
 // 1 -> "A", 2 -> "B", ..., 26 -> "Z", 27 -> "AA", 28 -> "AB", ...
 function editLetterSuffix(n) {
@@ -249,7 +283,7 @@ function editLetterSuffix(n) {
   (e.g. KIT_05) at the moment it is issued:
     first issue            KIT_05
     its 1st / 2nd edit     KIT_05-A / KIT_05-B ... (KIT_05-Z, then -AA)
-    same template issued   KIT_05-2, KIT_05-3 ...   (a fresh issue, not an edit)
+    same template issued   KIT_05-A, KIT_05-B ...   (a fresh issue, not an edit)
     again from scratch
   A template with no kit code falls back to its name. The person issuing
   can overwrite the suggested code with their own; a code can only be used
@@ -278,12 +312,16 @@ async function assertIssueCodeFree(res, code, excludeId = null) {
   }
 }
 
-// Next code for a fresh (non-edit) issue of a template.
+// Next code for a fresh (non-edit) issue of a template: the kit's own code
+// the first time, then KIT_05-A, KIT_05-B ... — the same letter series an
+// edit uses. A code can only belong to one issued kit, so a letter already
+// taken (by an earlier issue OR by an edit of one) is skipped and the next
+// free one is suggested.
 async function suggestRootIssueCode(src) {
   const base = kitCodeBase(src);
   if (!(await issueCodeTaken(base))) return base;
-  for (let n = 2; n < 1000; n += 1) {
-    const candidate = `${base}-${n}`;
+  for (let n = 1; n < 1000; n += 1) {
+    const candidate = `${base}-${editLetterSuffix(n)}`;
     if (!(await issueCodeTaken(candidate))) return candidate;
   }
   return `${base}-${Date.now()}`;
@@ -960,6 +998,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
   const { issueId } = req.params;
   const { quantity, vendor, remarks, lines: overrideLines, extraItems } = req.body;
   const requestedCode = cleanIssueCode(req.body.issueCode);
+  const editMode = cleanEditMode(req.body.editMode);
 
   const original = await KitIssue.findById(issueId);
   if (!original || original.status !== "issued") {
@@ -1046,7 +1085,8 @@ export const editKitIssue = asyncHandler(async (req, res) => {
   const { resolvedLines, shortages } = await resolveDraftLines(
     items,
     qty,
-    withSavedExtraQty(overrideLines, original.lines)
+    withSavedExtraQty(overrideLines, original.lines),
+    editMode === "partial" ? await previousTotalsFor(original._id) : null
   );
 
   const draft = await KitIssue.create({
@@ -1059,6 +1099,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     issueCode: requestedCode,
     rootIssue: rootDoc._id,
     editedFrom: original._id,
+    editMode,
     quantity: qty,
     vendor: vendorDoc ? vendorDoc._id : original.vendor || null,
     issuedBy: req.user?.name || req.user?.username || "",
@@ -1295,10 +1336,13 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
   }
 
   const qty = Number(quantity) > 0 ? Number(quantity) : 1;
+  // Only a saved EDIT has an edit mode; the body may switch it.
+  if (draft.editedFrom && req.body.editMode !== undefined) draft.editMode = cleanEditMode(req.body.editMode);
   const { resolvedLines, shortages } = await resolveDraftLines(
     items,
     qty,
-    withSavedExtraQty(overrideLines, draft.lines)
+    withSavedExtraQty(overrideLines, draft.lines),
+    draft.editedFrom && draft.editMode === "partial" ? await previousTotalsFor(draft.editedFrom) : null
   );
 
   if (codeSent) draft.issueCode = requestedCode;
@@ -1493,7 +1537,12 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
 
   let resolvedLines, shortages;
   try {
-    ({ resolvedLines, shortages } = await resolveAndDeductLines(items, qty, linesToUse));
+    ({ resolvedLines, shortages } = await resolveAndDeductLines(
+      items,
+      qty,
+      linesToUse,
+      draft.editedFrom && draft.editMode === "partial" ? await previousTotalsFor(draft.editedFrom) : null
+    ));
   } catch (err) {
     res.status(err.status || 400);
     throw err;
@@ -1532,7 +1581,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
 /*
   GET /api/kits/:id/next-code
   The code a fresh issue of this template would get right now (its kit
-  code, or KIT_05-2 … if that is taken) — shown pre-filled, and editable,
+  code, or KIT_05-A, KIT_05-B … if that is taken) — shown pre-filled, and editable,
   on the Issue-a-kit form.
 */
 export const getNextKitIssueCode = asyncHandler(async (req, res) => {

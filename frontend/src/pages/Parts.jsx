@@ -55,6 +55,8 @@ import {
   Boxes,
 } from "lucide-react";
 import { fmtQty } from "@/lib/utils";
+import LowStockDot from "@/components/LowStockDot";
+import { isLowStock, LOW_STOCK_THRESHOLD } from "@/lib/stockLevel";
 
 /**
  * Column descriptor for the Parts master table.
@@ -2564,7 +2566,10 @@ function DuplicatePartsDialog({ onClose, onChanged }) {
                               : "—"}
                           </TableCell>
                           <TableCell className="text-right font-mono-tech">
-                            {fmtQty(p.quantityInStock)}
+                            <span className="inline-flex items-center justify-end gap-1.5">
+                              <LowStockDot qty={p.quantityInStock} />
+                              {fmtQty(p.quantityInStock)}
+                            </span>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -3314,6 +3319,7 @@ export default function Parts() {
 
   const [parts, setParts] = useState([]);
   const [search, setSearch] = useState("");
+  const [lowStockOnly, setLowStockOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState({ key: "ttUniquePartNumber", dir: "asc" });
   // True once the user has explicitly clicked a column header for the
@@ -3498,6 +3504,13 @@ export default function Parts() {
     });
   }, [parts, sort, isMultiTermSearch, manualSort, miscValue]);
 
+  // Parts whose usable stock is below the low-stock line (lib/stockLevel.js).
+  const lowStockCount = useMemo(() => parts.filter((p) => isLowStock(p.quantityInStock)).length, [parts]);
+  const visibleParts = useMemo(
+    () => (lowStockOnly ? sortedParts.filter((p) => isLowStock(p.quantityInStock)) : sortedParts),
+    [sortedParts, lowStockOnly]
+  );
+
   const SortIcon = ({ colKey }) => {
     if (sort.key !== colKey) return <ArrowUpDown className="ml-1 inline h-3 w-3 opacity-40" />;
     return sort.dir === "asc" ? (
@@ -3584,6 +3597,21 @@ export default function Parts() {
           <Button type="button" variant="outline" onClick={() => setShowDuplicates(true)}>
             <Copy className="mr-1.5 h-3.5 w-3.5" />
             Find duplicate part numbers
+          </Button>
+          <Button
+            type="button"
+            variant={lowStockOnly ? "default" : "outline"}
+            onClick={() => setLowStockOnly((v) => !v)}
+            title={`Show only parts with stock below ${LOW_STOCK_THRESHOLD}`}
+            aria-pressed={lowStockOnly}
+          >
+            <span className="relative mr-2 inline-flex h-2.5 w-2.5">
+              {lowStockCount > 0 && (
+                <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+              )}
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-600" />
+            </span>
+            Low stock ({lowStockCount})
           </Button>
           <div className="relative w-full sm:w-80">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -3684,8 +3712,13 @@ export default function Parts() {
                   </TableCell>
                 </TableRow>
               )}
+              {!loading && parts.length > 0 && visibleParts.length === 0 && (
+                <TableEmpty colSpan={colCount}>
+                  No parts below {LOW_STOCK_THRESHOLD} in stock — everything here is well stocked.
+                </TableEmpty>
+              )}
               {!loading &&
-                sortedParts.map((p, idx) => (
+                visibleParts.map((p, idx) => (
                   <TableRow
                     key={p._id}
                     className="cursor-pointer"
@@ -3726,7 +3759,15 @@ export default function Parts() {
                       )}
                     </TableCell>
                     <TableCell className="align-top py-1 text-right font-mono-tech">
-                      {fmtQty(p.quantityInStock)}
+                      <span
+                        className={
+                          "inline-flex items-center justify-end gap-1.5 " +
+                          (isLowStock(p.quantityInStock) ? "font-semibold text-red-600" : "")
+                        }
+                      >
+                        <LowStockDot qty={p.quantityInStock} />
+                        {fmtQty(p.quantityInStock)}
+                      </span>
                     </TableCell>
                     <TableCell
                       className="align-top py-1 text-right font-mono-tech text-muted-foreground"
