@@ -123,6 +123,78 @@ function formatBatchBreakdown(breakdown) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Popup panel the person can resize: drag the left / right / bottom
+ * edges or the bottom corners (the popup stays centred, so a side drag
+ * grows both sides). Double-click the bottom-right grip to reset.
+ * ------------------------------------------------------------------ */
+function ResizablePanel({ defaultWidth = 960, children }) {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ w: null, h: null });
+
+  const startDrag = (dir) => (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = ref.current.getBoundingClientRect();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const sw = rect.width;
+    const sh = rect.height;
+    const clampW = (v) => Math.max(360, Math.min(window.innerWidth - 32, v));
+    const clampH = (v) => Math.max(320, Math.min(window.innerHeight - 32, v));
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    const move = (ev) => {
+      const dx = ev.clientX - sx;
+      const dy = ev.clientY - sy;
+      setSize((prev) => ({
+        w: dir.includes("e") ? clampW(sw + 2 * dx) : dir.includes("w") ? clampW(sw - 2 * dx) : prev.w ?? sw,
+        h: dir.includes("s") ? clampH(sh + dy) : prev.h,
+      }));
+    };
+    const up = () => {
+      document.body.style.userSelect = prevSelect;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
+  const handle = "absolute z-30 touch-none";
+  return (
+    <div
+      ref={ref}
+      className="relative flex min-h-[320px] min-w-[360px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl"
+      style={{
+        width: size.w ?? `min(${defaultWidth}px, 100%)`,
+        height: size.h ?? undefined,
+        maxHeight: "calc(100vh - 2rem)",
+      }}
+    >
+      {children}
+      <div onPointerDown={startDrag("e")} className={`${handle} right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-accent/30`} />
+      <div onPointerDown={startDrag("w")} className={`${handle} left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-accent/30`} />
+      <div onPointerDown={startDrag("s")} className={`${handle} bottom-0 left-4 right-4 h-1.5 cursor-ns-resize hover:bg-accent/30`} />
+      <div onPointerDown={startDrag("sw")} className={`${handle} bottom-0 left-0 h-4 w-4 cursor-nesw-resize`} />
+      <div
+        onPointerDown={startDrag("se")}
+        onDoubleClick={() => setSize({ w: null, h: null })}
+        title="Drag to resize · double-click to reset"
+        className={`${handle} bottom-0 right-0 flex h-4 w-4 cursor-nwse-resize items-end justify-end p-0.5 text-muted-foreground`}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * Edit an already-issued kit — never touches the entry it was opened
  * from. Saving does NOT issue anything: it stores the edited version as a
  * saved kit (a draft, nothing deducted from stock), which is then issued
@@ -175,16 +247,24 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   // dialog was opened from — see getKitIssueChainTotals. Falls back to
   // the immediate entry's own qty (the old behaviour) until this loads,
   // and stays on that fallback if the fetch fails.
+  // Shape: { chain, kit } — `kit` = everything already issued of this kit
+  // (every earlier issue + its edits, matched by template or kit code), shown
+  // as "Prev. issued"; `chain` = this edit chain only, used to measure what a
+  // PARTIAL edit is still short by.
   const [previousTotals, setPreviousTotals] = useState(null);
   useEffect(() => {
     let cancelled = false;
     api
       .get(`/kits/issues/${issue._id}/previous-quantities`)
       .then(({ data }) => {
-        if (!cancelled) setPreviousTotals(data || {});
+        if (cancelled) return;
+        // Older servers answered with the flat chain map only.
+        const chain = data?.chain ?? data ?? {};
+        const kit = data?.kit ?? chain;
+        setPreviousTotals({ chain, kit });
       })
       .catch(() => {
-        if (!cancelled) setPreviousTotals({});
+        if (!cancelled) setPreviousTotals({ chain: {}, kit: {} });
       });
     return () => {
       cancelled = true;
@@ -222,7 +302,11 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         const required = r4((l.qtyPerKit || 0) * qtyNum);
         const ok = available >= required;
         const defaultToIssue = Math.min(available, required);
-        const cumulativePrevious = previousTotals?.[l.ttUniquePartNumber];
+        // Once loaded, a part that was never issued before is 0 (not the qty
+        // saved on this very entry); until then fall back to the entry's own.
+        const loaded = previousTotals !== null;
+        const kitPrevious = loaded ? previousTotals.kit?.[l.ttUniquePartNumber] ?? 0 : l.qtyIssued;
+        const chainPrevious = loaded ? previousTotals.chain?.[l.ttUniquePartNumber] ?? 0 : l.qtyIssued;
         return {
           ttUniquePartNumber: l.ttUniquePartNumber,
           itemDescription: l.part?.itemDescription || l.itemDescription,
@@ -232,9 +316,10 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
           available,
           ok,
           defaultToIssue,
-          // Cumulative across the whole chain once loaded; the immediate
+          // Everything already issued of this kit once loaded; the immediate
           // entry's own qty as a fallback while that's in flight.
-          previouslyIssued: cumulativePrevious !== undefined ? cumulativePrevious : l.qtyIssued,
+          previouslyIssued: kitPrevious,
+          chainPreviouslyIssued: chainPrevious,
         };
       }),
     [issue.lines, qtyNum, previousTotals]
@@ -365,7 +450,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <ResizablePanel defaultWidth={1024}>
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
@@ -519,7 +604,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                     <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
-                    <SortableHead label={isDraft ? "Last saved" : "Prev. issued"} sortKey="previouslyIssued" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
+                    <SortableHead label="Prev. issued" sortKey="previouslyIssued" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Available" sortKey="available" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Qty issuing" sortKey="issuing" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Status" sortKey="status" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
@@ -553,7 +638,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                           (() => {
                             const issuing = qtyToIssueFor(p);
                             // Still missing once earlier issues + this one are counted.
-                            const stillShort = r4(Math.max(0, p.required - (p.previouslyIssued || 0) - issuing));
+                            const stillShort = r4(Math.max(0, p.required - (p.chainPreviouslyIssued || 0) - issuing));
                             if (stillShort > 0) {
                               return (
                                 <Badge variant="destructive" className="gap-1">
@@ -710,7 +795,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
             {submitting ? "Saving…" : isDraft ? "Save changes" : "Save edited kit"}
           </Button>
         </div>
-      </div>
+      </ResizablePanel>
     </div>
   );
 }
@@ -729,6 +814,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
     qtyPerKit: (l) => Number(l.qtyPerKit),
     unit: (l) => l.part?.unit,
     required: (l) => Number(l.qtyRequired),
+    prevIssued: (l) => Number(l.qtyPreviouslyIssued || 0),
     issued: (l) => Number(l.qtyIssued),
     batches: (l) => formatBatchBreakdown(l.batchBreakdown),
     short: (l) => Number(l.qtyShort || 0),
@@ -744,7 +830,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
 
   return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <ResizablePanel defaultWidth={896}>
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
           <div className="min-w-0">
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
@@ -832,6 +918,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                   <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                  <SortableHead label="Prev. issued" sortKey="prevIssued" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Issued" sortKey="issued" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Batches" sortKey="batches" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Short" sortKey="short" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
@@ -840,7 +927,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
               <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                 {lines.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                    <td colSpan={9} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
                       This issue has no lines.
                     </td>
                   </tr>
@@ -854,6 +941,12 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyPerKit}</td>
                     <td className="px-2.5 py-1.5 text-xs">{l.part?.unit || "—"}</td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyRequired}</td>
+                    <td
+                      className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground"
+                      title="Already issued of this part by earlier issues of this kit (same kit code), before this entry"
+                    >
+                      {l.qtyPreviouslyIssued ?? 0}
+                    </td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyIssued}</td>
                     <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
                       {formatBatchBreakdown(l.batchBreakdown)}
@@ -891,7 +984,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
             </Button>
           )}
         </div>
-      </div>
+      </ResizablePanel>
     </div>
   );
 }

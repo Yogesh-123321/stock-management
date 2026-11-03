@@ -297,6 +297,85 @@ const cleanIssueCode = (v) => String(v ?? "").replace(/\s+/g, " ").trim().slice(
 // The base every code of this kit starts from: its kit code, else its name.
 const kitCodeBase = (src) => cleanIssueCode(src?.kitCode) || cleanIssueCode(src?.kitName) || "Kit";
 
+/* ---------------------------------------------------------------------
+  "Same kit" matching for the Prev. issued figures
+  Two issued entries belong to the same kit when they come from the same
+  kit template OR carry the same kit code (case-insensitive). Matching on
+  the code as well means a new issue made against a kit code still sees
+  what was issued before under that code — even when the template was
+  re-created / re-imported since (a new template _id, same code).
+--------------------------------------------------------------------- */
+const codeKey = (v) => cleanIssueCode(v).toLowerCase();
+
+// Mongo filter for every ISSUED entry of the same kit as `src`
+// ({ kitTemplate?, kitCode? }). null when src carries neither.
+function sameKitIssuedFilter(src) {
+  const or = [];
+  if (src?.kitTemplate) or.push({ kitTemplate: src.kitTemplate });
+  const code = cleanIssueCode(src?.kitCode);
+  if (code) or.push({ kitCode: new RegExp(`^${escapeRegExp(code)}$`, "i") });
+  return or.length ? { status: "issued", $or: or } : null;
+}
+
+// Per-part sum of qtyIssued over a set of KitIssue docs -> { code: qty }.
+function sumIssuedByPart(docs) {
+  const totals = {};
+  for (const doc of docs) {
+    for (const line of doc.lines || []) {
+      if (!line.ttUniquePartNumber) continue;
+      totals[line.ttUniquePartNumber] = qr((totals[line.ttUniquePartNumber] || 0) + (line.qtyIssued || 0));
+    }
+  }
+  return totals;
+}
+
+// Adds `qtyPreviouslyIssued` to every line of every (plain) issue in `list`:
+// what was issued of that part by EARLIER issued entries of the same kit
+// (same template or same kit code, any vendor, edits included). Feeds the
+// "Prev. issued" column of the Issued kits view.
+async function attachPreviouslyIssued(list) {
+  if (!list.length) return list;
+  const templateIds = new Set();
+  const codes = new Set();
+  for (const iss of list) {
+    if (iss.kitTemplate) templateIds.add(String(iss.kitTemplate));
+    const c = codeKey(iss.kitCode);
+    if (c) codes.add(c);
+  }
+  const or = [];
+  if (templateIds.size) or.push({ kitTemplate: { $in: [...templateIds] } });
+  for (const c of codes) or.push({ kitCode: new RegExp(`^${escapeRegExp(c)}$`, "i") });
+
+  const pool = or.length
+    ? await KitIssue.find({ status: "issued", $or: or })
+        .select("kitTemplate kitCode createdAt lines.ttUniquePartNumber lines.qtyIssued")
+        .lean()
+    : [];
+  const entries = pool.map((d) => ({
+    id: String(d._id),
+    tpl: d.kitTemplate ? String(d.kitTemplate) : "",
+    code: codeKey(d.kitCode),
+    at: d.createdAt ? new Date(d.createdAt).getTime() : 0,
+    totals: sumIssuedByPart([d]),
+  }));
+
+  for (const iss of list) {
+    const tpl = iss.kitTemplate ? String(iss.kitTemplate._id || iss.kitTemplate) : "";
+    const code = codeKey(iss.kitCode);
+    const at = iss.createdAt ? new Date(iss.createdAt).getTime() : 0;
+    const prev = {};
+    for (const e of entries) {
+      if (e.id === String(iss._id) || e.at >= at) continue;
+      if (!((tpl && e.tpl === tpl) || (code && e.code === code))) continue;
+      for (const [part, qty] of Object.entries(e.totals)) prev[part] = qr((prev[part] || 0) + qty);
+    }
+    for (const line of iss.lines || []) {
+      line.qtyPreviouslyIssued = prev[line.ttUniquePartNumber] || 0;
+    }
+  }
+  return list;
+}
+
 // Case-insensitive: is this code already carried by an ISSUED kit?
 async function issueCodeTaken(code, excludeId = null) {
   const filter = { status: "issued", issueCode: new RegExp(`^${escapeRegExp(code)}$`, "i") };
@@ -615,7 +694,11 @@ export const parseKitImport = asyncHandler(async (req, res) => {
 // have actually been issued — see getKitDrafts for the saved-but-not-yet-
 // issued half.
 export const getIssuesForTemplate = asyncHandler(async (req, res) => {
-  const issues = await KitIssue.find({ kitTemplate: req.params.id, status: "issued" })
+  // Same template OR same kit code, so a kit issued again under the same
+  // code (even from a re-created template) still shows what went out before.
+  const template = await KitTemplate.findById(req.params.id).select("kitCode");
+  const filter = sameKitIssuedFilter({ kitTemplate: req.params.id, kitCode: template?.kitCode });
+  const issues = await KitIssue.find(filter || { kitTemplate: req.params.id, status: "issued" })
     .populate("vendor", "companyName")
     .sort({ createdAt: -1 });
   const plain = issues.map((i) => i.toObject());
@@ -639,6 +722,7 @@ export const getKitIssues = asyncHandler(async (req, res) => {
     .limit(limit);
   const plain = issues.map((i) => i.toObject());
   await attachEditLock(plain);
+  await attachPreviouslyIssued(plain);
   res.json(plain);
 });
 
@@ -864,6 +948,7 @@ export const getKitIssueById = asyncHandler(async (req, res) => {
   }
   const plain = issue.toObject();
   await attachEditLock(plain);
+  await attachPreviouslyIssued([plain]);
   res.json(plain);
 });
 
@@ -1139,47 +1224,42 @@ export const editKitIssue = asyncHandler(async (req, res) => {
   Walks the chain via rootIssue + editIndex (see KitIssue.js) rather than
   editedFrom alone, so it totals the whole history in one query instead of
   hopping one parent at a time.
+
+  Responds { chain, kit }, each a { ttUniquePartNumber: qty } map:
+    chain - this edit chain only (what a PARTIAL edit measures shortages by)
+    kit   - everything issued of the same kit (same template or same kit
+            code), i.e. the "Prev. issued" column
 */
 export const getKitIssueChainTotals = asyncHandler(async (req, res) => {
-  const entry = await KitIssue.findById(req.params.id).select("status editedFrom rootIssue editIndex");
+  const entry = await KitIssue.findById(req.params.id).select(
+    "status editedFrom rootIssue editIndex kitTemplate kitCode"
+  );
   if (!entry) {
     res.status(404);
     throw new Error("Kit issue not found");
   }
 
+  // chain: this entry's own edit chain (root + edits up to the entry being
+  // edited) — the basis for measuring a PARTIAL edit's shortages. A draft
+  // made from scratch (never edited from an issued entry) has no chain.
   const baseId = entry.status === "draft" ? entry.editedFrom : entry._id;
-  if (!baseId) {
-    // Draft made from scratch (never edited from an issued entry, or its
-    // source has since been removed) — nothing precedes it.
-    res.json({});
-    return;
+  const chain = baseId ? Object.fromEntries(await previousTotalsFor(baseId)) : {};
+
+  // kit: EVERYTHING already issued of this kit — every earlier issue and its
+  // edits, any vendor — matched by template or kit code. This is what the
+  // "Prev. issued" column shows, so a fresh issue made against the same kit
+  // code is counted too, not just the edits of one chain.
+  const kitFilter = sameKitIssuedFilter(entry);
+  const kit = kitFilter
+    ? sumIssuedByPart(await KitIssue.find(kitFilter).select("lines.ttUniquePartNumber lines.qtyIssued").lean())
+    : {};
+  // The chain is always part of the kit; guard against a chain entry the
+  // template / code match could not see.
+  for (const [part, qty] of Object.entries(chain)) {
+    if ((kit[part] || 0) < qty) kit[part] = qty;
   }
 
-  const baseDoc =
-    String(baseId) === String(entry._id) ? entry : await KitIssue.findById(baseId).select("rootIssue editIndex");
-  if (!baseDoc) {
-    res.json({});
-    return;
-  }
-
-  const rootId = baseDoc.rootIssue || baseDoc._id;
-  const chain = await KitIssue.find({
-    $or: [{ _id: rootId }, { rootIssue: rootId }],
-    status: "issued",
-    editIndex: { $lte: baseDoc.editIndex || 0 },
-  })
-    .select("lines.ttUniquePartNumber lines.qtyIssued")
-    .lean();
-
-  const totals = {};
-  for (const doc of chain) {
-    for (const line of doc.lines || []) {
-      if (!line.ttUniquePartNumber) continue;
-      totals[line.ttUniquePartNumber] = (totals[line.ttUniquePartNumber] || 0) + (line.qtyIssued || 0);
-    }
-  }
-
-  res.json(totals);
+  res.json({ chain, kit });
 });
 
 /*
