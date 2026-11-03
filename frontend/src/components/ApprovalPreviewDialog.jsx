@@ -58,7 +58,7 @@ const day = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit"
  * approver can read who it is for, every line, the amounts and the remarks
  * without scanning the formatted sheet.
  */
-function DocSummary({ doc, type }) {
+export function DocSummary({ doc, type }) {
   const isPo = type === "po";
   const items = doc.items || [];
   const party = isPo
@@ -160,7 +160,7 @@ function DocSummary({ doc, type }) {
   );
 }
 
-function PartyDetails({ party, type }) {
+export function PartyDetails({ party, type }) {
   const docs = PARTY_DOCS.filter(([, key]) => party[key]);
   return (
     <div className="space-y-4">

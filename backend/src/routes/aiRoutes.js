@@ -8,7 +8,7 @@ import { GEMINI_MODELS, OPENROUTER_MODELS, isGeminiConfigured, isOpenRouterConfi
 const router = express.Router();
 
 // POST /api/ai/extract-document (multipart, field name "file")
-router.post("/extract-document", uploadForAiExtract.single("file"), extractDocument);
+router.post("/extract-document", protect, uploadForAiExtract.single("file"), extractDocument);
 
 // GET /api/ai/usage — which free AI sources are configured, how many requests
 // each handled today, and which are currently paused (limit hit) and until

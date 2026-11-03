@@ -8,8 +8,13 @@ import {
   checkTaxInvoiceDuplicate,
 } from "../controllers/taxInvoiceController.js";
 import { uploadTaxInvoiceDoc } from "../middleware/upload.js";
+import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Every tax-invoice route now needs a signed-in user. Without this, uploading an
+// invoice was logged as "Anonymous" and the routes were open to anyone.
+router.use(protect);
 
 router.route("/")
   .get(getTaxInvoices)

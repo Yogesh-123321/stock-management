@@ -9,6 +9,7 @@ import {
   Activity,
   AlertTriangle,
   Download,
+  FileText,
   Filter,
   RefreshCw,
   Search,
@@ -16,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ActivityDetailDialog from "@/components/ActivityDetailDialog";
+import { SECTION_LABEL, resolveDocRef } from "@/lib/activityFormat";
 
 const SECTIONS = [
   { value: "all", label: "All sections" },
@@ -25,6 +28,8 @@ const SECTIONS = [
   { value: "vendor", label: "Vendors" },
   { value: "buyer", label: "Buyers" },
   { value: "stock", label: "Stock" },
+  { value: "kit", label: "Kits" },
+  { value: "payment", label: "Payments" },
   { value: "receiving", label: "Material receiving" },
   { value: "invoice", label: "Tax invoices" },
   { value: "user", label: "Users" },
@@ -39,6 +44,8 @@ const SECTION_TONE = {
   vendor: "bg-emerald-100 text-emerald-700",
   buyer: "bg-teal-100 text-teal-700",
   stock: "bg-indigo-100 text-indigo-700",
+  kit: "bg-orange-100 text-orange-700",
+  payment: "bg-lime-100 text-lime-700",
   receiving: "bg-cyan-100 text-cyan-700",
   invoice: "bg-rose-100 text-rose-700",
   user: "bg-slate-200 text-slate-700",
@@ -100,6 +107,11 @@ export default function ActivityLog() {
   const [summary, setSummary] = useState(null);
   const [users, setUsers] = useState([]);
   const [detail, setDetail] = useState(null);
+  const [detailTab, setDetailTab] = useState("summary");
+  const openDetail = (row, tab = "summary") => {
+    setDetailTab(tab);
+    setDetail(row);
+  };
 
   const [filters, setFilters] = useState({
     q: "",
@@ -377,15 +389,26 @@ export default function ActivityLog() {
                         SECTION_TONE[r.entityType] || SECTION_TONE.other
                       )}
                     >
-                      {r.entityType}
+                      {SECTION_LABEL[r.entityType] || r.entityType}
                     </span>
                   </td>
                   <td className="px-3 py-1.5">
                     <div>{r.description || r.action}</div>
-                    <div className="font-mono text-[11px] text-muted-foreground">{r.action}</div>
                   </td>
-                  <td className="max-w-[180px] truncate px-3 py-1.5 text-xs">
-                    {r.entityLabel || "—"}
+                  <td className="max-w-[200px] px-3 py-1.5 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate">{r.entityLabel || "—"}</span>
+                      {resolveDocRef(r) ? (
+                        <button
+                          type="button"
+                          title="View the document this action was about"
+                          onClick={() => openDetail(r, "document")}
+                          className="shrink-0 rounded p-1 text-primary hover:bg-accent"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-3 py-1.5">
                     <span
@@ -398,7 +421,7 @@ export default function ActivityLog() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => setDetail(r)}>
+                    <Button variant="ghost" size="sm" onClick={() => openDetail(r)}>
                       Details
                     </Button>
                   </td>
@@ -433,55 +456,8 @@ export default function ActivityLog() {
         </div>
       </Card>
 
-      {/* Detail drawer */}
-      {detail ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setDetail(null)}
-        >
-          <Card
-            className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden bg-card"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <div>
-                <div className="font-semibold">{detail.description || detail.action}</div>
-                <div className="text-xs text-muted-foreground">
-                  {detail.userName} · {fmtDateTime(detail.createdAt)}
-                </div>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setDetail(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="space-y-3 overflow-y-auto px-4 py-3 text-sm">
-              <dl className="grid grid-cols-2 gap-2">
-                {[
-                  ["Action", detail.action],
-                  ["Section", detail.entityType],
-                  ["Reference", detail.entityLabel || "—"],
-                  ["Method", detail.method],
-                  ["Endpoint", detail.path],
-                  ["Status", `${detail.statusCode || "—"} (${detail.success ? "OK" : "failed"})`],
-                  ["Duration", detail.durationMs != null ? `${detail.durationMs} ms` : "—"],
-                  ["IP address", detail.ip || "—"],
-                ].map(([k, v]) => (
-                  <div key={k}>
-                    <dt className="text-[11px] uppercase text-muted-foreground">{k}</dt>
-                    <dd className="break-all">{String(v)}</dd>
-                  </div>
-                ))}
-              </dl>
-              <div>
-                <div className="mb-1 text-[11px] uppercase text-muted-foreground">Payload</div>
-                <pre className="max-h-64 overflow-auto rounded bg-muted p-2 text-[11px]">
-                  {JSON.stringify(detail.meta || {}, null, 2)}
-                </pre>
-              </div>
-            </div>
-          </Card>
-        </div>
-      ) : null}
+      {/* Details: summary / document / technical */}
+      <ActivityDetailDialog row={detail} initialTab={detailTab} onClose={() => setDetail(null)} />
     </div>
   );
 }

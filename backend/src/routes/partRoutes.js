@@ -97,8 +97,8 @@ router.get("/:id", getPartById);
 router.get("/:id/history", getPartHistory);
 router.get("/:id/document-history", getPartDocumentHistory);
 router.get("/:id/kits", getPartKitUsage);
-router.post("/", createPart);
-router.patch("/:id/stock", adjustPartStock);
+router.post("/", protect, createPart);
+router.patch("/:id/stock", protect, adjustPartStock);
 
 // Issuing R&D stock is done from the (admin-only) part-edit popup, so it
 // carries the same part.approve permission as editing/deleting the part.

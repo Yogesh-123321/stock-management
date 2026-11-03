@@ -1442,6 +1442,30 @@ export default function IssueKit() {
       .finally(() => setLoadingTemplate(false));
   }, [templateId]);
 
+  // Everything already ISSUED from the chosen template (every earlier kit and
+  // its edits, all vendors). Drives the "Prev. issued" column, so while the
+  // next kit is being filled in you can see how much of each part has already
+  // gone out. Drafts aren't included — they haven't deducted anything.
+  const [issueHistory, setIssueHistory] = useState([]);
+  useEffect(() => {
+    if (!templateId) {
+      setIssueHistory([]);
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .get(`/kits/${templateId}/issues`)
+      .then(({ data }) => {
+        if (!cancelled) setIssueHistory(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setIssueHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [templateId, reloadKey]);
+
   // Suggested code for the chosen template (its kit code, or KIT_05-2 … when
   // that one is already taken). Not applied over a code the person typed or
   // one saved on a resumed kit.
@@ -1485,6 +1509,25 @@ export default function IssueKit() {
 
   const qtyNum = Number(quantity) || 0;
 
+  // part number -> qty already issued, over every earlier issue of this kit —
+  // and the same restricted to the vendor currently chosen on the form.
+  const vendorId = vendor?._id ? String(vendor._id) : "";
+  const { issuedByPart, issuedToVendorByPart } = useMemo(() => {
+    const all = {};
+    const toVendor = {};
+    for (const issue of issueHistory) {
+      const issueVendorId = String(issue.vendor?._id || issue.vendor || "");
+      for (const line of issue.lines || []) {
+        const key = line.ttUniquePartNumber;
+        if (!key) continue;
+        const qty = Number(line.qtyIssued) || 0;
+        all[key] = r4((all[key] || 0) + qty);
+        if (vendorId && issueVendorId === vendorId) toVendor[key] = r4((toVendor[key] || 0) + qty);
+      }
+    }
+    return { issuedByPart: all, issuedToVendorByPart: toVendor };
+  }, [issueHistory, vendorId]);
+
   const preview = useMemo(
     () =>
       issuableItems.map((it) => {
@@ -1492,9 +1535,17 @@ export default function IssueKit() {
         const available = it.matchedPart?.quantityInStock ?? 0;
         const ok = !!it.matchedPart && available >= required;
         const defaultToIssue = Math.min(available, required);
-        return { ...it, required, available, ok, defaultToIssue };
+        return {
+          ...it,
+          required,
+          available,
+          ok,
+          defaultToIssue,
+          previouslyIssued: issuedByPart[it.ttUniquePartNumber] || 0,
+          previouslyIssuedToVendor: issuedToVendorByPart[it.ttUniquePartNumber] || 0,
+        };
       }),
-    [issuableItems, qtyNum]
+    [issuableItems, qtyNum, issuedByPart, issuedToVendorByPart]
   );
 
   const hasShortfall = preview.some((p) => !p.ok);
@@ -1518,6 +1569,7 @@ export default function IssueKit() {
     qtyPerKit: (p) => Number(p.qtyPerKit),
     unit: (p) => p.matchedPart?.unit,
     required: (p) => Number(p.required),
+    previouslyIssued: (p) => Number(p.previouslyIssued ?? 0),
     available: (p) => Number(p.available),
     issuing: (p) => Number(qtyToIssueFor(p)),
     batches: (p) => formatBatchBreakdown(previewBatchBreakdown(p.batches, qtyToIssueFor(p))),
@@ -1831,6 +1883,12 @@ export default function IssueKit() {
                       ? ` · ${template.items.length - issuableItems.length} DNP (excluded)`
                       : ""}
                   </span>
+                  {issueHistory.length > 0 && (
+                    <span className="text-muted-foreground">
+                      · “Prev. issued” counts {issueHistory.length} earlier issue
+                      {issueHistory.length === 1 ? "" : "s"} of this kit
+                    </span>
+                  )}
                 </div>
 
                 <div className="overflow-x-auto rounded-lg border border-border">
@@ -1842,6 +1900,7 @@ export default function IssueKit() {
                         <SortableHead label="Qty/kit" sortKey="qtyPerKit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Unit" sortKey="unit" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Required" sortKey="required" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
+                        <SortableHead label="Prev. issued" sortKey="previouslyIssued" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Available" sortKey="available" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Qty issuing" sortKey="issuing" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Batches" sortKey="batches" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
@@ -1865,6 +1924,17 @@ export default function IssueKit() {
                           <td className="px-2.5 py-1.5 text-xs">{p.matchedPart?.unit || "—"}</td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                             {p.required}
+                          </td>
+                          <td
+                            className="px-2.5 py-1.5 text-xs text-right font-mono-tech"
+                            title="Total of this part already issued across every earlier issue of this kit"
+                          >
+                            {p.previouslyIssued}
+                            {vendor && p.previouslyIssuedToVendor > 0 && (
+                              <div className="text-[10px] font-sans text-muted-foreground">
+                                {p.previouslyIssuedToVendor} to {vendor.companyName || "this vendor"}
+                              </div>
+                            )}
                           </td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                             {p.available}
