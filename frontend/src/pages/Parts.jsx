@@ -2097,7 +2097,12 @@ useEffect(() => {
                                       Batch {e.batchCode}
                                     </Badge>
                                   )}
-                                  {e.type === "issued" &&
+                                  {e.type === "kit_reverted" && (
+                                    <Badge variant="success" title="Put back into main stock from an issued kit">
+                                      Reverted to stock
+                                    </Badge>
+                                  )}
+                                  {(e.type === "issued" || e.type === "kit_reverted") &&
                                     (e.batchBreakdown || []).map((b, i) => (
                                       <Badge key={i} variant="secondary" className="font-mono-tech">
                                         {b.batchCode ? `Batch ${b.batchCode}` : "No batch"}: {fmtQty(b.quantity)}
@@ -2192,17 +2197,20 @@ useEffect(() => {
                                 {e.balance}
                               </td>
                               <td className="px-1 py-1.5 align-top text-right">
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-7 w-7"
-                                  title="Delete this history entry"
-                                  disabled={deletingId === e._id}
-                                  onClick={() => deleteEntry(e)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                </Button>
+                                {/* A stock revert is a record, not something to delete here. */}
+                                {e.entryType !== "kit_revert" && (
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7"
+                                    title="Delete this history entry"
+                                    disabled={deletingId === e._id}
+                                    onClick={() => deleteEntry(e)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                  </Button>
+                                )}
                               </td>
                             </tr>
                           ))}

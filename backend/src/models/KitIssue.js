@@ -42,6 +42,34 @@ const kitIssueLineSchema = new mongoose.Schema(
       ],
       default: [],
     },
+
+    // Stock put BACK into main stock after the kit was issued ("Revert stock").
+    // qtyIssued is reduced by the reverted amount (so every total, the batch
+    // balances and the next entry's "previously issued" stay correct); this
+    // keeps the audit trail: how much came back, when, by whom, and from
+    // which batch(es).
+    qtyReverted: { type: Number, default: 0, min: 0 },
+    reverts: {
+      type: [
+        {
+          quantity: { type: Number, required: true, min: 0 },
+          at: { type: Date, default: Date.now },
+          by: { type: String, trim: true, default: "" },
+          byUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+          reason: { type: String, trim: true, default: "" },
+          batchBreakdown: {
+            type: [
+              {
+                batchCode: { type: String, default: null },
+                quantity: { type: Number, required: true, min: 0 },
+              },
+            ],
+            default: [],
+          },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

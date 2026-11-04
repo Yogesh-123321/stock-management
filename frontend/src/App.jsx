@@ -17,6 +17,7 @@ import Approvals from "@/pages/Approvals";
 import Payments from "@/pages/Payments";
 import { AuthProvider, RequireAuth, RequirePermission } from "@/lib/auth";
 import ActivityLog from "@/pages/ActivityLog";
+import UserInsights from "@/pages/UserInsights";
 const guard = (permission, element) => (
   <RequirePermission permission={permission}>{element}</RequirePermission>
 );
@@ -57,6 +58,8 @@ export default function App() {
           <Route path="/approvals" element={<Approvals />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/users" element={guard("users.manage", <Users />)} />
+          <Route path="/user-insights" element={guard("users.manage", <UserInsights />)} />
+          <Route path="/user-insights/:id" element={guard("users.manage", <UserInsights />)} />
         <Route path="/activity-log" element={guard("logs.view", <ActivityLog />)} />
         </Route>
 

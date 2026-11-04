@@ -7,6 +7,7 @@ import Part from "../models/Part.js";
 import Vendor from "../models/Vendor.js";
 import { parseKitWorkbook } from "../utils/parseKitSheet.js";
 import { getAvailableBatches, allocateFromBatches } from "../utils/batchAllocation.js";
+import { returnedMap } from "../utils/kitReturn.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1292,6 +1293,178 @@ export const deleteKitIssueLine = asyncHandler(async (req, res) => {
   await issue.save();
 
   res.json({ message: "Kit issue line reverted — stock restored", issueId: issue._id, lineId, partId: partDoc?._id });
+});
+
+/*
+  Revert stock from an ISSUED kit — put parts back into main stock.
+
+    GET  /api/kits/issues/:issueId/revertable
+         -> per line, how much can still be reverted (issued, less anything the
+            vendor has already sent back through Receive material).
+    POST /api/kits/issues/:issueId/revert
+         body { all?: true, lines?: [{ lineId, quantity? }], reason? }
+         Pick any number of lines — or `all` — and an optional quantity per
+         line (default: everything still revertable on it).
+
+  For every reverted line: Part.quantityInStock goes up by the quantity, the
+  line's qtyIssued goes down by it (so batch balances, "previously issued" and
+  completion all recompute correctly) and the revert is recorded on the line.
+*/
+const roundQ = (n) => Math.round((Number(n) || 0) * 1000) / 1000;
+
+/** Max revertable per line: issued less what the vendor already returned, per part, in line order. */
+async function revertCaps(issue) {
+  const returned = await returnedMap([issue._id]);
+  const freeByPart = new Map();
+  for (const l of issue.lines || []) {
+    if (!l.part) continue;
+    const key = String(l.part);
+    freeByPart.set(key, (freeByPart.get(key) ?? 0) + (l.qtyIssued || 0));
+  }
+  for (const [key, total] of freeByPart) {
+    freeByPart.set(key, Math.max(0, roundQ(total - (returned.get(`${issue._id}|${key}`) || 0))));
+  }
+  const caps = new Map(); // lineId -> { max, returned }
+  for (const l of issue.lines || []) {
+    if (!l.part || !(l.qtyIssued > 0)) {
+      caps.set(String(l._id), { max: 0, returned: 0 });
+      continue;
+    }
+    const key = String(l.part);
+    const free = freeByPart.get(key) || 0;
+    const max = Math.min(l.qtyIssued, free);
+    freeByPart.set(key, roundQ(free - max));
+    caps.set(String(l._id), { max: roundQ(max), returned: roundQ(l.qtyIssued - max) });
+  }
+  return caps;
+}
+
+export const getKitIssueRevertable = asyncHandler(async (req, res) => {
+  const issue = await KitIssue.findById(req.params.issueId);
+  if (!issue) {
+    res.status(404);
+    throw new Error("Kit issue not found");
+  }
+  const caps = await revertCaps(issue);
+  res.json({
+    status: issue.status,
+    lines: (issue.lines || []).map((l) => ({
+      lineId: l._id,
+      maxRevert: caps.get(String(l._id))?.max || 0,
+      alreadyReturned: caps.get(String(l._id))?.returned || 0,
+    })),
+  });
+});
+
+export const revertKitIssueStock = asyncHandler(async (req, res) => {
+  const { issueId } = req.params;
+  const { all = false, lines: requested = [], reason = "" } = req.body || {};
+
+  const issue = await KitIssue.findById(issueId);
+  if (!issue) {
+    res.status(404);
+    throw new Error("Kit issue not found");
+  }
+  if (issue.status !== "issued") {
+    res.status(400);
+    throw new Error("Only an issued kit can have its stock reverted — a saved kit has not deducted anything");
+  }
+
+  const caps = await revertCaps(issue);
+
+  // Work out what to revert: [{ line, qty }]
+  const plan = [];
+  if (all) {
+    for (const l of issue.lines) {
+      const max = caps.get(String(l._id))?.max || 0;
+      if (max > 0) plan.push({ line: l, qty: max });
+    }
+  } else {
+    if (!Array.isArray(requested) || requested.length === 0) {
+      res.status(400);
+      throw new Error("Select at least one part to revert");
+    }
+    const seen = new Set();
+    for (const r of requested) {
+      const line = issue.lines.id(r.lineId);
+      if (!line) {
+        res.status(404);
+        throw new Error("One of the selected lines is not on this kit issue");
+      }
+      if (seen.has(String(line._id))) continue;
+      seen.add(String(line._id));
+      const max = caps.get(String(line._id))?.max || 0;
+      const qty = r.quantity === undefined || r.quantity === null || r.quantity === "" ? max : roundQ(r.quantity);
+      if (!(qty > 0)) {
+        res.status(400);
+        throw new Error(`Enter a quantity above 0 for ${line.ttUniquePartNumber}`);
+      }
+      if (qty > max + 1e-6) {
+        res.status(400);
+        throw new Error(
+          max > 0
+            ? `${line.ttUniquePartNumber}: only ${max} can be reverted (${line.qtyIssued} issued${
+                line.qtyIssued > max ? `, ${roundQ(line.qtyIssued - max)} already returned by the vendor` : ""
+              })`
+            : `${line.ttUniquePartNumber}: nothing left to revert`
+        );
+      }
+      plan.push({ line, qty });
+    }
+  }
+  if (plan.length === 0) {
+    res.status(400);
+    throw new Error("Nothing to revert — no part on this issue has stock left to put back");
+  }
+
+  const at = new Date();
+  const by = req.user?.name || req.user?.username || "";
+  const stockBack = new Map(); // partId -> qty
+  const done = [];
+
+  for (const { line, qty } of plan) {
+    // Put the quantity back into the batch(es) it was drawn from, most recently
+    // drawn first, so the older batches stay as consumed as they were.
+    let left = qty;
+    const takenBack = [];
+    const bd = (line.batchBreakdown || []).map((b) => ({ batchCode: b.batchCode ?? null, quantity: b.quantity }));
+    for (let i = bd.length - 1; i >= 0 && left > 1e-9; i -= 1) {
+      const take = Math.min(bd[i].quantity, left);
+      if (take > 0) {
+        takenBack.push({ batchCode: bd[i].batchCode, quantity: roundQ(take) });
+        bd[i].quantity = roundQ(bd[i].quantity - take);
+        left = roundQ(left - take);
+      }
+    }
+    line.batchBreakdown = bd.filter((b) => b.quantity > 1e-9);
+    line.qtyIssued = qr(Math.max(0, (line.qtyIssued || 0) - qty));
+    line.qtyReverted = qr((line.qtyReverted || 0) + qty);
+    line.reverts.push({
+      quantity: qty,
+      at,
+      by,
+      byUser: req.user?._id || null,
+      reason: String(reason || "").trim().slice(0, 300),
+      batchBreakdown: takenBack,
+    });
+
+    if (line.part) stockBack.set(String(line.part), qr((stockBack.get(String(line.part)) || 0) + qty));
+    done.push({ lineId: line._id, ttUniquePartNumber: line.ttUniquePartNumber, quantity: qty });
+  }
+
+  // Save the issue first (validated), then credit the stock.
+  await issue.save();
+  for (const [partId, qty] of stockBack) {
+    await Part.updateOne({ _id: partId }, { $inc: { quantityInStock: qty } });
+  }
+
+  const total = qr(done.reduce((s, d) => s + d.quantity, 0));
+  res.json({
+    message: `Reverted ${done.length} part${done.length === 1 ? "" : "s"} (${total} unit${total === 1 ? "" : "s"}) — stock restored`,
+    issueId: issue._id,
+    reverted: done,
+    totalQuantity: total,
+  });
 });
 
 /* ===================================================================== *

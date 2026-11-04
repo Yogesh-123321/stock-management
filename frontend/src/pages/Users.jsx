@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { UserPlus, KeyRound, Save, ShieldCheck, User as UserIcon, RefreshCw } from "lucide-react";
+import { UserPlus, KeyRound, Save, ShieldCheck, User as UserIcon, RefreshCw, BarChart3 } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -229,9 +230,16 @@ export default function Users() {
               what they may do — approval rights stay locked to the admin.
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" asChild>
+              <Link to="/user-insights">
+                <BarChart3 className="mr-1.5 h-3.5 w-3.5" /> Usage dashboard
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
+            </Button>
+          </div>
         </CardHeader>
 
         <CardContent className="space-y-2">
@@ -284,6 +292,11 @@ export default function Users() {
                       <option value="user">User</option>
                       <option value="admin">Admin</option>
                     </select>
+                    <Button size="sm" variant="outline" className="h-8" asChild>
+                      <Link to={`/user-insights/${u._id}`}>
+                        <BarChart3 className="mr-1 h-3.5 w-3.5" /> Activity
+                      </Link>
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

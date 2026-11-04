@@ -14,6 +14,8 @@ import {
   editKitIssue,
   getKitIssueChainTotals,
   deleteKitIssueLine,
+  getKitIssueRevertable,
+  revertKitIssueStock,
   saveKitDraft,
   updateKitDraft,
   getKitDrafts,
@@ -55,6 +57,14 @@ router.post(
   protect,
   requirePermission("kit.issue", "kit.manage"),
   editKitIssue
+);
+// Revert stock from an issued kit: pick parts (or all) and put them back into main stock.
+router.get("/issues/:issueId/revertable", protect, getKitIssueRevertable);
+router.post(
+  "/issues/:issueId/revert",
+  protect,
+  requirePermission("kit.issue", "kit.manage"),
+  revertKitIssueStock
 );
 router.delete(
   "/issues/:issueId/lines/:lineId",

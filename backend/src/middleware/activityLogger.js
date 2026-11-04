@@ -115,6 +115,7 @@ const PAST_TENSE = {
   copy: "copied",
   issue: "issued",
   edit: "edited",
+  revert: "reverted stock of",
 };
 
 function describe(req, segment, entityType) {
@@ -129,6 +130,7 @@ function describe(req, segment, entityType) {
     "copy",
     "issue",
     "edit",
+    "revert",
   ];
   if (tail === "pay") return `marked the ${LABEL[entityType]} as paid`;
   if (tail === "resubmit") return `resubmitted the ${LABEL[entityType]}`;
@@ -152,6 +154,7 @@ function actionKey(req, segment) {
     "download",
     "issue",
     "edit",
+    "revert",
     "pay",
     "resubmit",
   ];

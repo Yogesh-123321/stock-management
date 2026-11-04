@@ -815,7 +815,7 @@ export function lineCompletedHere(l) {
   return required > 0 && prev + issued >= required - 1e-6;
 }
 
-function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
+function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
   const lines = issue.lines || [];
   const { sort, toggle, apply } = useSort();
   const sortedLines = apply(lines, {
@@ -967,7 +967,19 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     >
                       {l.qtyPreviouslyIssued ?? 0}
                     </td>
-                    <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">{l.qtyIssued}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
+                      {l.qtyIssued}
+                      {Number(l.qtyReverted) > 0 && (
+                        <div
+                          className="text-[10px] text-muted-foreground"
+                          title={(l.reverts || [])
+                            .map((r) => `${r.quantity} on ${fmtDateTime(r.at)}${r.by ? ` by ${r.by}` : ""}${r.reason ? ` — ${r.reason}` : ""}`)
+                            .join("\n")}
+                        >
+                          {l.qtyReverted} reverted
+                        </div>
+                      )}
+                    </td>
                     <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
                       {formatBatchBreakdown(l.batchBreakdown)}
                     </td>
@@ -1005,12 +1017,316 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
             )}
             {downloading ? "Preparing…" : "Download Excel"}
           </Button>
+          {onRevert && (
+            <Button type="button" variant="outline" onClick={onRevert} disabled={!lines.some((l) => Number(l.qtyIssued) > 0)}>
+              <Undo2 className="mr-1.5 h-4 w-4 text-destructive" />
+              Revert stock
+            </Button>
+          )}
           {onEdit && (
             <Button type="button" onClick={onEdit}>
               <Pencil className="mr-1.5 h-4 w-4" />
               Edit — saves to Saved kits
             </Button>
           )}
+        </div>
+      </ResizablePanel>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Revert stock from an ISSUED kit: tick the parts to take back (or "all"),
+ * adjust the quantity per part if only some should come back, and they are
+ * added straight back into main stock. Replaces the old one-line-at-a-time
+ * prompt.
+ * ------------------------------------------------------------------ */
+function RevertStockDialog({ issue, onClose, onDone }) {
+  const [caps, setCaps] = useState(null); // lineId -> { maxRevert, alreadyReturned }
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState({}); // lineId -> quantity string ("" = not picked)
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await api.get(`/kits/issues/${issue._id}/revertable`);
+        if (!alive) return;
+        setCaps(Object.fromEntries((data.lines || []).map((l) => [String(l.lineId), l])));
+      } catch (err) {
+        if (alive) toast.error(err.response?.data?.message || "Could not check what can be reverted");
+        // Fall back to the issued quantities; the server still enforces the real limit.
+        if (alive) {
+          setCaps(
+            Object.fromEntries(
+              (issue.lines || []).map((l) => [String(l._id), { lineId: l._id, maxRevert: Number(l.qtyIssued) || 0, alreadyReturned: 0 }])
+            )
+          );
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [issue]);
+
+  const lines = issue.lines || [];
+  const maxOf = (l) => Number(caps?.[String(l._id)]?.maxRevert ?? l.qtyIssued ?? 0);
+  const selectable = lines.filter((l) => maxOf(l) > 0);
+  const term = filter.trim().toLowerCase();
+  const shown = term
+    ? lines.filter((l) =>
+        `${l.ttUniquePartNumber} ${l.part?.itemDescription || l.itemDescription || ""}`.toLowerCase().includes(term)
+      )
+    : lines;
+
+  const isPicked = (l) => picked[String(l._id)] !== undefined;
+  const pickedLines = selectable.filter(isPicked);
+  const allPicked = selectable.length > 0 && pickedLines.length === selectable.length;
+
+  const toggleOne = (l) =>
+    setPicked((cur) => {
+      const next = { ...cur };
+      const id = String(l._id);
+      if (next[id] !== undefined) delete next[id];
+      else next[id] = String(maxOf(l));
+      return next;
+    });
+
+  const toggleAll = () =>
+    setPicked(allPicked ? {} : Object.fromEntries(selectable.map((l) => [String(l._id), String(maxOf(l))])));
+
+  const setQty = (l, v) => setPicked((cur) => ({ ...cur, [String(l._id)]: v }));
+
+  // Validate every ticked quantity.
+  const problems = pickedLines
+    .map((l) => {
+      const q = Number(picked[String(l._id)]);
+      if (!(q > 0)) return `${l.ttUniquePartNumber}: enter a quantity above 0`;
+      if (q > maxOf(l) + 1e-9) return `${l.ttUniquePartNumber}: at most ${maxOf(l)}`;
+      return null;
+    })
+    .filter(Boolean);
+  const totalUnits = pickedLines.reduce((n, l) => n + (Number(picked[String(l._id)]) || 0), 0);
+
+  const submit = async () => {
+    if (!pickedLines.length || problems.length) return;
+    const ok = window.confirm(
+      `Revert ${pickedLines.length} part${pickedLines.length === 1 ? "" : "s"} (${
+        Math.round(totalUnits * 1000) / 1000
+      } units) from ${issue.issueCode || issue.kitName}?\n\nThey will be added back to the main stock.`
+    );
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const { data } = await api.post(`/kits/issues/${issue._id}/revert`, {
+        lines: pickedLines.map((l) => ({ lineId: l._id, quantity: Number(picked[String(l._id)]) })),
+        reason,
+      });
+      toast.success(data?.message || "Stock reverted");
+      onDone?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not revert the stock");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <ResizablePanel defaultWidth={860}>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+              <Undo2 className="h-4 w-4 text-destructive" />
+              Revert stock from this kit
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {issue.kitName} ·{" "}
+              <span className="font-mono-tech">{issue.issueCode || "—"}</span>
+              {issue.vendor?.companyName ? ` · issued to ${issue.vendor.companyName}` : ""}
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <p className="text-xs text-muted-foreground">
+            Tick the parts to take back — or use <b>Select all</b>. The quantity you enter goes back
+            into the main stock (and into the batch it was drawn from).
+          </p>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={allPicked}
+                disabled={loading || selectable.length === 0}
+                onChange={toggleAll}
+              />
+              Select all ({selectable.length})
+            </label>
+            <Input
+              className="h-8 w-56"
+              placeholder="Find a part"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/70">
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <th className="w-8 px-2.5 py-1.5" />
+                  <th className="px-2.5 py-1.5">TT part #</th>
+                  <th className="px-2.5 py-1.5">Description</th>
+                  <th className="px-2.5 py-1.5 text-right">Issued</th>
+                  <th className="px-2.5 py-1.5">Batches</th>
+                  <th className="px-2.5 py-1.5 text-right">Revert qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td colSpan={6} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                      Checking what can be reverted…
+                    </td>
+                  </tr>
+                )}
+                {!loading && shown.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+                      No parts match.
+                    </td>
+                  </tr>
+                )}
+                {!loading &&
+                  shown.map((l) => {
+                    const max = maxOf(l);
+                    const disabled = max <= 0;
+                    const on = isPicked(l);
+                    const returned = Number(caps?.[String(l._id)]?.alreadyReturned || 0);
+                    return (
+                      <tr
+                        key={l._id}
+                        className={`border-b border-border last:border-0 ${on ? "bg-primary/5" : ""} ${
+                          disabled ? "opacity-50" : ""
+                        }`}
+                      >
+                        <td className="px-2.5 py-1.5">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={on}
+                            disabled={disabled}
+                            onChange={() => toggleOne(l)}
+                          />
+                        </td>
+                        <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
+                        <td className="px-2.5 py-1.5 text-xs">
+                          {l.part?.itemDescription || l.itemDescription || "—"}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right text-xs font-mono-tech">
+                          {l.qtyIssued}
+                          {returned > 0 && (
+                            <div className="text-[10px] text-muted-foreground">{returned} returned by vendor</div>
+                          )}
+                          {Number(l.qtyReverted) > 0 && (
+                            <div className="text-[10px] text-muted-foreground">{l.qtyReverted} reverted earlier</div>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                          {formatBatchBreakdown(l.batchBreakdown)}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right">
+                          {disabled ? (
+                            <span className="text-[11px] text-muted-foreground">
+                              {Number(l.qtyIssued) > 0 ? "all returned" : "nothing issued"}
+                            </span>
+                          ) : on ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Input
+                                type="number"
+                                min="0"
+                                step="any"
+                                className="h-8 w-24 text-right font-mono-tech"
+                                value={picked[String(l._id)]}
+                                onChange={(e) => setQty(l, e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="text-[11px] text-primary hover:underline"
+                                onClick={() => setQty(l, String(max))}
+                                title="Revert everything issued on this line"
+                              >
+                                max {max}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">max {max}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Reason (optional)
+            </label>
+            <Textarea
+              rows={2}
+              value={reason}
+              maxLength={300}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Kit not sent after all / issued to the wrong vendor"
+            />
+          </div>
+
+          {problems.length > 0 && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {problems.slice(0, 4).map((p) => (
+                <div key={p}>{p}</div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-5 py-3">
+          <p className="text-xs text-muted-foreground">
+            {pickedLines.length
+              ? `${pickedLines.length} part${pickedLines.length === 1 ? "" : "s"} · ${
+                  Math.round(totalUnits * 1000) / 1000
+                } units will go back to stock`
+              : "Nothing selected"}
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={submit}
+              disabled={saving || !pickedLines.length || problems.length > 0}
+            >
+              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Undo2 className="mr-1.5 h-4 w-4" />}
+              {saving ? "Reverting…" : allPicked ? "Revert all parts" : "Revert selected"}
+            </Button>
+          </div>
         </div>
       </ResizablePanel>
     </div>
@@ -1041,6 +1357,7 @@ function KitsPanel({
   const [busyIssueId, setBusyIssueId] = useState(null);
   const [editingIssue, setEditingIssue] = useState(null);
   const [previewingIssue, setPreviewingIssue] = useState(null);
+  const [revertingIssue, setRevertingIssue] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
 
   // ---- Saved kits (drafts) state ----
@@ -1105,37 +1422,6 @@ function KitsPanel({
   };
 
   // -- Issued kits actions --
-  const revertLine = async (issue) => {
-    const lines = issue.lines || [];
-    if (lines.length === 0) return;
-    let line = lines[0];
-    if (lines.length > 1) {
-      const choice = window.prompt(
-        `This issue has ${lines.length} parts:\n` +
-          lines.map((l, i) => `${i + 1}. ${l.ttUniquePartNumber} (${l.qtyIssued} unit(s))`).join("\n") +
-          "\n\nEnter the number of the line to revert:"
-      );
-      const idx = Number(choice) - 1;
-      if (!choice || !Number.isInteger(idx) || idx < 0 || idx >= lines.length) return;
-      line = lines[idx];
-    } else {
-      const ok = window.confirm(
-        `Revert ${line.ttUniquePartNumber} (${line.qtyIssued} unit(s)) from this issue? Stock will be restored.`
-      );
-      if (!ok) return;
-    }
-    setBusyIssueId(line._id);
-    try {
-      await api.delete(`/kits/issues/${issue._id}/lines/${line._id}`);
-      toast.success("Line reverted — stock restored");
-      loadIssues();
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Could not revert this line");
-    } finally {
-      setBusyIssueId(null);
-    }
-  };
-
   // -- Saved kits actions --
   const issueNow = async (draft) => {
     const ok = window.confirm(
@@ -1315,9 +1601,9 @@ function KitsPanel({
                               type="button"
                               size="icon"
                               variant="ghost"
-                              title="Revert a line from this issue"
-                              onClick={() => revertLine(iss)}
-                              disabled={!iss.lines?.length || busyIssueId !== null}
+                              title="Revert stock — pick parts (or all) to put back into main stock"
+                              onClick={() => setRevertingIssue(iss)}
+                              disabled={!iss.lines?.some((l) => Number(l.qtyIssued) > 0) || busyIssueId !== null}
                             >
                               <Undo2 className="h-3.5 w-3.5 text-destructive" />
                             </Button>
@@ -1329,7 +1615,8 @@ function KitsPanel({
               </TableBody>
             </Table>
             <p className="mt-2 text-xs text-muted-foreground">
-              Undo reverts one line's quantity back onto the part's stock. Edit never changes the entry
+              Revert stock lets you pick one, several or all parts of an issued kit and puts them back
+              into the main stock. Edit never changes the entry
               itself — it saves your changes as a new kit under Saved kits; issue it from there and it
               becomes the next entry (e.g. ABC11 → ABC11A → ABC11B) so the original stays as
               permanent history. Open a part's own history from the Parts master for full line-by-line
@@ -1469,6 +1756,15 @@ function KitsPanel({
         <KitIssuePreviewDialog
           issue={previewingIssue}
           onClose={() => setPreviewingIssue(null)}
+          onRevert={
+            canManage || canIssue
+              ? () => {
+                  const iss = previewingIssue;
+                  setPreviewingIssue(null);
+                  setRevertingIssue(iss);
+                }
+              : undefined
+          }
           onEdit={
             canManage && previewingIssue.isEditable !== false
               ? () => {
@@ -1478,6 +1774,14 @@ function KitsPanel({
                 }
               : undefined
           }
+        />
+      )}
+
+      {revertingIssue && (
+        <RevertStockDialog
+          issue={revertingIssue}
+          onClose={() => setRevertingIssue(null)}
+          onDone={() => loadIssues()}
         />
       )}
     </Card>

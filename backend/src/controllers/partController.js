@@ -345,15 +345,65 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   }));
 
   const kitMovements = [];
+  // Stock put back from issued kits ("Revert stock" on the Kits page). The issue
+  // row below keeps its ORIGINAL quantity (issued now + reverted since), and each
+  // revert is its own "in" row, so the history reads like a statement and the
+  // running balance still matches quantityInStock.
+  const kitRevertMovements = [];
   for (const issue of kitIssuesForPart) {
     for (const line of issue.lines) {
       if (String(line.part) !== String(part._id)) continue;
+
+      // Original batch split = what is still drawn + what was handed back.
+      const originalBatches = new Map();
+      for (const b of line.batchBreakdown || []) {
+        const k = b.batchCode || "";
+        originalBatches.set(k, (originalBatches.get(k) || 0) + (b.quantity || 0));
+      }
+      for (const r of line.reverts || []) {
+        for (const b of r.batchBreakdown || []) {
+          const k = b.batchCode || "";
+          originalBatches.set(k, (originalBatches.get(k) || 0) + (b.quantity || 0));
+        }
+      }
+      const originalBreakdown = [...originalBatches.entries()].map(([k, quantity]) => ({
+        batchCode: k || null,
+        quantity,
+      }));
+
+      for (const r of line.reverts || []) {
+        kitRevertMovements.push({
+          _id: r._id,
+          date: r.at,
+          direction: "in",
+          type: "kit_reverted",
+          quantity: r.quantity,
+          party: issue.vendor
+            ? { role: "vendor", id: issue.vendor._id, name: issue.vendor.companyName }
+            : null,
+          reference: {
+            type: "Kit issue (reverted)",
+            number: issue.issueCode || issue.kitCode || issue.kitName,
+            id: issue._id,
+          },
+          matchType: null,
+          enteredBy: r.by || null,
+          remarks: r.reason ? `Stock reverted — ${r.reason}` : "Stock reverted to main stock",
+          stockApplied: true,
+          batchBreakdown: r.batchBreakdown || [],
+          // Not deletable from the ledger — it is a record of a revert.
+          entryType: "kit_revert",
+          issueId: issue._id,
+          lineId: line._id,
+        });
+      }
+
       kitMovements.push({
         _id: line._id,
         date: issue.createdAt,
         direction: "out",
         type: "issued",
-        quantity: line.qtyIssued,
+        quantity: (line.qtyIssued || 0) + (line.qtyReverted || 0),
         party: issue.vendor
           ? { role: "vendor", id: issue.vendor._id, name: issue.vendor.companyName }
           : null,
@@ -377,7 +427,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
         // first — see utils/batchAllocation.js. batchCode: null is stock
         // that wasn't tied to any batch (a legacy receipt, or a manual
         // stock correction).
-        batchBreakdown: line.batchBreakdown || [],
+        batchBreakdown: (line.reverts || []).length ? originalBreakdown : line.batchBreakdown || [],
         entryType: "kit_issue",
         issueId: issue._id,
         lineId: line._id,
@@ -403,7 +453,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     entryType: "rnd_issue",
   }));
 
-  const movements = [...receiptMovements, ...kitMovements, ...rndMovements];
+  const movements = [...receiptMovements, ...kitMovements, ...kitRevertMovements, ...rndMovements];
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was
@@ -441,7 +491,8 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   );
   const mainStock = part.quantityInStock || 0;
   const rndStock = part.rndStock || 0;
-  const issuedInKits = sumQty(kitMovements);
+  // Net of anything reverted back to stock.
+  const issuedInKits = sumQty(kitMovements) - sumQty(kitRevertMovements);
   const expectedTotal = mainStock + iqcStock + awaitingInvoice + rndStock;
   const stockSummary = {
     mainStock,
