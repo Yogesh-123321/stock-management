@@ -600,6 +600,13 @@ function TemplateIssuesDialog({ template, onClose }) {
               <TableBody>
                 {sortedIssues.map((iss) => {
                   const shortLines = (iss.lines || []).filter((l) => (l.qtyShort || 0) > 0);
+                  // Parts complete as of this entry that earlier entries had already started (prev + issued >= required).
+                  const completedLines = (iss.lines || []).filter((l) => {
+                    const prev = Number(l.qtyPreviouslyIssued || 0);
+                    const issued = Number(l.qtyIssued || 0);
+                    const required = Number(l.qtyRequired || 0);
+                    return prev > 0 && required > 0 && prev + issued >= required - 1e-6;
+                  });
                   return (
                     <TableRow key={iss._id}>
                       <TableCell className="text-xs text-muted-foreground">
@@ -630,8 +637,16 @@ function TemplateIssuesDialog({ template, onClose }) {
                             >
                               {shortLines.length} short
                             </Badge>
-                          ) : (
+                          ) : completedLines.length === 0 ? (
                             <Badge variant="success">Full</Badge>
+                          ) : null}
+                          {completedLines.length > 0 && (
+                            <Badge
+                              variant="success"
+                              title={completedLines.map((l) => l.ttUniquePartNumber).join(", ")}
+                            >
+                              {completedLines.length} completed
+                            </Badge>
                           )}
                           {iss.isEditable === false && (
                             <Badge variant="secondary" title="This entry has been edited — view only">

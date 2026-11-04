@@ -703,6 +703,7 @@ export const getIssuesForTemplate = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 });
   const plain = issues.map((i) => i.toObject());
   await attachEditLock(plain);
+  await attachPreviouslyIssued(plain);
   res.json(plain);
 });
 

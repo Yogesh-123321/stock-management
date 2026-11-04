@@ -805,6 +805,16 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
  * recorded at issue time. Opened by clicking a row in the Issued kits
  * tab below.
  * ------------------------------------------------------------------ */
+// True when the part is complete as of this entry: earlier issued + issued here
+// reaches the required quantity. A part finished in kit 12 therefore stays
+// "Completed" in every later entry of the kit (12-A, 12-B ...).
+export function lineCompletedHere(l) {
+  const prev = Number(l.qtyPreviouslyIssued || 0);
+  const issued = Number(l.qtyIssued || 0);
+  const required = Number(l.qtyRequired || 0);
+  return required > 0 && prev + issued >= required - 1e-6;
+}
+
 function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
   const lines = issue.lines || [];
   const { sort, toggle, apply } = useSort();
@@ -932,8 +942,18 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     </td>
                   </tr>
                 )}
-                {sortedLines.map((l) => (
-                  <tr key={l._id} className="border-b border-border">
+                {sortedLines.map((l) => {
+                  // Part is complete as of this entry (prev. issued + issued >= required),
+                  // including when it was already completed by an earlier kit.
+                  const completedHere = lineCompletedHere(l);
+                  return (
+                  <tr
+                    key={l._id}
+                    className={
+                      "border-b border-border " +
+                      (completedHere ? "!bg-green-100 dark:!bg-green-950/40" : "")
+                    }
+                  >
                     <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
                     <td className="px-2.5 py-1.5 text-xs">
                       {l.part?.itemDescription || l.itemDescription || "—"}
@@ -954,12 +974,20 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit }) {
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                       {l.qtyShort > 0 ? (
                         <span className="text-destructive">{l.qtyShort}</span>
+                      ) : completedHere ? (
+                        <span
+                          className="font-semibold text-green-700 dark:text-green-400"
+                          title={`${l.qtyPreviouslyIssued || 0} previously issued + ${l.qtyIssued || 0} issued here ≥ ${l.qtyRequired} required`}
+                        >
+                          Completed
+                        </span>
                       ) : (
                         "—"
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
