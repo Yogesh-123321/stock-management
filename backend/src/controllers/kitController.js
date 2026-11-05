@@ -44,6 +44,29 @@ const sanitizeItem = (raw = {}) => {
   };
 };
 
+// A kit template may list each part only ONCE. Matching is on the TT unique part
+// number (already trimmed + upper-cased by sanitizeItem). Throws a 400 naming
+// every part that appears more than once and the rows it is on.
+const assertNoDuplicateParts = (items) => {
+  const rowsByCode = new Map();
+  items.forEach((it, i) => {
+    const list = rowsByCode.get(it.ttUniquePartNumber) || [];
+    list.push(i + 1);
+    rowsByCode.set(it.ttUniquePartNumber, list);
+  });
+  const dups = [...rowsByCode.entries()].filter(([, rows]) => rows.length > 1);
+  if (dups.length) {
+    const list = dups.map(([code, rows]) => `${code} (rows ${rows.join(", ")})`).join("; ");
+    throw Object.assign(
+      new Error(
+        `A part can appear only once in a kit template. Duplicate part${dups.length === 1 ? "" : "s"}: ${list}. ` +
+          "Remove the repeated line(s) or add their quantities together."
+      ),
+      { status: 400 }
+    );
+  }
+};
+
 // Quantities can be decimal (metres, kilograms, ...). Rounding to 4 places keeps
 // float noise (0.1 * 3 = 0.30000000000000004) out of stock and issue figures.
 const qr = (n) => Math.round((Number(n) || 0) * 1e4) / 1e4;
@@ -572,6 +595,7 @@ export const createKitTemplate = asyncHandler(async (req, res) => {
   let sanitizedItems;
   try {
     sanitizedItems = items.map(sanitizeItem);
+    assertNoDuplicateParts(sanitizedItems);
   } catch (err) {
     res.status(err.status || 400);
     throw err;
@@ -639,7 +663,9 @@ export const updateKitTemplate = asyncHandler(async (req, res) => {
       throw new Error("A kit template needs at least one item");
     }
     try {
-      template.items = items.map(sanitizeItem);
+      const cleaned = items.map(sanitizeItem);
+      assertNoDuplicateParts(cleaned);
+      template.items = cleaned;
     } catch (err) {
       res.status(err.status || 400);
       throw err;
@@ -743,6 +769,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     throw new Error("Kit issue not found");
   }
   const iss = issue.toObject();
+  await attachPreviouslyIssued([iss]); // adds line.qtyPreviouslyIssued (earlier entries of this kit)
   const v = iss.vendor || {};
   const lines = iss.lines || [];
 
@@ -767,7 +794,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
   const THIN = { style: "thin", color: { argb: "FF9CA3AF" } };
   const BOX = { top: THIN, bottom: THIN, left: THIN, right: THIN };
   const NAVY = "FF1F3A5F";
-  const LAST_COL = 9; // I
+  const LAST_COL = 11; // K
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Inventory Platform";
@@ -788,17 +815,19 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     { width: 20 }, // D  ref designator
     { width: 10 }, // E  qty / kit
     { width: 13 }, // F  required
-    { width: 12 }, // G  issued
-    { width: 11 }, // H  short
-    { width: 32 }, // I  batches
+    { width: 12 }, // G  previously issued
+    { width: 12 }, // H  issued
+    { width: 11 }, // I  short
+    { width: 18 }, // J  status tag
+    { width: 32 }, // K  batches
   ];
 
   // ---- Title ----
-  ws.mergeCells("C1:I1");
+  ws.mergeCells("C1:K1");
   ws.getCell("C1").value = "TECHNOTRENDZ INNOVATIVE SOLUTIONS PVT. LTD";
   ws.getCell("C1").font = { bold: true, size: 14 };
   ws.getCell("C1").alignment = { vertical: "middle", horizontal: "center" };
-  ws.mergeCells("C2:I2");
+  ws.mergeCells("C2:K2");
   ws.getCell("C2").value = "KIT ISSUE SLIP — MATERIAL ISSUED";
   ws.getCell("C2").font = { bold: true, size: 12, color: { argb: NAVY } };
   ws.getCell("C2").alignment = { vertical: "middle", horizontal: "center" };
@@ -810,7 +839,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     ws.addImage(imageId, { tl: { col: 0.15, row: 0.1 }, ext: { width: 70, height: 72 } });
   }
 
-  // ---- Details block: label (A:B) + value (C:I) ----
+  // ---- Details block: label (A:B) + value (C:K) ----
   const contact = [v.contactPersonName, v.phone].filter(Boolean).join(" · ");
   const details = [
     ["Kit", iss.kitName],
@@ -824,6 +853,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     ["Issued On", fmtIst(iss.createdAt)],
     ["Kits Issued", iss.quantity],
     ["Shortage", iss.hasShortage ? "Yes — some parts were issued short (see Qty Short)" : "No"],
+    iss.revertedAt ? ["Reverted", `Whole kit reverted to stock on ${fmtIst(iss.revertedAt)}${iss.revertedBy ? ` by ${iss.revertedBy}` : ""}`] : null,
     iss.remarks ? ["Remarks", iss.remarks] : null,
   ].filter(Boolean);
 
@@ -831,7 +861,7 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     const row = ws.addRow([]);
     const r = row.number;
     ws.mergeCells(`A${r}:B${r}`);
-    ws.mergeCells(`C${r}:I${r}`);
+    ws.mergeCells(`C${r}:K${r}`);
     const l = ws.getCell(`A${r}`);
     l.value = label;
     l.font = { bold: true };
@@ -854,8 +884,10 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     "Ref. Designator",
     "Qty / Kit",
     "Qty Required",
+    "Prev. Issued",
     "Qty Issued",
     "Qty Short",
+    "Status",
     "Batches (FIFO)",
   ]);
   header.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -864,8 +896,39 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
   header.height = 24;
   for (let c = 1; c <= LAST_COL; c += 1) header.getCell(c).border = BOX;
 
+  // Colour coding — same rules as the on-screen kit preview:
+  //   SHORT       (red)    some of the part is still missing
+  //   OVER-ISSUE  (yellow) earlier issues + this one are ABOVE what is required
+  //   COMPLETED   (green)  earlier issues + this one reach what is required
+  const PALETTE = {
+    short: { fill: "FFFECACA", text: "FFB91C1C" },
+    over: { fill: "FFFEF08A", text: "FF92400E" },
+    completed: { fill: "FFBBF7D0", text: "FF166534" },
+    reverted: { fill: "FFE5E7EB", text: "FF374151" },
+  };
+  const rnd = (n) => Math.round((Number(n) || 0) * 1e4) / 1e4;
+  // A part sitting on several lines is judged on the combined figures.
+  const totalsByPart = new Map();
+  for (const ln of lines) {
+    const t = totalsByPart.get(ln.ttUniquePartNumber) || { required: 0, issued: 0 };
+    t.required += Number(ln.qtyRequired) || 0;
+    t.issued += Number(ln.qtyIssued) || 0;
+    totalsByPart.set(ln.ttUniquePartNumber, t);
+  }
+  const statusOf = (ln) => {
+    const prev = Number(ln.qtyPreviouslyIssued) || 0;
+    const t = totalsByPart.get(ln.ttUniquePartNumber) || { required: 0, issued: 0 };
+    const over = rnd(prev + t.issued - t.required);
+    if ((Number(ln.qtyShort) || 0) > 0) return { kind: "short", tag: `SHORT ${ln.qtyShort}` };
+    if (t.required > 0 && over > 1e-9) return { kind: "over", tag: `OVER-ISSUE +${over}` };
+    if (t.required > 0 && prev + t.issued >= t.required - 1e-9) return { kind: "completed", tag: "COMPLETED" };
+    if ((Number(ln.qtyReverted) || 0) > 0 && !(Number(ln.qtyIssued) > 0)) return { kind: "reverted", tag: "REVERTED" };
+    return null;
+  };
+
   const firstDataRow = header.number + 1;
   lines.forEach((ln, i) => {
+    const st = statusOf(ln);
     const row = ws.addRow([
       i + 1,
       ln.ttUniquePartNumber || "",
@@ -873,27 +936,45 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
       ln.referenceDesignator || "",
       ln.qtyPerKit,
       ln.qtyRequired,
+      ln.qtyPreviouslyIssued || 0,
       ln.qtyIssued,
       ln.qtyShort || 0,
+      st ? st.tag : "",
       batchText(ln.batchBreakdown),
     ]);
     row.alignment = { vertical: "top", wrapText: true };
-    [1, 5, 6, 7, 8].forEach((c) => {
-      row.getCell(c).alignment = { vertical: "top", horizontal: "center" };
+    [1, 5, 6, 7, 8, 9, 10].forEach((c) => {
+      row.getCell(c).alignment = { vertical: "top", horizontal: "center", wrapText: true };
     });
     for (let c = 1; c <= LAST_COL; c += 1) row.getCell(c).border = BOX;
-    if (ln.qtyShort > 0) {
-      row.getCell(8).font = { bold: true, color: { argb: "FFB91C1C" } };
+    if (st) {
+      const { fill, text } = PALETTE[st.kind];
+      for (let c = 1; c <= LAST_COL; c += 1) {
+        row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+      }
+      row.getCell(10).font = { bold: true, color: { argb: text } };
+      if (st.kind === "short") row.getCell(9).font = { bold: true, color: { argb: text } };
     }
   });
   const lastDataRow = header.number + lines.length;
 
   if (lines.length === 0) {
     const r = ws.addRow(["This issue has no lines."]).number;
-    ws.mergeCells(`A${r}:I${r}`);
+    ws.mergeCells(`A${r}:K${r}`);
     ws.getCell(`A${r}`).alignment = { horizontal: "center" };
   } else {
-    const sum = (key) => lines.reduce((t, l) => t + (Number(l[key]) || 0), 0);
+    const sum = (key) => {
+      if (key === "qtyPreviouslyIssued") {
+        // Earlier-issued is a per-PART figure: count it once even if the part is on several lines.
+        const seen = new Set();
+        return lines.reduce((t, l) => {
+          if (seen.has(l.ttUniquePartNumber)) return t;
+          seen.add(l.ttUniquePartNumber);
+          return t + (Number(l.qtyPreviouslyIssued) || 0);
+        }, 0);
+      }
+      return lines.reduce((t, l) => t + (Number(l[key]) || 0), 0);
+    };
     const tot = ws.addRow([]);
     const r = tot.number;
     ws.mergeCells(`A${r}:E${r}`);
@@ -901,18 +982,48 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     ws.getCell(`A${r}`).alignment = { horizontal: "right" };
     [
       ["F", "qtyRequired"],
-      ["G", "qtyIssued"],
-      ["H", "qtyShort"],
+      ["G", "qtyPreviouslyIssued"],
+      ["H", "qtyIssued"],
+      ["I", "qtyShort"],
     ].forEach(([col, key]) => {
-      ws.getCell(`${col}${r}`).value = {
-        formula: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`,
-        result: sum(key),
-      };
+      ws.getCell(`${col}${r}`).value =
+        key === "qtyPreviouslyIssued"
+          ? sum(key)
+          : {
+              formula: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`,
+              result: sum(key),
+            };
       ws.getCell(`${col}${r}`).alignment = { horizontal: "center" };
     });
     tot.font = { bold: true };
     tot.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF2F7" } };
     for (let c = 1; c <= LAST_COL; c += 1) tot.getCell(c).border = BOX;
+  }
+
+  // ---- Colour key ----
+  if (lines.length) {
+    ws.addRow([]);
+    const keyRow = ws.addRow([]);
+    const kr = keyRow.number;
+    ws.mergeCells(`A${kr}:B${kr}`);
+    ws.getCell(`A${kr}`).value = "Colour key";
+    ws.getCell(`A${kr}`).font = { bold: true };
+    [
+      [3, "COMPLETED — earlier issues + this issue reach the required qty", PALETTE.completed],
+      [6, "OVER-ISSUE — more issued than required", PALETTE.over],
+      [9, "SHORT — part of the required qty is missing", PALETTE.short],
+    ].forEach(([col, text, pal]) => {
+      const c = keyRow.getCell(col);
+      c.value = text;
+      c.font = { bold: true, size: 9, color: { argb: pal.text } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: pal.fill } };
+      c.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      c.border = BOX;
+    });
+    ws.mergeCells(`C${kr}:E${kr}`);
+    ws.mergeCells(`F${kr}:H${kr}`);
+    ws.mergeCells(`I${kr}:K${kr}`);
+    keyRow.height = 30;
   }
 
   // ---- Signature lines ----
@@ -921,10 +1032,10 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
   const sig = ws.addRow([]);
   const sr = sig.number;
   ws.mergeCells(`A${sr}:C${sr}`);
-  ws.mergeCells(`F${sr}:I${sr}`);
+  ws.mergeCells(`F${sr}:K${sr}`);
   ws.getCell(`A${sr}`).value = `Issued By: ${iss.issuedBy || ""}`;
   ws.getCell(`F${sr}`).value = "Received By (Name & Signature):";
-  for (const c of [1, 2, 3, 6, 7, 8, 9]) {
+  for (const c of [1, 2, 3, 6, 7, 8, 9, 10, 11]) {
     sig.getCell(c).border = { top: THIN };
   }
   sig.font = { bold: true };
@@ -1452,6 +1563,16 @@ export const revertKitIssueStock = asyncHandler(async (req, res) => {
     done.push({ lineId: line._id, ttUniquePartNumber: line.ttUniquePartNumber, quantity: qty });
   }
 
+  // Everything that was issued is now back in stock -> mark the whole kit Reverted.
+  const fullyReverted =
+    issue.lines.every((l) => !(l.qtyIssued > 1e-9)) &&
+    issue.lines.some((l) => (l.qtyReverted || 0) > 0);
+  if (fullyReverted) {
+    issue.revertedAt = at;
+    issue.revertedBy = by;
+    issue.revertedByUser = req.user?._id || null;
+  }
+
   // Save the issue first (validated), then credit the stock.
   await issue.save();
   for (const [partId, qty] of stockBack) {
@@ -1460,8 +1581,11 @@ export const revertKitIssueStock = asyncHandler(async (req, res) => {
 
   const total = qr(done.reduce((s, d) => s + d.quantity, 0));
   res.json({
-    message: `Reverted ${done.length} part${done.length === 1 ? "" : "s"} (${total} unit${total === 1 ? "" : "s"}) — stock restored`,
+    message: fullyReverted
+      ? `Kit reverted — ${done.length} part${done.length === 1 ? "" : "s"} (${total} unit${total === 1 ? "" : "s"}) back in stock`
+      : `Reverted ${done.length} part${done.length === 1 ? "" : "s"} (${total} unit${total === 1 ? "" : "s"}) — stock restored`,
     issueId: issue._id,
+    fullyReverted,
     reverted: done,
     totalQuantity: total,
   });

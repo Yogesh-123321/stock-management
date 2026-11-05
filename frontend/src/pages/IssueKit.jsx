@@ -30,6 +30,7 @@ import {
   Send,
   History,
   Undo2,
+  RotateCcw,
   Pencil,
   X,
   Plus,
@@ -364,6 +365,29 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
   };
   const isPartial = editMode === "partial";
 
+  // Where each part stands once THIS edit is counted: what was already issued
+  // of the kit + what is being issued now, against what is required.
+  //   completed  -> already complete, or this edit completes it
+  //   over       -> would push the issued total ABOVE what is required
+  //   short      -> still missing some
+  const lineState = (p) => {
+    const issuing = Number(qtyToIssueFor(p)) || 0;
+    const prev = Number(p.previouslyIssued) || 0;
+    const total = r4(prev + issuing);
+    const required = Number(p.required) || 0;
+    if (required > 0 && total > required + 1e-9) {
+      return { kind: "over", issuing, prev, total, over: r4(total - required) };
+    }
+    if (required > 0 && total >= required - 1e-9) {
+      return { kind: "completed", issuing, prev, total, already: prev >= required - 1e-9 };
+    }
+    return { kind: "short", issuing, prev, total, short: r4(required - total) };
+  };
+
+  const lineKinds = preview.map((p) => lineState(p).kind);
+  const overIssueCount = lineKinds.filter((k) => k === "over").length;
+  const completedCount = lineKinds.filter((k) => k === "completed").length;
+
   // Parts getting a quantity > 0 in this edit (original lines + added parts).
   const partsIssuingCount =
     preview.filter((p) => qtyToIssueFor(p) > 0).length + extraLines.filter((l) => Number(l.qty) > 0).length;
@@ -566,6 +590,18 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 
           <div className="mt-4 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs">
+              {overIssueCount > 0 && (
+                <Badge variant="warning" className="gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {overIssueCount} part{overIssueCount === 1 ? "" : "s"} will be over-issued
+                </Badge>
+              )}
+              {completedCount > 0 && (
+                <Badge variant="success" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {completedCount} part{completedCount === 1 ? "" : "s"} complete
+                </Badge>
+              )}
               {isPartial ? (
                 <Badge variant="secondary" className="gap-1">
                   <CheckCircle2 className="h-3 w-3" />
@@ -597,7 +633,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                   <col className="w-[14%]" />
                   <col className="w-[12%]" />
                 </colgroup>
-                <thead className="bg-secondary/70">
+                <thead className="bg-secondary [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-secondary [&_th]:shadow-[0_1px_0_rgba(0,0,0,0.18)]">
                   <tr className="border-b border-border">
                     <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
                     <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-1.5 py-1.5 leading-tight h-auto" />
@@ -611,8 +647,20 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                   </tr>
                 </thead>
                 <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                  {sortedPreview.map((p) => (
-                    <tr key={p.ttUniquePartNumber} className="border-b border-border">
+                  {sortedPreview.map((p) => {
+                    const st = lineState(p);
+                    return (
+                    <tr
+                      key={p.ttUniquePartNumber}
+                      className={
+                        "border-b border-border " +
+                        (st.kind === "completed"
+                          ? "!bg-green-100 dark:!bg-green-950/40"
+                          : st.kind === "over"
+                            ? "!bg-amber-100 dark:!bg-amber-950/40"
+                            : "")
+                      }
+                    >
                       <td className="break-all px-1.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
                       <td className="break-words px-1.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.qtyPerKit}</td>
@@ -634,42 +682,38 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                         />
                       </td>
                       <td className="px-1.5 py-1.5">
-                        {isPartial ? (
-                          (() => {
-                            const issuing = qtyToIssueFor(p);
-                            // Still missing once earlier issues + this one are counted.
-                            const stillShort = r4(Math.max(0, p.required - (p.chainPreviouslyIssued || 0) - issuing));
-                            if (stillShort > 0) {
-                              return (
-                                <Badge variant="destructive" className="gap-1">
-                                  <XCircle className="h-3 w-3" />
-                                  Short {stillShort}
-                                </Badge>
-                              );
+                        {st.kind === "over" ? (
+                          <Badge
+                            variant="warning"
+                            className="gap-1"
+                            title={`${st.prev} already issued + ${st.issuing} issuing = ${st.total}, but only ${p.required} required`}
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            Over-issue +{st.over}
+                          </Badge>
+                        ) : st.kind === "completed" ? (
+                          <Badge
+                            variant="success"
+                            className="gap-1"
+                            title={
+                              st.already
+                                ? `Already complete — ${st.prev} of ${p.required} issued earlier`
+                                : `${st.prev} issued earlier + ${st.issuing} now = ${p.required} required`
                             }
-                            return issuing > 0 ? (
-                              <Badge variant="success" className="gap-1">
-                                <CheckCircle2 className="h-3 w-3" />
-                                OK
-                              </Badge>
-                            ) : (
-                              <span className="text-[11px] text-muted-foreground">Not issuing</span>
-                            );
-                          })()
-                        ) : p.ok ? (
-                          <Badge variant="success" className="gap-1">
+                          >
                             <CheckCircle2 className="h-3 w-3" />
-                            OK
+                            Completed
                           </Badge>
                         ) : (
-                          <Badge variant="destructive" className="gap-1">
+                          <Badge variant="destructive" className="gap-1" title={`${st.prev} issued earlier + ${st.issuing} now of ${p.required} required`}>
                             <XCircle className="h-3 w-3" />
-                            Short
+                            Short {st.short}
                           </Badge>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -808,6 +852,23 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
 // True when the part is complete as of this entry: earlier issued + issued here
 // reaches the required quantity. A part finished in kit 12 therefore stays
 // "Completed" in every later entry of the kit (12-A, 12-B ...).
+// How far the part's issued total is ABOVE what the kit requires, counting
+// everything issued by earlier entries plus this entry:
+//   (earlier issued + issued here) - required
+// It does NOT matter whether this entry issued anything: a part that earlier
+// entries already over-issued stays flagged. When the same part sits on more
+// than one line of the entry, the lines are added together first.
+export function lineOverIssue(l, allLines) {
+  const same = (allLines && allLines.length
+    ? allLines.filter((x) => x.ttUniquePartNumber === l.ttUniquePartNumber)
+    : [l]);
+  const prev = Number(l.qtyPreviouslyIssued || 0);
+  const issued = same.reduce((n, x) => n + Number(x.qtyIssued || 0), 0);
+  const required = same.reduce((n, x) => n + Number(x.qtyRequired || 0), 0);
+  const over = Math.round((prev + issued - required) * 1e4) / 1e4;
+  return required > 0 && over > 1e-9 ? over : 0;
+}
+
 export function lineCompletedHere(l) {
   const prev = Number(l.qtyPreviouslyIssued || 0);
   const issued = Number(l.qtyIssued || 0);
@@ -815,7 +876,7 @@ export function lineCompletedHere(l) {
   return required > 0 && prev + issued >= required - 1e-6;
 }
 
-function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
+function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }) {
   const lines = issue.lines || [];
   const { sort, toggle, apply } = useSort();
   const sortedLines = apply(lines, {
@@ -846,6 +907,12 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
               <PackageOpen className="h-4 w-4 text-accent" />
               {issue.kitName}
+              {issue.revertedAt && (
+                <Badge variant="destructive" className="gap-1">
+                  <RotateCcw className="h-3 w-3" />
+                  Reverted
+                </Badge>
+              )}
               {issue.hasShortage && (
                 <Badge variant="destructive" className="gap-1">
                   <AlertTriangle className="h-3 w-3" />
@@ -919,9 +986,9 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
 
           <p className="text-xs text-muted-foreground">{lines.length} line(s) on this issue</p>
 
-          <div className="overflow-x-auto rounded-lg border border-border">
+          <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
             <table className="w-full text-sm">
-              <thead className="bg-secondary/70">
+              <thead className="bg-secondary [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-secondary [&_th]:shadow-[0_1px_0_rgba(0,0,0,0.18)]">
                 <tr className="border-b border-border">
                   <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                   <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
@@ -946,12 +1013,18 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
                   // Part is complete as of this entry (prev. issued + issued >= required),
                   // including when it was already completed by an earlier kit.
                   const completedHere = lineCompletedHere(l);
+                  // Issued more than required once earlier issues are counted.
+                  const overBy = lineOverIssue(l, lines);
                   return (
                   <tr
                     key={l._id}
                     className={
                       "border-b border-border " +
-                      (completedHere ? "!bg-green-100 dark:!bg-green-950/40" : "")
+                      (overBy > 0
+                        ? "!bg-amber-100 dark:!bg-amber-950/40"
+                        : completedHere
+                          ? "!bg-green-100 dark:!bg-green-950/40"
+                          : "")
                     }
                   >
                     <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
@@ -986,6 +1059,17 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                       {l.qtyShort > 0 ? (
                         <span className="text-destructive">{l.qtyShort}</span>
+                      ) : overBy > 0 ? (
+                        <span
+                          className="font-semibold text-amber-700 dark:text-amber-400"
+                          title={`${l.qtyPreviouslyIssued || 0} issued earlier + ${l.qtyIssued || 0} issued here, but the kit only requires ${l.qtyRequired}${
+                            lines.filter((x) => x.ttUniquePartNumber === l.ttUniquePartNumber).length > 1
+                              ? " on this line (this part is on several lines — totals are combined)"
+                              : ""
+                          }`}
+                        >
+                          Over-issue +{overBy}
+                        </span>
                       ) : completedHere ? (
                         <span
                           className="font-semibold text-green-700 dark:text-green-400"
@@ -1017,6 +1101,18 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert }) {
             )}
             {downloading ? "Preparing…" : "Download Excel"}
           </Button>
+          {onRevertAll && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onRevertAll}
+              disabled={!!issue.revertedAt || !lines.some((l) => Number(l.qtyIssued) > 0)}
+              title="Put every part back into main stock and mark the kit Reverted"
+            >
+              <RotateCcw className="mr-1.5 h-4 w-4 text-destructive" />
+              Revert entire kit
+            </Button>
+          )}
           {onRevert && (
             <Button type="button" variant="outline" onClick={onRevert} disabled={!lines.some((l) => Number(l.qtyIssued) > 0)}>
               <Undo2 className="mr-1.5 h-4 w-4 text-destructive" />
@@ -1048,6 +1144,7 @@ function RevertStockDialog({ issue, onClose, onDone }) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1114,14 +1211,13 @@ function RevertStockDialog({ issue, onClose, onDone }) {
     .filter(Boolean);
   const totalUnits = pickedLines.reduce((n, l) => n + (Number(picked[String(l._id)]) || 0), 0);
 
+  // Any change to the selection cancels a pending confirmation.
+  useEffect(() => {
+    setConfirming(false);
+  }, [picked]);
+
   const submit = async () => {
     if (!pickedLines.length || problems.length) return;
-    const ok = window.confirm(
-      `Revert ${pickedLines.length} part${pickedLines.length === 1 ? "" : "s"} (${
-        Math.round(totalUnits * 1000) / 1000
-      } units) from ${issue.issueCode || issue.kitName}?\n\nThey will be added back to the main stock.`
-    );
-    if (!ok) return;
     setSaving(true);
     try {
       const { data } = await api.post(`/kits/issues/${issue._id}/revert`, {
@@ -1296,6 +1392,20 @@ function RevertStockDialog({ issue, onClose, onDone }) {
             />
           </div>
 
+          {confirming && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm">
+              <div className="flex items-center gap-1.5 font-semibold text-destructive">
+                <AlertTriangle className="h-4 w-4" /> Are you sure?
+              </div>
+              <p className="mt-1 text-xs text-foreground">
+                {pickedLines.length} part{pickedLines.length === 1 ? "" : "s"} (
+                {Math.round(totalUnits * 1000) / 1000} units) will be taken off{" "}
+                <b>{issue.issueCode || issue.kitName}</b> and added back to the main stock. This changes
+                stock and cannot be undone from here.
+              </p>
+            </div>
+          )}
+
           {problems.length > 0 && (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {problems.slice(0, 4).map((p) => (
@@ -1314,21 +1424,106 @@ function RevertStockDialog({ issue, onClose, onDone }) {
               : "Nothing selected"}
           </p>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={submit}
-              disabled={saving || !pickedLines.length || problems.length > 0}
-            >
-              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Undo2 className="mr-1.5 h-4 w-4" />}
-              {saving ? "Reverting…" : allPicked ? "Revert all parts" : "Revert selected"}
-            </Button>
+            {confirming ? (
+              <>
+                <Button type="button" variant="outline" onClick={() => setConfirming(false)} disabled={saving}>
+                  No, go back
+                </Button>
+                <Button type="button" variant="destructive" onClick={submit} disabled={saving}>
+                  {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Undo2 className="mr-1.5 h-4 w-4" />}
+                  {saving ? "Reverting…" : "Yes, revert now"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setConfirming(true)}
+                  disabled={saving || !pickedLines.length || problems.length > 0}
+                >
+                  <Undo2 className="mr-1.5 h-4 w-4" />
+                  {allPicked ? "Revert all parts" : "Revert selected"}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </ResizablePanel>
+    </div>
+  );
+}
+
+/* Confirmation for "Revert entire kit" — nothing happens until the user says yes. */
+function RevertWholeKitDialog({ issue, onClose, onDone }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const issued = (issue.lines || []).filter((l) => Number(l.qtyIssued) > 0);
+  const units = Math.round(issued.reduce((n, l) => n + Number(l.qtyIssued), 0) * 1000) / 1000;
+
+  const confirm = async () => {
+    setSaving(true);
+    try {
+      const { data } = await api.post(`/kits/issues/${issue._id}/revert`, { all: true, reason });
+      toast.success(data?.message || "Kit reverted");
+      onDone?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not revert this kit");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-semibold">Revert the entire kit?</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              <b className="text-foreground">{issue.kitName}</b>{" "}
+              <span className="font-mono-tech">({issue.issueCode || "—"})</span>
+              {issue.vendor?.companyName ? ` issued to ${issue.vendor.companyName}` : ""}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+          All <b>{issued.length}</b> part{issued.length === 1 ? "" : "s"} (<b>{units}</b> units) will be added back
+          to the main stock and this kit will be marked <b>Reverted</b>. This changes stock and cannot be
+          undone from here.
+        </div>
+
+        <div className="mt-3">
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Reason (optional)
+          </label>
+          <Textarea
+            rows={2}
+            value={reason}
+            maxLength={300}
+            autoFocus
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Kit not sent after all / issued to the wrong vendor"
+          />
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            No, keep it
+          </Button>
+          <Button type="button" variant="destructive" onClick={confirm} disabled={saving}>
+            {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-1.5 h-4 w-4" />}
+            {saving ? "Reverting…" : "Yes, revert entire kit"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1358,6 +1553,7 @@ function KitsPanel({
   const [editingIssue, setEditingIssue] = useState(null);
   const [previewingIssue, setPreviewingIssue] = useState(null);
   const [revertingIssue, setRevertingIssue] = useState(null);
+  const [revertingWhole, setRevertingWhole] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
 
   // ---- Saved kits (drafts) state ----
@@ -1422,6 +1618,15 @@ function KitsPanel({
   };
 
   // -- Issued kits actions --
+  // Opens the confirmation; nothing is reverted until the user confirms there.
+  const revertWholeKit = (issue) => {
+    if (!(issue.lines || []).some((l) => Number(l.qtyIssued) > 0)) {
+      toast.error("Nothing on this kit is left to revert");
+      return;
+    }
+    setRevertingWhole(issue);
+  };
+
   // -- Saved kits actions --
   const issueNow = async (draft) => {
     const ok = window.confirm(
@@ -1557,6 +1762,16 @@ function KitsPanel({
                               View only
                             </Badge>
                           )}
+                          {iss.revertedAt && (
+                            <Badge
+                              variant="destructive"
+                              className="gap-1"
+                              title={`Whole kit reverted to stock on ${fmtDateTime(iss.revertedAt)}${iss.revertedBy ? ` by ${iss.revertedBy}` : ""}`}
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Reverted
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="truncate">{iss.vendor?.companyName || "—"}</TableCell>
@@ -1596,6 +1811,24 @@ function KitsPanel({
                               disabled={busyIssueId !== null || iss.isEditable === false}
                             >
                               <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title={
+                                iss.revertedAt
+                                  ? "This kit has already been fully reverted"
+                                  : "Revert entire kit — put every part back into main stock and mark the kit Reverted"
+                              }
+                              onClick={() => revertWholeKit(iss)}
+                              disabled={
+                                !!iss.revertedAt ||
+                                !iss.lines?.some((l) => Number(l.qtyIssued) > 0) ||
+                                busyIssueId !== null
+                              }
+                            >
+                              <RotateCcw className="h-3.5 w-3.5 text-destructive" />
                             </Button>
                             <Button
                               type="button"
@@ -1756,6 +1989,15 @@ function KitsPanel({
         <KitIssuePreviewDialog
           issue={previewingIssue}
           onClose={() => setPreviewingIssue(null)}
+          onRevertAll={
+            canManage || canIssue
+              ? () => {
+                  const iss = previewingIssue;
+                  setPreviewingIssue(null);
+                  revertWholeKit(iss);
+                }
+              : undefined
+          }
           onRevert={
             canManage || canIssue
               ? () => {
@@ -1777,6 +2019,13 @@ function KitsPanel({
         />
       )}
 
+      {revertingWhole && (
+        <RevertWholeKitDialog
+          issue={revertingWhole}
+          onClose={() => setRevertingWhole(null)}
+          onDone={() => loadIssues()}
+        />
+      )}
       {revertingIssue && (
         <RevertStockDialog
           issue={revertingIssue}
@@ -2316,9 +2565,9 @@ export default function IssueKit() {
                   )}
                 </div>
 
-                <div className="overflow-x-auto rounded-lg border border-border">
+                <div className="max-h-[65vh] overflow-auto rounded-lg border border-border">
                   <table className="w-full text-sm">
-                    <thead className="bg-secondary/70">
+                    <thead className="bg-secondary [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-secondary [&_th]:shadow-[0_1px_0_rgba(0,0,0,0.18)]">
                       <tr className="border-b border-border">
                         <SortableHead label="TT part #" sortKey="partNo" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
                         <SortableHead label="Description" sortKey="description" sort={sort} onSort={toggle} className="px-2.5 py-1.5 h-auto whitespace-nowrap" />
@@ -2333,8 +2582,16 @@ export default function IssueKit() {
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
-                      {sortedPreview.map((p) => (
-                        <tr key={p._id} className="border-b border-border">
+                      {sortedPreview.map((p) => {
+                        // Earlier issues of this kit + what is being issued now, against what is required.
+                        const issuingNow = Number(qtyToIssueFor(p)) || 0;
+                        const overBy = r4((Number(p.previouslyIssued) || 0) + issuingNow - (Number(p.required) || 0));
+                        const isOver = p.required > 0 && overBy > 1e-9;
+                        return (
+                        <tr
+                          key={p._id}
+                          className={"border-b border-border " + (isOver ? "!bg-amber-100 dark:!bg-amber-950/40" : "")}
+                        >
                           <td className="px-2.5 py-1.5 text-xs font-mono-tech">
                             {p.ttUniquePartNumber}
                           </td>
@@ -2381,7 +2638,18 @@ export default function IssueKit() {
                             {formatBatchBreakdown(previewBatchBreakdown(p.batches, qtyToIssueFor(p)))}
                           </td>
                           <td className="px-2.5 py-1.5">
-                            {p.ok ? (
+                            {isOver ? (
+                              <Badge
+                                variant="warning"
+                                className="gap-1"
+                                title={`${p.previouslyIssued} already issued + ${issuingNow} issuing = ${r4(
+                                  (Number(p.previouslyIssued) || 0) + issuingNow
+                                )}, but only ${p.required} required`}
+                              >
+                                <AlertTriangle className="h-3 w-3" />
+                                Over-issue +{overBy}
+                              </Badge>
+                            ) : p.ok ? (
                               <Badge variant="success" className="gap-1">
                                 <CheckCircle2 className="h-3 w-3" />
                                 OK
@@ -2394,7 +2662,8 @@ export default function IssueKit() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

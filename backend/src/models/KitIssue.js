@@ -134,6 +134,12 @@ const kitIssueSchema = new mongoose.Schema(
     hasShortage: { type: Boolean, default: false },
 
     lines: { type: [kitIssueLineSchema], default: [] },
+
+    // Set when EVERY part of this issue has been put back into stock
+    // ("Revert entire kit", or partial reverts that add up to everything).
+    revertedAt: { type: Date, default: null },
+    revertedBy: { type: String, trim: true, default: "" },
+    revertedByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true }
 );

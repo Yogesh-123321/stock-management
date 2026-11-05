@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ import {
   History,
   Eye,
   Copy,
+  AlertTriangle,
 } from "lucide-react";
 
 const fmtDate = (d) =>
@@ -73,6 +74,21 @@ const toEditorRows = (items = []) =>
     remarks: it.remarks || "",
     matchedPart: it.matchedPart || null,
   }));
+
+/* A kit template can list each part only once. Returns Map(code -> [row numbers])
+   for every TT part number that appears on more than one row. */
+const partCode = (r) => String(r.ttUniquePartNumber || "").trim().toUpperCase();
+const findDuplicateParts = (rows = []) => {
+  const seen = new Map();
+  rows.forEach((r, i) => {
+    const c = partCode(r);
+    if (!c) return;
+    seen.set(c, [...(seen.get(c) || []), i + 1]);
+  });
+  return new Map([...seen].filter(([, list]) => list.length > 1));
+};
+const describeDuplicates = (dups) =>
+  [...dups].map(([code, rows]) => `${code} (rows ${rows.join(", ")})`).join("; ");
 
 /* ------------------------------------------------------------------ *
  * Create / edit a kit template — manual item table, with an "Import
@@ -133,8 +149,13 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
       setKitCode(data.kitCode || "");
       setRevision(data.revision || "");
       setDescription(data.description || "");
-      setItems(toEditorRows(data.items));
+      const copied = toEditorRows(data.items);
+      setItems(copied);
       toast.success(`Copied "${data.kitName}" — review before saving`);
+      const dups = findDuplicateParts(copied);
+      if (dups.size) {
+        toast.error(`Duplicate parts found: ${describeDuplicates(dups)}. Fix them before saving.`, { duration: 8000 });
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || "Could not load that kit template to copy");
     } finally {
@@ -147,6 +168,28 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
     setItems((rows) => rows.map((r) => (r._key === key ? { ...r, [field]: value } : r)));
 
   const addRow = () => setItems((rows) => [...rows, blankItem()]);
+
+  // Every part may be listed only once in a kit template.
+  const duplicateParts = useMemo(() => findDuplicateParts(items), [items]);
+  const focusValue = useRef({}); // rowKey -> part number when the cell was focused
+
+  // When someone leaves a part-number cell holding a part that is ALREADY on
+  // another row, refuse it: warn and clear the cell.
+  const guardDuplicate = (key) => {
+    const before = focusValue.current[key];
+    const row = items.find((r) => r._key === key);
+    if (!row) return;
+    const code = partCode(row);
+    if (!code || code === before) return; // empty, or untouched (e.g. imported rows)
+    const otherIdx = items.findIndex((r) => r._key !== key && partCode(r) === code);
+    if (otherIdx >= 0) {
+      toast.error(
+        `${code} is already in this kit (row ${otherIdx + 1}). A part can be added only once — change that row's quantity instead.`,
+        { duration: 6000 }
+      );
+      setItem(key, "ttUniquePartNumber", before || "");
+    }
+  };
 
   // Live "Matched" / "Not in master" preview as the admin types a part
   // number into a row -- without this, a row typed in by hand (as opposed
@@ -202,9 +245,17 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
     // already typed something in — never silently overwrite their input.
     if (parsed.kitName && !kitName.trim()) setKitName(parsed.kitName);
     if (parsed.kitCode && !kitCode.trim()) setKitCode(parsed.kitCode);
-    setItems(toEditorRows(parsed.rows));
+    const imported = toEditorRows(parsed.rows);
+    setItems(imported);
     setShowImport(false);
     toast.success(`${parsed.rows.length} row(s) loaded into the item table — review before saving`);
+    const dups = findDuplicateParts(imported);
+    if (dups.size) {
+      toast.error(
+        `The sheet lists the same part more than once: ${describeDuplicates(dups)}. A part can appear only once — fix the highlighted rows before saving.`,
+        { duration: 9000 }
+      );
+    }
   };
 
   const submit = async (e) => {
@@ -219,6 +270,14 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
     );
     if (usableItems.length === 0) {
       toast.error("Add at least one item to the kit");
+      return;
+    }
+    const dupsOnSave = findDuplicateParts(usableItems);
+    if (dupsOnSave.size) {
+      toast.error(
+        `A part can appear only once in a kit. Duplicate: ${describeDuplicates(dupsOnSave)}`,
+        { duration: 8000 }
+      );
       return;
     }
     for (const r of usableItems) {
@@ -391,6 +450,19 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                 </div>
               </div>
 
+              {duplicateParts.size > 0 && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <b>The same part is listed more than once:</b> {describeDuplicates(duplicateParts)}.
+                    <div className="text-foreground">
+                      A kit can contain each part only once — delete the repeated rows (or add their
+                      quantities into one row). Saving is blocked until this is fixed.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-sm">
                   <thead className="bg-secondary/70">
@@ -436,14 +508,31 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                         </td>
                         <td className="px-1.5 py-1 w-[150px]">
                           <Input
-                            className="h-8 text-xs font-mono-tech"
+                            className={`h-8 text-xs font-mono-tech ${
+                              duplicateParts.has(partCode(r))
+                                ? "border-destructive bg-destructive/5 focus-visible:ring-destructive"
+                                : ""
+                            }`}
                             value={r.ttUniquePartNumber}
+                            onFocus={() => {
+                              focusValue.current[r._key] = r.ttUniquePartNumber;
+                            }}
                             onChange={(e) =>
                               setItem(r._key, "ttUniquePartNumber", e.target.value.toUpperCase())
                             }
+                            onBlur={() => guardDuplicate(r._key)}
                             placeholder="required"
                             disabled={locked}
                           />
+                          {duplicateParts.has(partCode(r)) && (
+                            <div className="mt-0.5 text-[10px] font-medium text-destructive">
+                              Duplicate — also on row{" "}
+                              {duplicateParts
+                                .get(partCode(r))
+                                .filter((n) => n !== items.indexOf(r) + 1)
+                                .join(", ")}
+                            </div>
+                          )}
                         </td>
                         <td className="px-1.5 py-1 w-[130px]">
                           <Input
@@ -627,7 +716,15 @@ function TemplateIssuesDialog({ template, onClose }) {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-1">
-                          {shortLines.length > 0 ? (
+                          {iss.revertedAt && (
+                            <Badge
+                              variant="destructive"
+                              title={`Whole kit reverted to stock on ${new Date(iss.revertedAt).toLocaleString("en-IN")}${iss.revertedBy ? ` by ${iss.revertedBy}` : ""}`}
+                            >
+                              Reverted
+                            </Badge>
+                          )}
+                          {iss.revertedAt ? null : shortLines.length > 0 ? (
                             <Badge
                               variant="destructive"
                               className="gap-1"
