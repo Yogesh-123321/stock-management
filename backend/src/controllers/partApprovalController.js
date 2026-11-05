@@ -2,6 +2,7 @@ import PartApprovalRequest from "../models/PartApprovalRequest.js";
 import { notifyApprovers, notifyRequester } from "../utils/notify.js";
 import { createPartFromApprovedRequest } from "../utils/stockBooking.js";
 import { uploadFileToCloudinary } from "../config/cloudinary.js";
+import Part from "../models/Part.js";
 
 const partLabel = (doc) =>
   [doc.newPart?.itemDescription, doc.newPart?.manufacturerPartNumber]
@@ -342,7 +343,17 @@ export const updateRequest = async (req, res) => {
         .status(400)
         .json({ message: "Stock is already booked against this request — it cannot be edited" });
 
-    const incoming = req.body.newPart || {};
+    // The edit dialog now sends multipart/form-data (so a replacement photo
+    // can ride along), in which case `newPart` arrives as a JSON string.
+    // Plain JSON bodies (nested object) still work unchanged.
+    let incoming = req.body.newPart || {};
+    if (typeof incoming === "string") {
+      try {
+        incoming = JSON.parse(incoming);
+      } catch {
+        return res.status(400).json({ message: "Invalid part details" });
+      }
+    }
     for (const f of EDITABLE_PART_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(incoming, f)) {
         doc.newPart[f] = String(incoming[f] ?? "").trim();
@@ -354,6 +365,18 @@ export const updateRequest = async (req, res) => {
     // price is numeric, so it's handled separately from the string fields above.
     if (Object.prototype.hasOwnProperty.call(incoming, "price")) {
       doc.newPart.price = incoming.price === "" || incoming.price == null ? null : Number(incoming.price);
+    }
+
+    // Approver may replace the part's photo. Uploaded straight to Cloudinary;
+    // if the part was already created from this request (approved), its
+    // photo is updated too so the Parts master shows the new image.
+    const photoFile = req.files?.photo?.[0];
+    if (photoFile) {
+      const photoUrl = await uploadFileToCloudinary(photoFile, { category: "parts/photos" });
+      doc.newPart.photoUrl = photoUrl;
+      if (doc.createdPart) {
+        await Part.findByIdAndUpdate(doc.createdPart, { photoUrl });
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "proposedQuantity")) {

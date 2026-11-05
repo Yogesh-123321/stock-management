@@ -12,6 +12,7 @@ import {
   getIqcStockEntries,
   submitIqcReport,
   submitBulkIqcReport,
+  addIqcLineToInvoice,
 } from "../controllers/iqcInspectionController.js";
 import { protect, requirePermission } from "../middleware/auth.js";
 import { uploadStockSheet } from "../middleware/upload.js";
@@ -37,6 +38,8 @@ router.get("/iqc-stock", protect, getIqcStockEntries);
 // Bulk approve: one checklist/template applied to many lines at once.
 router.post("/iqc-report/bulk", protect, submitBulkIqcReport);
 router.post("/:id/iqc-report", protect, submitIqcReport);
+// Add another part line against a bill that is already in IQC stock.
+router.post("/iqc-stock/add-line", protect, requirePermission("receive.manage"), addIqcLineToInvoice);
 
 router.get("/", getStockEntries);
 // Every other mutating route in this file requires `protect` — this one

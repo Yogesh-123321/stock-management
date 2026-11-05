@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { SortableHead, useSort } from "@/components/SortableHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import {
   Boxes,
   Sparkles,
   RefreshCw,
+  Trash2,
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
@@ -1209,6 +1211,9 @@ function BillCell({ row }) {
 }
 
 function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
+  const { can } = useAuth();
+  const canDelete = can?.("part.approve");
+  const [deletingId, setDeletingId] = useState(null);
   const [rows, setRows] = useState([]);
   const sort = useSort();
   const sortedRows = sort.apply(rows, {
@@ -1251,6 +1256,29 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
       toast.error(err?.response?.data?.message || "Could not regenerate the extraction");
     } finally {
       setRegenId(null);
+    }
+  };
+
+  // Deleting an invoice also deletes every stock line booked against it
+  // (and takes accepted quantity back out of main stock) — admin only.
+  const deleteRow = async (row) => {
+    const label = row.invoiceNumber || "this invoice";
+    const ok = window.confirm(
+      `Delete tax invoice ${label}?\n\nEvery stock entry booked against it will be deleted too. Quantity that was already accepted into main stock will be taken back out, and each part's history will note that the invoice was deleted.\n\nThis cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingId(row._id);
+    try {
+      const { data } = await api.delete(`/tax-invoices/${row._id}`);
+      toast.success(
+        `Invoice deleted — ${data.stockLinesDeleted || 0} stock line${data.stockLinesDeleted === 1 ? "" : "s"} removed`
+      );
+      setRows((prev) => prev.filter((r) => r._id !== row._id));
+      if (stockFor?._id === row._id) setStockFor(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not delete the invoice");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -1434,6 +1462,18 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
                           <Download className="mr-1 h-4 w-4" /> Open
                         </a>
                       </Button>
+                      {canDelete && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={deletingId === row._id}
+                          onClick={() => deleteRow(row)}
+                          title="Delete this invoice and the stock booked against it"
+                        >
+                          <Trash2 className="mr-1 h-4 w-4 text-destructive" />
+                          {deletingId === row._id ? "Deleting…" : "Delete"}
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>

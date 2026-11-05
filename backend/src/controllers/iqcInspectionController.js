@@ -2,6 +2,8 @@ import asyncHandler from "express-async-handler";
 import StockEntry from "../models/StockEntry.js";
 import IqcTemplate from "../models/IqcTemplate.js";
 import Part from "../models/Part.js";
+import TaxInvoice from "../models/TaxInvoice.js";
+import { generateBatchCode } from "../utils/batchCode.js";
 
 const populateEntry = (query) =>
   query.populate([
@@ -388,4 +390,77 @@ export const submitBulkIqcReport = asyncHandler(async (req, res) => {
   }
 
   res.json({ approved, failed });
+});
+
+/*
+  POST /api/stock-entries/iqc-stock/add-line
+  Body: { invoiceId, partId, quantityReceived, unit?, price?, remarks? }
+
+  Adds one more line of material against a tax invoice that is already in
+  the IQC stock window — for a part that was on the bill but never got
+  logged at stock entry. The line is created straight in "in_iqc_stock"
+  under that invoice (same vendor / PO-PI / lot code as the bill), so it
+  is inspected like any other line and is only credited to main stock once
+  an IQC report accepts it. Nothing touches Part.quantityInStock here.
+*/
+export const addIqcLineToInvoice = asyncHandler(async (req, res) => {
+  const { invoiceId, partId, quantityReceived, unit, price, remarks } = req.body;
+
+  if (!invoiceId || !partId) {
+    res.status(400);
+    throw new Error("invoiceId and partId are required");
+  }
+  const qty = Number(quantityReceived);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    res.status(400);
+    throw new Error("Enter a quantity greater than zero");
+  }
+  let rate = null;
+  if (price !== "" && price != null) {
+    rate = Number(price);
+    if (!Number.isFinite(rate) || rate < 0) {
+      res.status(400);
+      throw new Error("Price must be zero or more");
+    }
+  }
+
+  const invoice = await TaxInvoice.findById(invoiceId);
+  if (!invoice) {
+    res.status(404);
+    throw new Error("Tax invoice not found");
+  }
+  const part = await Part.findById(partId);
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+
+  // Keep the new line in the same receiving session as the rest of this bill.
+  const sibling = await StockEntry.findOne({ appliedVia: invoice._id }).select("receivingSession");
+
+  part.vendors.addToSet(invoice.vendor);
+  if (!part.unit && unit) part.unit = String(unit).trim();
+  await part.save();
+
+  const batchCode = generateBatchCode(invoice.invoiceDate);
+  const entry = await StockEntry.create({
+    vendor: invoice.vendor,
+    purchaseOrder: invoice.purchaseOrder || null,
+    receivingSession: sibling?.receivingSession || null,
+    part: part._id,
+    quantityReceived: qty,
+    matchType: "existing_part_number",
+    enteredBy: req.user?.name || req.user?.username || "",
+    remarks: String(remarks || "").trim(),
+    unit: String(unit || "").trim() || part.unit || "",
+    price: rate,
+    stockApplied: false,
+    iqcStatus: "in_iqc_stock",
+    appliedVia: invoice._id,
+    appliedAt: new Date(),
+    ...(batchCode ? { batchCode } : {}),
+  });
+
+  const populated = await populateEntry(StockEntry.findById(entry._id));
+  res.status(201).json(populated);
 });

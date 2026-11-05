@@ -7,6 +7,32 @@ import mongoose from "mongoose";
   whenever photoUrl/datasheetUrl actually change value; read back by
   GET /api/parts/:id/document-history (partController.js).
 */
+/*
+  One entry per tax invoice that was deleted while this part had stock booked
+  against it. The stock lines themselves are removed with the invoice, so
+  this is the only trace left — shown in the part's "Stock movements" history
+  (see getPartHistory in partController.js) so the removal is never silent.
+*/
+const invoiceDeletionSchema = new mongoose.Schema(
+  {
+    invoiceNumber: { type: String, trim: true, default: "" },
+    invoiceDate: { type: Date, default: null },
+    vendorName: { type: String, trim: true, default: "" },
+    quantity: { type: Number, default: 0 },
+    unit: { type: String, trim: true, default: "" },
+    price: { type: Number, default: null },
+    batchCode: { type: String, trim: true, default: "" },
+    // Where the line stood when it was removed (in_iqc_stock | accepted |
+    // rejected). Only "accepted" lines had been credited to main stock, so
+    // only those reduced quantityInStock on deletion.
+    iqcStatus: { type: String, trim: true, default: "" },
+    removedFromStock: { type: Boolean, default: false },
+    deletedBy: { type: String, trim: true, default: "" },
+    deletedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const documentHistoryEntrySchema = new mongoose.Schema(
   {
     field: { type: String, enum: ["photo", "datasheet"], required: true },
@@ -85,6 +111,10 @@ const partSchema = new mongoose.Schema(
     // see documentHistoryEntrySchema above. Populated by updatePart, read
     // by GET /api/parts/:id/document-history.
     documentHistory: { type: [documentHistoryEntrySchema], default: [] },
+
+    // Stock lines removed because their tax invoice was deleted — see
+    // invoiceDeletionSchema above. Read by GET /api/parts/:id/history.
+    invoiceDeletions: { type: [invoiceDeletionSchema], default: [] },
 
     // Free-text notes about the part. Pre-filled from the "remarks for the
     // approver" the operator typed when raising the new-part / alternate-part

@@ -727,3 +727,127 @@ export const uploadTaxInvoice = asyncHandler(async (req, res) => {
   const populated = await invoice.populate("vendor purchaseOrder");
   res.status(201).json({ ...populated.toObject(), reconciliation, iqcPending });
 });
+
+/*
+  DELETE /api/tax-invoices/:id   — ADMIN ONLY
+
+  Deletes a tax invoice together with every stock line booked against it
+  (the lines it moved into IQC, plus any added to it later):
+
+    - lines already ACCEPTED in IQC were credited to the part's main stock,
+      so that quantity is taken back out of quantityInStock
+    - lines still in IQC stock or rejected never touched main stock, so
+      they are simply removed
+    - each affected part gets an entry in Part.invoiceDeletions, which is
+      what the part's "Stock movements" history shows ("Tax invoice
+      deleted") — the removal always leaves a trace
+
+  Refused (nothing changes) when:
+    - a payment is recorded against the invoice — delete the payment on the
+      Billing page first
+    - an accepted line's quantity has already been used (issued in a kit /
+      to R&D / as a sample), so taking it back would push stock below zero —
+      revert that issue first
+
+  A PO/PI that was auto-closed because its quantities matched is re-opened,
+  since the stock behind that match no longer exists.
+*/
+export const deleteTaxInvoice = asyncHandler(async (req, res) => {
+  const invoice = await TaxInvoice.findById(req.params.id).populate("vendor", "companyName");
+  if (!invoice) {
+    res.status(404);
+    throw new Error("Tax invoice not found");
+  }
+
+  const pay = invoice.payment || {};
+  if (pay.status === "paid" || pay.status === "partial" || Number(pay.paidAmount) > 0) {
+    res.status(409);
+    throw new Error(
+      "A payment is recorded against this invoice. Delete the payment on the Billing page first, then delete the invoice."
+    );
+  }
+
+  const entries = await StockEntry.find({ appliedVia: invoice._id }).populate(
+    "part",
+    "ttUniquePartNumber itemDescription quantityInStock"
+  );
+
+  // Work out the stock effect per part up front, so a refusal changes nothing.
+  const takeBack = new Map(); // partId -> { part, qty }
+  for (const e of entries) {
+    if (!e.stockApplied || !e.part) continue;
+    const key = String(e.part._id);
+    const row = takeBack.get(key) || { part: e.part, qty: 0 };
+    row.qty += Number(e.quantityReceived) || 0;
+    takeBack.set(key, row);
+  }
+  const short = [...takeBack.values()].filter(
+    (r) => (Number(r.part.quantityInStock) || 0) + 1e-9 < r.qty
+  );
+  if (short.length) {
+    res.status(409);
+    throw new Error(
+      `Part of this invoice's stock has already been used, so it cannot be taken back: ${short
+        .map(
+          (r) =>
+            `${r.part.ttUniquePartNumber} (needs ${r.qty}, only ${r.part.quantityInStock} in stock)`
+        )
+        .join("; ")}. Revert the issue(s) first.`
+    );
+  }
+
+  const deletedBy = req.user?.name || req.user?.username || "";
+  const vendorName = invoice.vendor?.companyName || "";
+
+  for (const e of entries) {
+    if (e.part) {
+      const partDoc = await Part.findById(e.part._id);
+      if (partDoc) {
+        const qty = Number(e.quantityReceived) || 0;
+        if (e.stockApplied) {
+          partDoc.quantityInStock = Math.max(0, (Number(partDoc.quantityInStock) || 0) - qty);
+        }
+        partDoc.invoiceDeletions.push({
+          invoiceNumber: invoice.invoiceNumber || "",
+          invoiceDate: invoice.invoiceDate || null,
+          vendorName,
+          quantity: qty,
+          unit: e.unit || "",
+          price: e.price ?? null,
+          batchCode: e.batchCode || "",
+          iqcStatus: e.iqcStatus || "",
+          removedFromStock: !!e.stockApplied,
+          deletedBy,
+          deletedAt: new Date(),
+        });
+        await partDoc.save();
+      }
+    }
+    await e.deleteOne();
+  }
+
+  // Re-open a PO/PI that was auto-closed on the strength of this delivery.
+  if (invoice.purchaseOrder) {
+    const po = await PurchaseOrder.findById(invoice.purchaseOrder);
+    const ids = [invoice.purchaseOrder];
+    if (po?.linkedDocument) ids.push(po.linkedDocument);
+    await PurchaseOrder.updateMany(
+      {
+        _id: { $in: ids },
+        lifecycleStatus: "closed",
+        closedReason: /^Auto-closed/,
+      },
+      { lifecycleStatus: "open", closedAt: null, closedReason: "" }
+    );
+  }
+
+  await invoice.deleteOne();
+
+  res.json({
+    message: "Tax invoice deleted",
+    _id: invoice._id,
+    invoiceNumber: invoice.invoiceNumber || "",
+    stockLinesDeleted: entries.length,
+    totalQuantityRemoved: entries.reduce((n, e) => n + (Number(e.quantityReceived) || 0), 0),
+  });
+});

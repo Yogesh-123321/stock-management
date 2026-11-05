@@ -12,6 +12,8 @@ import { SortableHead, useSort } from "@/components/SortableHead";
 import { useAuth } from "@/lib/auth";
 import IqcReportForm from "@/components/IqcReportForm";
 import IqcReferenceViewer from "@/components/IqcReferenceViewer";
+import AlternatePartPicker from "@/components/AlternatePartPicker";
+import { Plus } from "lucide-react";
 import { ClipboardList, ClipboardCheck, ListChecks, XCircle, CheckCircle2, X, Search, FileText, ChevronDown, ChevronRight } from "lucide-react";
 
 const TABS = [
@@ -222,11 +224,115 @@ function BulkIqcPanel({ selected, templates, onDone, onCancel }) {
 }
 
 /*
+  "Add part" panel — adds one more part line against a bill that is already
+  in IQC stock (for something on the bill that was missed at stock entry).
+  The line lands in IQC stock under the same invoice, ready for its own IQC
+  report; main stock is only credited once that report accepts it.
+*/
+function AddPartToBillPanel({ group, onAdded, onCancel }) {
+  const [part, setPart] = useState(null);
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("");
+  const [price, setPrice] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const pickPart = (p) => {
+    setPart(p);
+    if (p?.unit && !unit) setUnit(p.unit);
+    if (p?.price != null && price === "") setPrice(String(p.price));
+  };
+
+  const submit = async () => {
+    if (!part?._id) {
+      toast.error("Search and pick a part first");
+      return;
+    }
+    if (!(Number(qty) > 0)) {
+      toast.error("Enter a quantity greater than zero");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { data } = await api.post("/stock-entries/iqc-stock/add-line", {
+        invoiceId: group.invoice._id,
+        partId: part._id,
+        quantityReceived: Number(qty),
+        unit,
+        price,
+        remarks,
+      });
+      toast.success("Part added to this bill — it is now waiting for IQC");
+      onAdded?.(data);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not add the part to this bill");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-b border-border bg-muted/20 p-3">
+      <div className="flex items-center gap-1.5 text-sm font-medium">
+        <Plus className="h-4 w-4" />
+        Add a part to invoice {group.invoice?.invoiceNumber || "(no number)"}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Part</Label>
+        <AlternatePartPicker value={part} onChange={pickPart} placeholder="Search part number or description" />
+        <p className="text-[11px] text-muted-foreground">
+          The part must already exist in the Parts master. For a brand-new part number, raise a new part request
+          first and add it here once it is approved.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Quantity received</Label>
+          <Input type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Unit</Label>
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="PCS, KG, MTR…" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Price per unit</Label>
+          <Input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Remarks</Label>
+        <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="button" size="sm" onClick={submit} disabled={saving}>
+          {saving ? "Adding…" : "Add part to bill"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/*
   Header strip for one invoice's group of lines in the IQC stock window.
   On the "IQC stock" tab it carries a checkbox that ticks every line of that
   invoice for the bulk IQC report.
 */
-function InvoiceHeader({ group, selectable = false, allSelected = false, onToggle, collapsed = false, onToggleCollapse }) {
+function InvoiceHeader({
+  group,
+  selectable = false,
+  allSelected = false,
+  onToggle,
+  collapsed = false,
+  onToggleCollapse,
+  onAddPart,
+}) {
   const { invoice, vendorName, entries } = group;
   const title = invoice ? `Invoice ${invoice.invoiceNumber || "(no number)"}` : "No tax invoice linked";
   const meta = [
@@ -267,17 +373,35 @@ function InvoiceHeader({ group, selectable = false, allSelected = false, onToggl
         <span className="truncate text-sm font-semibold">{title}</span>
         <span className="truncate text-xs text-muted-foreground">{meta}</span>
       </div>
-      {invoice?.documentUrl && (
-        <a
-          href={invoice.documentUrl}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(ev) => ev.stopPropagation()}
-          className="shrink-0 text-xs text-primary hover:underline"
-        >
-          View invoice
-        </a>
-      )}
+      <div className="flex shrink-0 items-center gap-3">
+        {onAddPart && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onAddPart();
+            }}
+            title="Add another part against this bill"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add part
+          </Button>
+        )}
+        {invoice?.documentUrl && (
+          <a
+            href={invoice.documentUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(ev) => ev.stopPropagation()}
+            className="text-xs text-primary hover:underline"
+          >
+            View invoice
+          </a>
+        )}
+      </div>
     </div>
   );
 }
@@ -295,6 +419,9 @@ function InvoiceHeader({ group, selectable = false, allSelected = false, onToggl
               its stock figures
 */
 export default function IqcStock({ onClose, onChanged }) {
+  const { can } = useAuth();
+  const canAddPart = can?.("receive.manage");
+  const [addingKey, setAddingKey] = useState(null);
   const [tab, setTab] = useState("in_iqc_stock");
   const { sort, toggle, apply } = useSort();
   const entryGetters = {
@@ -344,6 +471,7 @@ export default function IqcStock({ onClose, onChanged }) {
     setSelectedIds(new Set());
     setBulkOpen(false);
     setExpandedKeys(new Set());
+    setAddingKey(null);
   }, [tab]);
 
   const handleClose = () => {
@@ -366,6 +494,14 @@ export default function IqcStock({ onClose, onChanged }) {
     setOpenEntryId(null);
     // The line no longer belongs on this tab (it's now accepted/rejected).
     setEntries((prev) => prev.filter((e) => e._id !== updatedEntry._id));
+  };
+
+  const handlePartAdded = (newEntry) => {
+    setEntries((prev) => [newEntry, ...prev]);
+    setAddingKey(null);
+    // Make sure the bill is open so the new line is visible.
+    const key = invoiceKeyOf(newEntry);
+    setExpandedKeys((prev) => new Set(prev).add(key));
   };
 
   const handleBulkDone = (result) => {
@@ -658,7 +794,22 @@ export default function IqcStock({ onClose, onChanged }) {
                           onToggle={() => toggleGroup(g)}
                           collapsed={isCollapsed(g.key)}
                           onToggleCollapse={() => toggleCollapse(g.key)}
+                          onAddPart={
+                            canAddPart && g.invoice
+                              ? () => {
+                                  setAddingKey(g.key);
+                                  setExpandedKeys((prev) => new Set(prev).add(g.key));
+                                }
+                              : undefined
+                          }
                         />
+                        {addingKey === g.key && g.invoice && !isCollapsed(g.key) && (
+                          <AddPartToBillPanel
+                            group={g}
+                            onAdded={handlePartAdded}
+                            onCancel={() => setAddingKey(null)}
+                          />
+                        )}
                         {!isCollapsed(g.key) && (
                         <ul className="space-y-2 p-3">
                           {g.entries.map((e) => (

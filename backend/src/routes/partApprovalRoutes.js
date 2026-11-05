@@ -39,6 +39,7 @@ router.patch("/:id/consume", requirePermission("receive.manage"), consumeRequest
 
 // Editing a request (pending / approved / rejected) — ADMIN ONLY.
 // Declared last so it never shadows the /:id/<action> routes above.
-router.patch("/:id", requirePermission("part.approve"), updateRequest);
+// Accepts an optional replacement `photo` (multipart) alongside the fields.
+router.patch("/:id", requirePermission("part.approve"), partDocFields, updateRequest);
 
 export default router;

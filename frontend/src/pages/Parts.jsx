@@ -196,6 +196,12 @@ function EditRequestDialog({ request, onClose, onSaved }) {
     };
   });
   const [saving, setSaving] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const photoPreview = useMemo(
+    () => (photoFile ? URL.createObjectURL(photoFile) : ""),
+    [photoFile]
+  );
+  useEffect(() => () => photoPreview && URL.revokeObjectURL(photoPreview), [photoPreview]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -211,12 +217,15 @@ function EditRequestDialog({ request, onClose, onSaved }) {
       REQUEST_FIELDS.forEach((f) => {
         newPart[f.key] = form[f.key];
       });
-      const { data } = await api.patch(`/part-approvals/${request._id}`, {
-        newPart,
-        proposedQuantity: form.proposedQuantity,
-        requestRemarks: form.requestRemarks,
-        reviewRemarks: form.reviewRemarks,
-        status: form.status,
+      const fd = new FormData();
+      fd.append("newPart", JSON.stringify(newPart));
+      fd.append("proposedQuantity", form.proposedQuantity ?? "");
+      fd.append("requestRemarks", form.requestRemarks ?? "");
+      fd.append("reviewRemarks", form.reviewRemarks ?? "");
+      fd.append("status", form.status);
+      if (photoFile) fd.append("photo", photoFile);
+      const { data } = await api.patch(`/part-approvals/${request._id}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
       toast.success("Request updated — the requester has been notified");
       onSaved?.(data);
@@ -299,6 +308,48 @@ function EditRequestDialog({ request, onClose, onSaved }) {
                     {s.label}
                   </Button>
                 ))}
+              </div>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Part photo (JPEG / PNG)
+              </label>
+              <div className="flex items-start gap-3">
+                {(photoPreview || request.newPart?.photoUrl) ? (
+                  <a
+                    href={photoPreview || request.newPart.photoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0"
+                  >
+                    <img
+                      src={photoPreview || request.newPart.photoUrl}
+                      alt="Part"
+                      className="h-20 w-20 rounded border border-border object-cover"
+                    />
+                  </a>
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded border border-dashed border-border text-[10px] text-muted-foreground">
+                    No photo
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <Input
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                  />
+                  {photoFile ? (
+                    <p className="mt-1 truncate text-xs text-warning">
+                      Will replace the current photo with {photoFile.name} on save.
+                    </p>
+                  ) : request.newPart?.photoUrl ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Choose a file to replace the current photo.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
 
@@ -2114,6 +2165,18 @@ useEffect(() => {
                                       Reverted to stock
                                     </Badge>
                                   )}
+                                  {e.type === "invoice_deleted" && (
+                                    <Badge
+                                      variant="destructive"
+                                      title={
+                                        e.removedFromStock
+                                          ? "The tax invoice was deleted — this stock was taken back out of main stock"
+                                          : "The tax invoice was deleted — this stock had not reached main stock"
+                                      }
+                                    >
+                                      Tax invoice deleted
+                                    </Badge>
+                                  )}
                                   {(e.type === "issued" || e.type === "kit_reverted") &&
                                     (e.batchBreakdown || []).map((b, i) => (
                                       <Badge key={i} variant="secondary" className="font-mono-tech">
@@ -2212,7 +2275,8 @@ useEffect(() => {
                                 {/* A stock revert is a record, not something to delete here. */}
                                 {e.entryType !== "kit_revert" &&
                                   e.entryType !== "sample_issue" &&
-                                  e.entryType !== "sample_return" && (
+                                  e.entryType !== "sample_return" &&
+                                  e.entryType !== "invoice_deletion" && (
                                   <Button
                                     type="button"
                                     size="icon"

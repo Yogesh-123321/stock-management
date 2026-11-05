@@ -509,7 +509,45 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     }
   }
 
-  const movements = [...receiptMovements, ...kitMovements, ...kitRevertMovements, ...rndMovements, ...sampleMovements];
+  // Stock lines that were removed because their tax invoice was deleted.
+  // The original "received" row is gone with the line, so this is a record
+  // only — it never moves the running balance (see `counts` below); the
+  // part's quantityInStock was already corrected when the invoice was deleted.
+  const invoiceDeletionMovements = (part.invoiceDeletions || []).map((d) => ({
+    _id: d._id,
+    date: d.deletedAt,
+    direction: "out",
+    type: "invoice_deleted",
+    quantity: d.quantity,
+    party: d.vendorName ? { role: "vendor", id: null, name: d.vendorName } : null,
+    reference: {
+      type: "Tax invoice deleted",
+      number: d.invoiceNumber || null,
+      id: null,
+    },
+    matchType: null,
+    enteredBy: d.deletedBy || null,
+    remarks: `Tax invoice ${d.invoiceNumber || "(no number)"} was deleted — this stock entry was removed with it${
+      d.removedFromStock
+        ? " and the quantity was taken back out of main stock"
+        : " (it had not reached main stock, so stock is unchanged)"
+    }.`,
+    unit: d.unit || null,
+    price: d.price ?? null,
+    stockApplied: true,
+    batchCode: d.batchCode || null,
+    removedFromStock: !!d.removedFromStock,
+    entryType: "invoice_deletion",
+  }));
+
+  const movements = [
+    ...receiptMovements,
+    ...kitMovements,
+    ...kitRevertMovements,
+    ...rndMovements,
+    ...sampleMovements,
+    ...invoiceDeletionMovements,
+  ];
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was
@@ -518,7 +556,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   // doesn't actually have.
   let running = 0;
   const withBalance = movements.map((m) => {
-    const counts = m.type !== "received" || m.stockApplied;
+    const counts = m.type !== "invoice_deleted" && (m.type !== "received" || m.stockApplied);
     if (counts) {
       running += m.direction === "out" ? -m.quantity : m.quantity;
     }
