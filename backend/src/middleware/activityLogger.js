@@ -73,6 +73,7 @@ const ENTITY_BY_SEGMENT = {
   stock: "stock",
   "stock-entries": "stock",
   kits: "kit",
+  samples: "sample",
   receiving: "receiving",
   "receiving-sessions": "receiving",
   receive: "receiving",
@@ -96,6 +97,7 @@ const LABEL = {
   buyer: "buyer",
   stock: "stock entry",
   kit: "kit",
+  sample: "sample issue",
   receiving: "material receipt",
   invoice: "tax invoice",
   payment: "purchase invoice",
@@ -116,6 +118,7 @@ const PAST_TENSE = {
   issue: "issued",
   edit: "edited",
   revert: "reverted stock of",
+  return: "received back",
 };
 
 function describe(req, segment, entityType) {
@@ -131,6 +134,7 @@ function describe(req, segment, entityType) {
     "issue",
     "edit",
     "revert",
+    "return",
   ];
   if (tail === "pay") return `marked the ${LABEL[entityType]} as paid`;
   if (tail === "resubmit") return `resubmitted the ${LABEL[entityType]}`;
@@ -155,6 +159,7 @@ function actionKey(req, segment) {
     "issue",
     "edit",
     "revert",
+    "return",
     "pay",
     "resubmit",
   ];

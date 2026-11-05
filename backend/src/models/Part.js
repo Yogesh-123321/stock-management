@@ -106,6 +106,13 @@ const partSchema = new mongoose.Schema(
     rndStock: { type: Number, default: 0, min: 0 },
     rndIssues: { type: [rndIssueEntrySchema], default: [] },
 
+    // Stock currently OUT with buyers as samples. Issuing samples subtracts
+    // from quantityInStock and adds here (see controllers/sampleController.js);
+    // receiving them back reverses it. Because kits only ever draw on
+    // quantityInStock, sample stock can never be issued in a kit. Who holds
+    // what is read back from the SampleIssue ledger (utils/sampleHolders.js).
+    sampleStock: { type: Number, default: 0, min: 0 },
+
     // Every vendor this part has ever been received from. Populated with
     // companyName and rendered as "VendorA / VendorB" wherever the part is
     // displayed. New vendors are appended (deduped) each time stock for this

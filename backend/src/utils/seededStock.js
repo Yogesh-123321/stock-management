@@ -4,7 +4,8 @@
     appliedIn  - receipts already credited to main stock
     kits       - units issued out through kits
     rndIssued  - units moved to R&D (from the part's own issue log)
-    ledgerMain - appliedIn - kits - rndIssued
+    sampleOut  - units currently out with buyers as samples (part.sampleStock)
+    ledgerMain - appliedIn - kits - rndIssued - sampleOut
                  = what main stock should be WITHOUT any seeded quantity
 */
 import StockEntry from "../models/StockEntry.js";
@@ -25,5 +26,6 @@ export async function ledgerFor(part) {
   const appliedIn = inAgg?.qty || 0;
   const kits = kitAgg?.qty || 0;
   const rndIssued = (part.rndIssues || []).reduce((n, e) => n + (Number(e.quantity) || 0), 0);
-  return { appliedIn, kits, rndIssued, ledgerMain: r3(appliedIn - kits - rndIssued) };
+  const sampleOut = Number(part.sampleStock) || 0;
+  return { appliedIn, kits, rndIssued, sampleOut, ledgerMain: r3(appliedIn - kits - rndIssued - sampleOut) };
 }

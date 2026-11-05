@@ -17,6 +17,7 @@ export const SECTION_LABEL = {
   buyer: "Buyer",
   stock: "Stock",
   kit: "Kit",
+  sample: "Sample issue",
   receiving: "Material receiving",
   invoice: "Tax invoice",
   payment: "Payment",

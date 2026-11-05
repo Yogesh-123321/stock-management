@@ -75,7 +75,7 @@ const run = async () => {
     }
 
     const { appliedIn, kits } = await ledgerFor(part);
-    const gap = r3((part.quantityInStock || 0) + (part.rndStock || 0) - (appliedIn - kits) - (part.seededStock || 0));
+    const gap = r3((part.quantityInStock || 0) + (part.rndStock || 0) + (part.sampleStock || 0) - (appliedIn - kits) - (part.seededStock || 0));
 
     if (Math.abs(gap) <= 0.0005) noGap.push(code);
     else if (gap < 0) lower.push({ code, gap });

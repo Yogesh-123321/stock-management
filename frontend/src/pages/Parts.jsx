@@ -21,6 +21,7 @@ import { SortableHead, useSort } from "@/components/SortableHead";
 import CategorySelect from "@/components/CategorySelect";
 import PriceTrendChart from "@/components/PriceTrendChart";
 import RndStockHover from "@/components/RndStockHover";
+import SampleStockHover from "@/components/SampleStockHover";
 import MiscStockMenu from "@/components/MiscStockMenu";
 import IqcStockDialog from "@/pages/IqcStock";
 import { useAuth } from "@/lib/auth";
@@ -119,7 +120,7 @@ const COLUMNS = [
   },
   {
     // "MISC stock" — the figure shown depends on the view picked from the
-    // header dropdown (R&D / Rejected), so the real sort value is worked
+    // header dropdown (R&D / Rejected / Issued samples), so the real sort value is worked
     // out in the component (see miscValue); this one is only a fallback.
     key: "miscStock",
     label: "MISC stock",
@@ -1189,7 +1190,7 @@ function EditPartDialog({ part, onClose, onSaved }) {
             <h2 className="font-display text-base font-semibold">Edit part</h2>
             <p className="break-all text-xs text-muted-foreground">
               {part.ttUniquePartNumber} · stock {fmtQty(part.quantityInStock)} · R&amp;D stock{" "}
-              {fmtQty(part.rndStock)}
+              {fmtQty(part.rndStock)} · samples out {fmtQty(part.sampleStock)}
             </p>
           </div>
           <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -1824,11 +1825,12 @@ useEffect(() => {
                           <div className="text-[10px] text-muted-foreground">Cleared IQC</div>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
                         {[
                           { label: "In IQC stock", value: data.stockSummary.iqcStock, hint: "Awaiting inspection" },
                           { label: "Awaiting invoice", value: data.stockSummary.awaitingInvoice, hint: "Tax invoice not in yet" },
                           { label: "R&D stock", value: data.stockSummary.rndStock, hint: "Set aside for R&D" },
+                          { label: "Issued samples", value: data.stockSummary.sampleStock, hint: "Out with buyers" },
                           { label: "Issued in kits", value: data.stockSummary.issuedInKits, hint: "Already sent out" },
                           { label: "Rejected (IQC)", value: data.stockSummary.rejected, hint: "Not counted in total" },
                         ].map((c) => (
@@ -2097,6 +2099,16 @@ useEffect(() => {
                                       Batch {e.batchCode}
                                     </Badge>
                                   )}
+                                  {e.type === "sample_issued" && (
+                                    <Badge variant="warning" title="Issued to a buyer as a sample — held outside main stock">
+                                      Sample issued
+                                    </Badge>
+                                  )}
+                                  {e.type === "sample_returned" && (
+                                    <Badge variant="success" title="Sample received back into main stock">
+                                      Sample received back
+                                    </Badge>
+                                  )}
                                   {e.type === "kit_reverted" && (
                                     <Badge variant="success" title="Put back into main stock from an issued kit">
                                       Reverted to stock
@@ -2198,7 +2210,9 @@ useEffect(() => {
                               </td>
                               <td className="px-1 py-1.5 align-top text-right">
                                 {/* A stock revert is a record, not something to delete here. */}
-                                {e.entryType !== "kit_revert" && (
+                                {e.entryType !== "kit_revert" &&
+                                  e.entryType !== "sample_issue" &&
+                                  e.entryType !== "sample_return" && (
                                   <Button
                                     type="button"
                                     size="icon"
@@ -3376,7 +3390,7 @@ export default function Parts() {
   const [showIssuedReport, setShowIssuedReport] = useState(false);
 
   // "MISC stock" column: the header dropdown just picks which bucket the
-  // column shows ("rnd" | "rejected"). IQC stock has its own toolbar button
+  // column shows ("rnd" | "rejected" | "samples"). IQC stock has its own toolbar button
   // above the table now, so it isn't one of this dropdown's options.
   const [miscView, setMiscView] = useState("rnd");
   const [showIqcStock, setShowIqcStock] = useState(false);
@@ -3386,8 +3400,9 @@ export default function Parts() {
   const miscOptions = [
     { key: "rnd", label: "R&D stock" },
     { key: "rejected", label: "Rejected stock" },
+    { key: "samples", label: "Issued samples" },
   ];
-  const miscViewLabel = miscView === "rejected" ? "Rejected" : "R&D";
+  const miscViewLabel = { rejected: "Rejected", samples: "Samples" }[miscView] || "R&D";
 
   // Rejected quantity per part, totalled from the rejected IQC lines. Only
   // fetched while the column is actually showing rejected stock.
@@ -3416,7 +3431,12 @@ export default function Parts() {
   }, [miscView, iqcReloadKey]);
 
   const miscValue = useCallback(
-    (p) => (miscView === "rejected" ? Number(rejectedByPart[p._id] ?? 0) : Number(p.rndStock ?? 0)),
+    (p) =>
+      miscView === "rejected"
+        ? Number(rejectedByPart[p._id] ?? 0)
+        : miscView === "samples"
+        ? Number(p.sampleStock ?? 0)
+        : Number(p.rndStock ?? 0),
     [miscView, rejectedByPart]
   );
 
@@ -3821,6 +3841,15 @@ export default function Parts() {
                         >
                           {fmtQty(miscValue(p))}
                         </span>
+                      ) : miscView === "samples" ? (
+                        <SampleStockHover holders={p.sampleHolders}>
+                          <span
+                            className={miscValue(p) > 0 ? "" : "text-muted-foreground"}
+                            title="Out with buyers as samples — not in main stock, not issuable in a kit"
+                          >
+                            {fmtQty(p.sampleStock)}
+                          </span>
+                        </SampleStockHover>
                       ) : (
                         <RndStockHover issues={p.rndIssues}>
                           <span>{fmtQty(p.rndStock)}</span>

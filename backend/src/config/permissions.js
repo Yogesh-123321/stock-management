@@ -42,6 +42,8 @@ export const PERMISSIONS = [
   { key: "kit.manage", group: "Kits", label: "Create / edit kit templates", adminOnly: true },
   { key: "kit.issue", group: "Kits", label: "Issue kits to a vendor" },
   { key: "kit.save", group: "Kits", label: "Save & view kits only (cannot issue)" },
+  // Samples
+  { key: "sample.issue", group: "Samples", label: "Issue samples to a buyer & receive them back" },
   // Quality
   {
     key: "iqc.manage",
@@ -79,6 +81,7 @@ export const DEFAULT_PERMISSIONS = {
     "receive.manage",
     "documents.view",
     "kit.issue",
+    "sample.issue",
   ],
 };
 

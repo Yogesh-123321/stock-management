@@ -82,7 +82,7 @@ const run = async () => {
 
     // Total difference = (main + R&D) - (applied inward - kits) - seeded.
     const { appliedIn, kits } = await ledgerFor(part);
-    const diffAfter = r3((part.quantityInStock || 0) + (part.rndStock || 0) - (appliedIn - kits) - seeded);
+    const diffAfter = r3((part.quantityInStock || 0) + (part.rndStock || 0) + (part.sampleStock || 0) - (appliedIn - kits) - seeded);
 
     toSet += 1;
     if (Math.abs(diffAfter) > 0.0005) stillMismatched.push({ code, seeded, diffAfter });

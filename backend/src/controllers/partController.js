@@ -8,6 +8,8 @@ import Part from "../models/Part.js";
 import StockEntry from "../models/StockEntry.js";
 import KitIssue from "../models/KitIssue.js";
 import KitTemplate from "../models/KitTemplate.js";
+import SampleIssue from "../models/SampleIssue.js";
+import { sampleHoldersByPart } from "../utils/sampleHolders.js";
 import ActivityLog from "../models/ActivityLog.js";
 import User from "../models/User.js";
 import Vendor from "../models/Vendor.js";
@@ -158,6 +160,14 @@ export const getParts = asyncHandler(async (req, res) => {
   // Single-term (or empty) searches keep the plain alphabetical order;
   // multi-term searches get re-ordered by how many/which terms matched.
   const ordered = terms.length > 1 ? rankByMatchedTerms(withDemand, terms) : withDemand;
+  // Who is holding each part's issued samples (for the "Issued samples" view
+  // of the MISC stock column). Only parts that actually have samples out.
+  const holders = await sampleHoldersByPart(
+    ordered.filter((p) => (p.sampleStock || 0) > 0).map((p) => p._id)
+  );
+  ordered.forEach((p) => {
+    p.sampleHolders = holders.get(String(p._id)) || [];
+  });
   res.json(ordered);
 });
 
@@ -453,7 +463,53 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     entryType: "rnd_issue",
   }));
 
-  const movements = [...receiptMovements, ...kitMovements, ...kitRevertMovements, ...rndMovements];
+  // Samples issued to buyers (out) and received back (in). Both are records,
+  // not deletable from the ledger — undo a sample by receiving it back.
+  const sampleIssuesForPart = await SampleIssue.find({ "lines.part": part._id }).sort({ createdAt: 1 }).lean();
+  const sampleMovements = [];
+  for (const si of sampleIssuesForPart) {
+    const issuedLines = (si.lines || []).filter((l) => String(l.part) === String(part._id));
+    const issuedQty = issuedLines.reduce((n, l) => n + (l.qtyIssued || 0), 0);
+    if (issuedQty > 0) {
+      sampleMovements.push({
+        _id: `${si._id}-out`,
+        date: si.createdAt,
+        direction: "out",
+        type: "sample_issued",
+        quantity: issuedQty,
+        party: { role: "buyer", id: si.buyer, name: si.buyerName },
+        reference: { type: "Sample issue", number: si.issueCode || null, id: si._id },
+        matchType: null,
+        enteredBy: si.issuedBy || null,
+        remarks: si.challanNumber ? `Challan ${si.challanNumber}${si.remarks ? ` — ${si.remarks}` : ""}` : si.remarks || null,
+        stockApplied: true,
+        entryType: "sample_issue",
+      });
+    }
+    for (const ret of si.returns || []) {
+      const back = (ret.lines || [])
+        .filter((l) => String(l.part) === String(part._id))
+        .reduce((n, l) => n + (l.quantity || 0), 0);
+      if (back > 0) {
+        sampleMovements.push({
+          _id: `${ret._id}-in`,
+          date: ret.at,
+          direction: "in",
+          type: "sample_returned",
+          quantity: back,
+          party: { role: "buyer", id: si.buyer, name: si.buyerName },
+          reference: { type: "Sample returned", number: si.issueCode || null, id: si._id },
+          matchType: null,
+          enteredBy: ret.by || null,
+          remarks: ret.remarks || "Samples received back into main stock",
+          stockApplied: true,
+          entryType: "sample_return",
+        });
+      }
+    }
+  }
+
+  const movements = [...receiptMovements, ...kitMovements, ...kitRevertMovements, ...rndMovements, ...sampleMovements];
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was
@@ -476,7 +532,10 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   //   iqcStock         - tax invoice in, waiting for IQC inspection
   //   awaitingInvoice  - received, but the tax invoice hasn't arrived yet
   //   rndStock         - set aside for R&D (still owned, not in main stock)
+  //   sampleStock      - out with buyers as samples (still owned, not in main
+  //                      stock, never issuable in a kit)
   //   expectedTotal    - mainStock + iqcStock + awaitingInvoice + rndStock
+  //                      + sampleStock
   //                      (everything we hold or are about to hold)
   //   issuedInKits     - already gone out through issued kits
   //   rejected         - failed IQC; held aside, NOT part of expectedTotal
@@ -491,14 +550,16 @@ export const getPartHistory = asyncHandler(async (req, res) => {
   );
   const mainStock = part.quantityInStock || 0;
   const rndStock = part.rndStock || 0;
+  const sampleStock = part.sampleStock || 0;
   // Net of anything reverted back to stock.
   const issuedInKits = sumQty(kitMovements) - sumQty(kitRevertMovements);
-  const expectedTotal = mainStock + iqcStock + awaitingInvoice + rndStock;
+  const expectedTotal = mainStock + iqcStock + awaitingInvoice + rndStock + sampleStock;
   const stockSummary = {
     mainStock,
     iqcStock,
     awaitingInvoice,
     rndStock,
+    sampleStock,
     expectedTotal,
     issuedInKits,
     rejected,
@@ -926,6 +987,7 @@ const PARTS_CSV_FIELDS = [
   { key: "unit", label: "Unit", get: (p) => p.unit || "" },
   { key: "quantityInStock", label: "Quantity in stock", get: (p) => p.quantityInStock ?? 0 },
   { key: "rndStock", label: "R&D stock", get: (p) => p.rndStock ?? 0 },
+  { key: "sampleStock", label: "Issued samples (out with buyers)", get: (p) => p.sampleStock ?? 0 },
   {
     key: "rndIssuedTo",
     label: "R&D stock issued to",
@@ -1164,11 +1226,11 @@ function buildActivityTrace(adjustments, diff, firstLogAt, unit) {
   return `Manual stock adjustments in activity log${more}: ${shown}. Net ${net > 0 ? "+" : ""}${fmtQty(net)}${u}. ${verdict}`;
 }
 
-function checkStockMismatch({ main, iqc, awaiting, rnd, appliedIn, kits, rndIssued, seeded = 0, unit }) {
+function checkStockMismatch({ main, iqc, awaiting, rnd, sample = 0, appliedIn, kits, rndIssued, seeded = 0, unit }) {
   const inward = r3(appliedIn + iqc + awaiting);
   const outward = r3(kits);
   const seededQty = r3(seeded); // from the stock sheet only
-  const recorded = r3(main + iqc + awaiting + rnd);
+  const recorded = r3(main + iqc + awaiting + rnd + sample);
   const ledger = r3(seededQty + inward - outward);
   const diff = r3(recorded - ledger);
   // Gap WITHOUT any seeded qty: used to tell "seeded qty is missing from
@@ -1238,7 +1300,7 @@ function checkStockMismatch({ main, iqc, awaiting, rnd, appliedIn, kits, rndIssu
 export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
   const parts = await Part.find({})
     .select(
-      "ttUniquePartNumber itemDescription manufacturerPartNumber unit quantityInStock rndStock rndIssues"
+      "ttUniquePartNumber itemDescription manufacturerPartNumber unit quantityInStock rndStock rndIssues sampleStock"
     )
     .sort({ ttUniquePartNumber: 1 })
     .lean();
@@ -1297,6 +1359,7 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     { header: "In IQC stock", key: "iqc", width: 13 },
     { header: "Awaiting invoice", key: "awaiting", width: 16 },
     { header: "R&D stock", key: "rnd", width: 11 },
+    { header: "Issued samples", key: "samples", width: 14 },
     { header: "Expected total stock", key: "expected", width: 20 },
     { header: "Issued in kits", key: "kits", width: 14 },
     { header: "All-in total (incl. kits)", key: "allin", width: 22 },
@@ -1311,10 +1374,10 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     { header: "Activity log trace", key: "trace", width: 80 },
   ];
 
-  const LAST_COL = 20; // T
-  const STATUS_COL = 18; // R
-  const REMARKS_COL = 19; // S
-  const TRACE_COL = 20; // T
+  const LAST_COL = 21; // U
+  const STATUS_COL = 19; // S
+  const REMARKS_COL = 20; // T
+  const TRACE_COL = 21; // U
   const RED_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
   let mismatchCount = 0;
 
@@ -1326,14 +1389,16 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     const pd = pending.get(String(p._id)) || { applied: 0, iqc: 0, rejected: 0, awaiting: 0, count: 0 };
     const main = p.quantityInStock || 0;
     const rnd = p.rndStock || 0;
+    const sample = p.sampleStock || 0;
     const kits = kitByPart.get(String(p._id)) || 0;
-    const expected = main + pd.iqc + pd.awaiting + rnd;
+    const expected = main + pd.iqc + pd.awaiting + rnd + sample;
     const rndIssued = (p.rndIssues || []).reduce((n, e) => n + (Number(e.quantity) || 0), 0);
     const chk = checkStockMismatch({
       main,
       iqc: pd.iqc,
       awaiting: pd.awaiting,
       rnd,
+      sample,
       appliedIn: pd.applied,
       kits,
       rndIssued,
@@ -1342,11 +1407,11 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     });
     // 0 = red (mismatch), 1 = yellow (OK, seeded), 2 = normal
     const priority = chk.mismatch ? 0 : chk.seeded > 0 ? 1 : 2;
-    return { p, pd, main, rnd, kits, expected, chk, priority };
+    return { p, pd, main, rnd, sample, kits, expected, chk, priority };
   });
   prepared.sort((a, b) => a.priority - b.priority);
 
-  prepared.forEach(({ p, pd, main, rnd, kits, expected, chk }, i) => {
+  prepared.forEach(({ p, pd, main, rnd, sample, kits, expected, chk }, i) => {
     if (chk.mismatch) mismatchCount += 1;
     const r = i + 2; // header is row 1
     const row = ws.addRow({
@@ -1358,15 +1423,16 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
       iqc: pd.iqc,
       awaiting: pd.awaiting,
       rnd,
-      expected: { formula: `E${r}+F${r}+G${r}+H${r}`, result: expected },
+      samples: sample,
+      expected: { formula: `E${r}+F${r}+G${r}+H${r}+I${r}`, result: expected },
       kits,
-      allin: { formula: `I${r}+J${r}`, result: expected + kits },
+      allin: { formula: `J${r}+K${r}`, result: expected + kits },
       rejected: pd.rejected,
       seeded: chk.seeded,
       inward: chk.inward,
       outward: chk.outward,
-      ledger: { formula: `M${r}+N${r}-O${r}`, result: chk.ledger },
-      diff: { formula: `ROUND(I${r}-P${r},3)`, result: chk.diff },
+      ledger: { formula: `N${r}+O${r}-P${r}`, result: chk.ledger },
+      diff: { formula: `ROUND(J${r}-Q${r},3)`, result: chk.diff },
       status: chk.mismatch ? "MISMATCH" : chk.seeded > 0 ? "OK (seeded)" : "OK",
       remarks: chk.remarks,
       trace: chk.mismatch
@@ -1385,7 +1451,7 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
       row.getCell(STATUS_COL).font = { color: { argb: "FF006100" } };
       if (chk.seeded > 0) {
         // Light-yellow marker on the seeded quantity so it is easy to spot.
-        row.getCell(13).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
+        row.getCell(14).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
       }
     }
     row.getCell(REMARKS_COL).alignment = { wrapText: true, vertical: "top" };
@@ -1396,32 +1462,32 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
   if (parts.length > 0) {
     const last = parts.length + 1;
     const totals = ws.addRow({ pn: "TOTAL" });
-    for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"]) {
+    for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"]) {
       totals.getCell(col).value = { formula: `SUM(${col}2:${col}${last})` };
     }
-    totals.getCell("R").value = {
-      formula: `COUNTIF(R2:R${last},"MISMATCH")&" mismatch(es)"`,
+    totals.getCell("S").value = {
+      formula: `COUNTIF(S2:S${last},"MISMATCH")&" mismatch(es)"`,
       result: `${mismatchCount} mismatch(es)`,
     };
     totals.font = { bold: true };
-    ws.autoFilter = { from: "A1", to: `T${last}` };
+    ws.autoFilter = { from: "A1", to: `U${last}` };
   }
 
   ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
   ws.getRow(1).alignment = { vertical: "middle", wrapText: true };
-  for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"]) {
+  for (const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R"]) {
     ws.getColumn(col).alignment = { horizontal: "right" };
     ws.getColumn(col).numFmt = "#,##0.###";
   }
-  ws.getColumn("R").alignment = { horizontal: "center" };
+  ws.getColumn("S").alignment = { horizontal: "center" };
   ws.getRow(1).getCell(STATUS_COL).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   ws.getRow(1).getCell(REMARKS_COL).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
   ws.getRow(1).getCell(TRACE_COL).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
   // Column-level fonts above would override the red row font; only bold the
   // two total columns on rows that are not already highlighted.
-  ws.getColumn("I").font = { bold: true };
-  ws.getColumn("K").font = { bold: true };
+  ws.getColumn("J").font = { bold: true };
+  ws.getColumn("L").font = { bold: true };
 
   // Re-apply row highlight fonts (column fonts are applied as defaults only
   // to cells without their own style, but be explicit for the red rows).
@@ -1430,7 +1496,7 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     if (String(row.getCell(STATUS_COL).value) === "MISMATCH") {
       for (let c = 1; c <= LAST_COL; c += 1) {
         const cell = row.getCell(c);
-        cell.font = { bold: c === 9 || c === 11 || c === STATUS_COL, color: { argb: "FF9C0006" } };
+        cell.font = { bold: c === 10 || c === 12 || c === STATUS_COL, color: { argb: "FF9C0006" } };
       }
     }
   });
@@ -1438,12 +1504,13 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
   const note = wb.addWorksheet("How to read");
   note.columns = [{ width: 110 }];
   [
-    "Expected total stock = Main stock + In IQC stock + Awaiting invoice + R&D stock",
+    "Expected total stock = Main stock + In IQC stock + Awaiting invoice + R&D stock + Issued samples",
     "All-in total = Expected total stock + Issued in kits",
     "Main stock: cleared IQC and credited to stock (usable now).",
     "In IQC stock: tax invoice received, waiting for IQC inspection.",
     "Awaiting invoice: material received, tax invoice not uploaded yet.",
     "R&D stock: set aside for R&D.",
+    "Issued samples: out with buyers as samples (still ours; comes back into main stock when received back; never issued in a kit).",
     "Issued in kits: already sent out through issued kits.",
     "Rejected: failed IQC; shown for reference and not counted in either total.",
     "",

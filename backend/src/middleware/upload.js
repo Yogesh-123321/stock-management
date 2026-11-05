@@ -25,6 +25,11 @@ export const uploadBuyerDoc = makeUploader();
 
 export const uploadPODoc = makeUploader();
 
+// Challans uploaded when samples are issued to a buyer, and the optional
+// return documents uploaded when they come back. Streamed to Cloudinary under
+// the buyer's folder (sample-challans / sample-returns) by sampleController.js.
+export const uploadSampleDoc = makeUploader();
+
 // Bills uploaded to the payment approval flow (Payments page). The file is
 // streamed to Cloudinary under misc/payment-bills by paymentBillController.js.
 export const uploadPaymentBillDoc = makeUploader();

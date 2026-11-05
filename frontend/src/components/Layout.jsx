@@ -20,6 +20,7 @@ import {
   PackageOpen,
   Layers,
   Wallet,
+  PackageCheck,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -46,6 +47,7 @@ const navItems = [
     // Users who may only save / view kits (no kit.issue) see this instead.
     saveOnlyLabel: "Saved kits",
   },
+  { to: "/issue-samples", label: "Issue samples", icon: PackageCheck, permission: "sample.issue" },
   { to: "/part-categories", label: "Part categories", icon: Tags, permission: "part.approve" },
   { to: "/parts", label: "Parts master", icon: Boxes, permission: null },
   { to: "/payments", label: "Payments", icon: Wallet, permission: "payment.pay", badge: "payments" },

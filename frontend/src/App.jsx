@@ -8,6 +8,7 @@ import Parts from "@/pages/Parts";
 import PartCategories from "@/pages/PartCategories";
 import Templates from "@/pages/Templates";
 import IssueKit from "@/pages/IssueKit";
+import IssueSamples from "@/pages/IssueSamples";
 import Documents from "@/pages/Documents";
 import PiGenerator from "@/pages/PiGenerator";
 import PoGenerator from "@/pages/PoGenerator";
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/iqc-stock" element={<Navigate to="/parts" replace />} />
           <Route path="/kits" element={<Navigate to="/templates?tab=kit" replace />} />
           <Route path="/issue-kit" element={guardAny(["kit.issue", "kit.save"], <IssueKit />)} />
+          <Route path="/issue-samples" element={guard("sample.issue", <IssueSamples />)} />
           <Route path="/documents" element={guard("documents.view", <Documents />)} />
           <Route path="/purchase-orders" element={<Navigate to="/documents" replace />} />
           <Route path="/pi-generator" element={guard("pi.create", <PiGenerator />)} />
