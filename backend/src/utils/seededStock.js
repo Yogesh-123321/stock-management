@@ -25,7 +25,11 @@ export async function ledgerFor(part) {
   ]);
   const appliedIn = inAgg?.qty || 0;
   const kits = kitAgg?.qty || 0;
-  const rndIssued = (part.rndIssues || []).reduce((n, e) => n + (Number(e.quantity) || 0), 0);
+  // Net of anything handed back: returned units are already back in main stock.
+  const rndIssued = (part.rndIssues || []).reduce(
+    (n, e) => n + (Number(e.quantity) || 0) - (Number(e.returnedQuantity) || 0),
+    0
+  );
   const sampleOut = Number(part.sampleStock) || 0;
   return { appliedIn, kits, rndIssued, sampleOut, ledgerMain: r3(appliedIn - kits - rndIssued - sampleOut) };
 }

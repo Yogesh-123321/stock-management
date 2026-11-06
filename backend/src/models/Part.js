@@ -56,6 +56,17 @@ const documentHistoryEntrySchema = new mongoose.Schema(
   `personName` is a snapshot of their name at issue time, so the ledger
   still reads correctly even if that user is later renamed or deactivated.
 */
+// One entry per time (part of) an R&D issue is handed back. Returned units
+// leave rndStock and go back into the main stock (quantityInStock).
+const rndReturnEntrySchema = new mongoose.Schema(
+  {
+    quantity: { type: Number, required: true, min: 0 },
+    returnedBy: { type: String, trim: true, default: "" }, // who marked it returned
+    remarks: { type: String, trim: true, default: "" },
+  },
+  { timestamps: { createdAt: "date", updatedAt: false } }
+);
+
 const rndIssueEntrySchema = new mongoose.Schema(
   {
     person: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
@@ -63,6 +74,10 @@ const rndIssueEntrySchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 1 },
     issuedBy: { type: String, trim: true, default: "" },
     remarks: { type: String, trim: true, default: "" },
+    // Total handed back so far (sum of `returns`). Still held by the person
+    // = quantity - returnedQuantity.
+    returnedQuantity: { type: Number, default: 0, min: 0 },
+    returns: { type: [rndReturnEntrySchema], default: [] },
   },
   { timestamps: { createdAt: "date", updatedAt: false } }
 );

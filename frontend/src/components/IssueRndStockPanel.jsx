@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
 import api from "@/lib/api";
-import { FlaskConical, ChevronDown, ChevronRight, User } from "lucide-react";
+import { FlaskConical, ChevronDown, ChevronRight, User, Undo2 } from "lucide-react";
 
 const fmtDate = (d) =>
   d
@@ -215,8 +215,13 @@ export default function IssueRndStockPanel({ onIssued }) {
                             {it.remarks ? ` · ${it.remarks}` : ""}
                           </div>
                         </div>
-                        <span className="shrink-0 font-mono-tech text-xs text-muted-foreground">
+                        <span className="shrink-0 text-right font-mono-tech text-xs text-muted-foreground">
                           {it.quantity}
+                          {Number(it.returnedQuantity) > 0 && (
+                            <span className="block text-[10px] text-emerald-600">
+                              {it.returnedQuantity} returned
+                            </span>
+                          )}
                         </span>
                       </li>
                     ))}
@@ -227,7 +232,14 @@ export default function IssueRndStockPanel({ onIssued }) {
         )}
       </CardContent>
     </Card>
-    <RndIssueHistoryByUser reloadKey={historyReloadKey} />
+    <RndIssueHistoryByUser
+      reloadKey={historyReloadKey}
+      onReturned={(updatedPart) => {
+        // Keep the part picked above in step with the new main / R&D stock.
+        setPart((p) => (p && updatedPart && p._id === updatedPart._id ? { ...p, ...updatedPart } : p));
+        onIssued?.(updatedPart);
+      }}
+    />
     </div>
   );
 }
@@ -237,11 +249,52 @@ export default function IssueRndStockPanel({ onIssued }) {
   every part issued to them with quantity, date, who issued it and the
   remarks (if any). Covers all parts — not just the one picked above.
 */
-function RndIssueHistoryByUser({ reloadKey }) {
+function RndIssueHistoryByUser({ reloadKey, onReturned }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState({}); // key -> bool
+  const [localReload, setLocalReload] = useState(0);
+  // Which issue row is being marked as returned: { issue, personName }
+  const [returning, setReturning] = useState(null);
+  const [retQty, setRetQty] = useState("");
+  const [retRemarks, setRetRemarks] = useState("");
+  const [savingReturn, setSavingReturn] = useState(false);
+
+  const startReturn = (g, it) => {
+    setReturning({ issue: it, personName: g.personName });
+    setRetQty(String(it.outstandingQuantity));
+    setRetRemarks("");
+  };
+
+  const confirmReturn = async () => {
+    if (!returning) return;
+    const { issue } = returning;
+    const q = Number(retQty);
+    if (!retQty || Number.isNaN(q) || q <= 0) {
+      toast.error("Enter a valid quantity to return");
+      return;
+    }
+    if (q > issue.outstandingQuantity) {
+      toast.error(`Only ${issue.outstandingQuantity} unit(s) are still with ${returning.personName}`);
+      return;
+    }
+    setSavingReturn(true);
+    try {
+      const { data } = await api.patch(`/parts/${issue.partId}/rnd-stock/${issue._id}/return`, {
+        quantity: q,
+        remarks: retRemarks.trim(),
+      });
+      toast.success(`Returned ${q} unit(s) of ${issue.ttUniquePartNumber} to main stock`);
+      setReturning(null);
+      setLocalReload((k) => k + 1);
+      onReturned?.(data);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not mark this as returned");
+    } finally {
+      setSavingReturn(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -266,7 +319,7 @@ function RndIssueHistoryByUser({ reloadKey }) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [reloadKey, search]);
+  }, [reloadKey, localReload, search]);
 
   const keyOf = (g) => g.personId || `name:${g.personName}`;
   const isOpen = (g) => (search.trim() ? true : !!expanded[keyOf(g)]);
@@ -280,7 +333,8 @@ function RndIssueHistoryByUser({ reloadKey }) {
           R&amp;D stock history — user wise
         </CardTitle>
         <CardDescription>
-          Who has been issued which part from R&amp;D stock, with the quantity, date and remarks.
+          Who has been issued which part from R&amp;D stock, with the quantity, date and remarks. Use
+          “Mark as returned” when a part comes back — it goes back into main stock.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -318,7 +372,17 @@ function RndIssueHistoryByUser({ reloadKey }) {
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {g.partCount} part{g.partCount === 1 ? "" : "s"} ·{" "}
                       <span className="font-mono-tech font-semibold text-foreground">{g.totalQuantity}</span>{" "}
-                      unit{g.totalQuantity === 1 ? "" : "s"} issued · last {fmtDate(g.lastIssuedAt)}
+                      issued
+                      {g.returnedQuantity > 0 && (
+                        <>
+                          {" · "}
+                          <span className="font-mono-tech font-semibold text-emerald-600">{g.returnedQuantity}</span>{" "}
+                          returned
+                        </>
+                      )}
+                      {" · "}
+                      <span className="font-mono-tech font-semibold text-foreground">{g.outstandingQuantity}</span>{" "}
+                      with them · last {fmtDate(g.lastIssuedAt)}
                     </span>
                   </button>
 
@@ -332,6 +396,7 @@ function RndIssueHistoryByUser({ reloadKey }) {
                             <th className="px-3 py-1.5 text-right font-semibold">Qty</th>
                             <th className="px-3 py-1.5 font-semibold">Issued by</th>
                             <th className="px-3 py-1.5 font-semibold">Remarks</th>
+                            <th className="px-3 py-1.5 font-semibold">Status</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -350,6 +415,34 @@ function RndIssueHistoryByUser({ reloadKey }) {
                               </td>
                               <td className="px-3 py-1.5 text-xs text-muted-foreground">{it.issuedBy || "—"}</td>
                               <td className="px-3 py-1.5 text-xs">{it.remarks || "—"}</td>
+                              <td className="px-3 py-1.5 text-xs">
+                                {it.outstandingQuantity > 0 ? (
+                                  <div className="flex flex-col items-start gap-1">
+                                    {it.returnedQuantity > 0 && (
+                                      <span className="text-emerald-600">{it.returnedQuantity} returned</span>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={() => startReturn(g, it)}
+                                    >
+                                      <Undo2 className="mr-1 h-3 w-3" />
+                                      Mark as returned
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <span className="text-emerald-600">Returned</span>
+                                )}
+                                {(it.returns || []).map((r, ri) => (
+                                  <div key={r._id || ri} className="mt-0.5 text-[11px] text-muted-foreground">
+                                    {fmtDate(r.date)} · {r.quantity} back
+                                    {r.returnedBy ? ` · by ${r.returnedBy}` : ""}
+                                    {r.remarks ? ` · ${r.remarks}` : ""}
+                                  </div>
+                                ))}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -359,6 +452,53 @@ function RndIssueHistoryByUser({ reloadKey }) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {returning && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md space-y-3 rounded-lg border border-border bg-card p-5 shadow-xl">
+              <h3 className="font-display text-base font-semibold">Mark as returned</h3>
+              <p className="text-sm text-muted-foreground">
+                <span className="font-mono-tech font-semibold text-foreground">
+                  {returning.issue.ttUniquePartNumber}
+                </span>{" "}
+                from {returning.personName}. The returned quantity is removed from R&amp;D stock and added back
+                to main stock.
+              </p>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Quantity returned (max {returning.issue.outstandingQuantity})
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  max={returning.issue.outstandingQuantity}
+                  className="font-mono-tech"
+                  value={retQty}
+                  onChange={(e) => setRetQty(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Remarks
+                </label>
+                <Input
+                  placeholder="Remarks (optional)"
+                  value={retRemarks}
+                  onChange={(e) => setRetRemarks(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" disabled={savingReturn} onClick={() => setReturning(null)}>
+                  Cancel
+                </Button>
+                <Button type="button" disabled={savingReturn} onClick={confirmReturn}>
+                  <Undo2 className="mr-1.5 h-4 w-4" />
+                  {savingReturn ? "Saving…" : "Mark as returned"}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </CardContent>

@@ -463,6 +463,28 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     entryType: "rnd_issue",
   }));
 
+  // Every time R&D stock is handed back (see returnRndStock) becomes an "in"
+  // ledger line, so the running balance keeps matching quantityInStock.
+  const rndReturnMovements = [];
+  for (const issue of part.rndIssues || []) {
+    for (const ret of issue.returns || []) {
+      rndReturnMovements.push({
+        _id: ret._id,
+        date: ret.date || ret.createdAt,
+        direction: "in",
+        type: "rnd_returned",
+        quantity: ret.quantity,
+        party: { role: "rnd", id: null, name: issue.personName },
+        reference: { type: "R&D return", number: null, id: null },
+        matchType: null,
+        enteredBy: ret.returnedBy || null,
+        remarks: ret.remarks || "Returned from R&D stock to main stock",
+        stockApplied: true,
+        entryType: "rnd_return",
+      });
+    }
+  }
+
   // Samples issued to buyers (out) and received back (in). Both are records,
   // not deletable from the ledger — undo a sample by receiving it back.
   const sampleIssuesForPart = await SampleIssue.find({ "lines.part": part._id }).sort({ createdAt: 1 }).lean();
@@ -545,6 +567,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     ...kitMovements,
     ...kitRevertMovements,
     ...rndMovements,
+    ...rndReturnMovements,
     ...sampleMovements,
     ...invoiceDeletionMovements,
   ];
@@ -708,13 +731,19 @@ export const getRndIssuesByUser = asyncHandler(async (req, res) => {
           personId: r.person ? String(r.person) : null,
           personName: r.personName || "Unknown",
           totalQuantity: 0,
+          returnedQuantity: 0,
+          outstandingQuantity: 0,
           issueCount: 0,
           lastIssuedAt: null,
           issues: [],
         };
         byPerson.set(key, group);
       }
-      group.totalQuantity += Number(r.quantity) || 0;
+      const issuedQty = Number(r.quantity) || 0;
+      const returnedQty = Number(r.returnedQuantity) || 0;
+      group.totalQuantity = r3(group.totalQuantity + issuedQty);
+      group.returnedQuantity = r3(group.returnedQuantity + returnedQty);
+      group.outstandingQuantity = r3(group.outstandingQuantity + (issuedQty - returnedQty));
       group.issueCount += 1;
       if (!group.lastIssuedAt || new Date(r.date) > new Date(group.lastIssuedAt)) {
         group.lastIssuedAt = r.date;
@@ -726,6 +755,15 @@ export const getRndIssuesByUser = asyncHandler(async (req, res) => {
         itemDescription: p.itemDescription,
         unit: p.unit || "",
         quantity: r.quantity,
+        returnedQuantity: returnedQty,
+        outstandingQuantity: r3(issuedQty - returnedQty),
+        returns: (r.returns || []).map((x) => ({
+          _id: x._id,
+          quantity: x.quantity,
+          date: x.date,
+          returnedBy: x.returnedBy || "",
+          remarks: x.remarks || "",
+        })),
         date: r.date,
         issuedBy: r.issuedBy || "",
         remarks: r.remarks || "",
@@ -749,7 +787,9 @@ export const getRndIssuesByUser = asyncHandler(async (req, res) => {
               ...g,
               issues,
               issueCount: issues.length,
-              totalQuantity: issues.reduce((n, i) => n + (Number(i.quantity) || 0), 0),
+              totalQuantity: r3(issues.reduce((n, i) => n + (Number(i.quantity) || 0), 0)),
+              returnedQuantity: r3(issues.reduce((n, i) => n + (Number(i.returnedQuantity) || 0), 0)),
+              outstandingQuantity: r3(issues.reduce((n, i) => n + (Number(i.outstandingQuantity) || 0), 0)),
             }
           : null;
       })
@@ -763,6 +803,66 @@ export const getRndIssuesByUser = asyncHandler(async (req, res) => {
   groups.sort((a, b) => a.personName.localeCompare(b.personName));
 
   res.json(groups);
+});
+
+/*
+  PATCH /api/parts/:id/rnd-stock/:issueId/return  (mark R&D stock as returned)
+  Body: { quantity?, remarks? } — quantity defaults to everything the person
+  still holds from that issue; a smaller number records a partial return.
+
+  The returned quantity leaves rndStock and goes straight back into main
+  stock (quantityInStock) — the exact reverse of issueRndStock. Each return
+  is kept on the issue (issue.returns) and shows up as an "in" line in the
+  part's history, so the ledger balance keeps matching main stock.
+*/
+export const returnRndStock = asyncHandler(async (req, res) => {
+  const part = await Part.findById(req.params.id);
+  if (!part) {
+    res.status(404);
+    throw new Error("Part not found");
+  }
+  const issue = part.rndIssues.id(req.params.issueId);
+  if (!issue) {
+    res.status(404);
+    throw new Error("That R&D issue was not found on this part");
+  }
+
+  const outstanding = r3((Number(issue.quantity) || 0) - (Number(issue.returnedQuantity) || 0));
+  if (outstanding <= 0) {
+    res.status(400);
+    throw new Error("This R&D issue has already been fully returned");
+  }
+
+  const raw = req.body.quantity;
+  const qty =
+    raw === undefined || raw === null || raw === "" ? outstanding : r3(Number(raw));
+  if (!qty || Number.isNaN(qty) || qty <= 0) {
+    res.status(400);
+    throw new Error("Quantity to return must be a positive number");
+  }
+  if (qty > outstanding) {
+    res.status(400);
+    throw new Error(`Only ${outstanding} unit(s) are still with ${issue.personName} from this issue`);
+  }
+  if (qty > (Number(part.rndStock) || 0)) {
+    res.status(400);
+    throw new Error(
+      `R&D stock for this part is only ${part.rndStock} — cannot return ${qty}. Please check the part's stock figures.`
+    );
+  }
+
+  part.rndStock = r3(part.rndStock - qty);
+  part.quantityInStock = r3((Number(part.quantityInStock) || 0) + qty);
+  issue.returnedQuantity = r3((Number(issue.returnedQuantity) || 0) + qty);
+  issue.returns.push({
+    quantity: qty,
+    returnedBy: req.user?.name || req.user?.username || "",
+    remarks: req.body.remarks ? String(req.body.remarks).trim() : "",
+  });
+
+  await part.save();
+
+  res.json(part);
 });
 
 /*
@@ -1114,7 +1214,8 @@ const PARTS_CSV_FIELDS = [
     label: "R&D stock issued to",
     get: (p) =>
       (p.rndIssues || [])
-        .map((i) => `${i.personName} (${i.quantity})`)
+        .filter((i) => (Number(i.quantity) || 0) - (Number(i.returnedQuantity) || 0) > 0)
+        .map((i) => `${i.personName} (${r3((Number(i.quantity) || 0) - (Number(i.returnedQuantity) || 0))})`)
         .filter(Boolean)
         .join(" / "),
   },
@@ -1513,7 +1614,11 @@ export const exportStockSummaryXlsx = asyncHandler(async (req, res) => {
     const sample = p.sampleStock || 0;
     const kits = kitByPart.get(String(p._id)) || 0;
     const expected = main + pd.iqc + pd.awaiting + rnd + sample;
-    const rndIssued = (p.rndIssues || []).reduce((n, e) => n + (Number(e.quantity) || 0), 0);
+    // Net of anything handed back (returned units are back in main stock).
+    const rndIssued = (p.rndIssues || []).reduce(
+      (n, e) => n + (Number(e.quantity) || 0) - (Number(e.returnedQuantity) || 0),
+      0
+    );
     const chk = checkStockMismatch({
       main,
       iqc: pd.iqc,

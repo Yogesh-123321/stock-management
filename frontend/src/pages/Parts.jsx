@@ -2160,6 +2160,11 @@ useEffect(() => {
                                       Sample received back
                                     </Badge>
                                   )}
+                                  {e.type === "rnd_returned" && (
+                                    <Badge variant="success" title="Returned from R&D stock back into main stock">
+                                      Returned from R&amp;D
+                                    </Badge>
+                                  )}
                                   {e.type === "kit_reverted" && (
                                     <Badge variant="success" title="Put back into main stock from an issued kit">
                                       Reverted to stock
@@ -2285,6 +2290,8 @@ useEffect(() => {
                                 {e.entryType !== "kit_revert" &&
                                   e.entryType !== "sample_issue" &&
                                   e.entryType !== "sample_return" &&
+                                  e.entryType !== "rnd_issue" &&
+                                  e.entryType !== "rnd_return" &&
                                   e.entryType !== "invoice_deletion" && (
                                   <Button
                                     type="button"

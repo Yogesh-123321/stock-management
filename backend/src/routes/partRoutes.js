@@ -11,6 +11,7 @@ import {
   createPart,
   adjustPartStock,
   issueRndStock,
+  returnRndStock,
   getRndIssuesByUser,
   getDuplicateParts,
   getDuplicateCriteria,
@@ -109,6 +110,15 @@ router.patch(
   protect,
   requirePermission("part.approve"),
   issueRndStock
+);
+
+// Marking R&D stock as returned puts it back into main stock — admin only,
+// same as issuing it.
+router.patch(
+  "/:id/rnd-stock/:issueId/return",
+  protect,
+  requirePermission("part.approve"),
+  returnRndStock
 );
 
 // Editing and deleting the parts master is ADMIN ONLY — part.approve is

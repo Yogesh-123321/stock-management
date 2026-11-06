@@ -8,6 +8,7 @@ import Vendor from "../models/Vendor.js";
 import { parseKitWorkbook } from "../utils/parseKitSheet.js";
 import { getAvailableBatches, allocateFromBatches } from "../utils/batchAllocation.js";
 import { returnedMap } from "../utils/kitReturn.js";
+import { supplyHintsByPart } from "../utils/supplyHints.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -502,8 +503,32 @@ async function attachPreviouslyIssued(list) {
 // Adds `templateRemarks` (the BOM row's note/remarks on the kit template) to
 // every line of every issue in `list`, matched by part number (and reference
 // designator when the part sits on several rows). Shown in the edit window.
+async function attachSupplyHints(arr) {
+  const lines = arr.flatMap((iss) => iss.lines || []);
+  const partIds = new Set();
+  const codesWithoutId = new Set();
+  for (const l of lines) {
+    const id = l.part?._id || l.part;
+    if (id) partIds.add(String(id));
+    else if (l.ttUniquePartNumber) codesWithoutId.add(l.ttUniquePartNumber);
+  }
+  let codeToId = new Map();
+  if (codesWithoutId.size) {
+    const found = await Part.find({ ttUniquePartNumber: { $in: [...codesWithoutId] } }).select("ttUniquePartNumber").lean();
+    codeToId = new Map(found.map((p) => [p.ttUniquePartNumber, String(p._id)]));
+    for (const id of codeToId.values()) partIds.add(id);
+  }
+  const supply = await supplyHintsByPart([...partIds]);
+  for (const l of lines) {
+    const id = String(l.part?._id || l.part || codeToId.get(l.ttUniquePartNumber) || "");
+    l.supply = supply.get(id) || null;
+  }
+}
+
 async function attachTemplateRemarks(list) {
   const arr = Array.isArray(list) ? list : [list];
+  // Where else a short part might be found (R&D / samples / pending invoice).
+  await attachSupplyHints(arr);
   const ids = new Set();
   for (const iss of arr) {
     const id = iss.kitTemplate?._id || iss.kitTemplate;
@@ -650,12 +675,17 @@ async function withResolvedItems(templateDoc) {
     })
   );
 
+  // Stock that exists but isn't in main stock (R&D, samples, pending invoice),
+  // so a short part can point at where more of it is.
+  const supplyByPart = await supplyHintsByPart([...byCode.values()].map((p) => p._id));
+
   template.items = (template.items || []).map((it) => {
     const matchedPart = byCode.get(it.ttUniquePartNumber) || null;
     return {
       ...it,
       matchedPart,
       batches: matchedPart ? batchesByPart.get(String(matchedPart._id)) || [] : [],
+      supply: matchedPart ? supplyByPart.get(String(matchedPart._id)) || null : null,
     };
   });
   return template;

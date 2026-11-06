@@ -96,6 +96,64 @@ const issueXlsxName = (issue) =>
 // float noise like 0.1 * 3 = 0.30000000000000004 out of the screens and payloads.
 const r4 = (n) => Math.round((Number(n) || 0) * 1e4) / 1e4;
 
+/*
+  Shown under a "Short" badge: where more of this part might be found when
+  main stock can't cover it — set aside for R&D, out as samples, or received
+  but still waiting on its tax invoice — each with the quantity. `supply`
+  comes from the server (utils/supplyHints.js); nothing here changes stock.
+*/
+function ShortageHints({ supply, shortBy }) {
+  if (!supply) return null;
+  const { rnd, samples, pendingInvoice } = supply;
+  if (!rnd && !samples && !pendingInvoice) return null;
+  const q = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+  return (
+    <div className="mt-1.5 max-w-[260px] space-y-1 whitespace-normal rounded-md border border-border bg-background/60 p-1.5 text-[10px] leading-snug">
+      {shortBy > 0 && <div className="font-semibold text-muted-foreground">Short by {q(shortBy)} — maybe here:</div>}
+      {rnd && (
+        <div>
+          <span className="font-semibold text-sky-700 dark:text-sky-400">Available in R&amp;D: {q(rnd.quantity)}</span>
+          {rnd.holders?.length > 0 && (
+            <span className="text-muted-foreground"> ({rnd.holders.map((h) => `${h.name} ${q(h.quantity)}`).join(", ")})</span>
+          )}
+        </div>
+      )}
+      {samples && (
+        <div>
+          <span className="font-semibold text-violet-700 dark:text-violet-400">Issued as sample: {q(samples.quantity)}</span>
+          {samples.holders?.length > 0 && (
+            <span className="text-muted-foreground">
+              {" "}
+              (
+              {samples.holders
+                .map((h) => `${h.buyerName || "buyer"}${h.issueCode ? ` · ${h.issueCode}` : ""} ${q(h.quantity)}`)
+                .join(", ")}
+              )
+            </span>
+          )}
+        </div>
+      )}
+      {pendingInvoice && (
+        <div>
+          <span className="font-semibold text-amber-700 dark:text-amber-400">
+            Invoice pending: {q(pendingInvoice.quantity)}
+          </span>
+          {pendingInvoice.entries?.length > 0 && (
+            <span className="text-muted-foreground">
+              {" "}
+              (
+              {pendingInvoice.entries
+                .map((e) => `${[e.vendorName, e.reference].filter(Boolean).join(" · ") || "received"} ${q(e.quantity)}`)
+                .join(", ")}
+              )
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Client-side mirror of the backend's FIFO batch walk (see
 // utils/batchAllocation.js) — used only to preview, before a kit is
 // actually issued, which batch(es) a line's qty will be drawn from.
@@ -338,6 +396,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
           itemDescription: l.part?.itemDescription || l.itemDescription,
           // Note / remarks on this part's row of the kit template.
           remarks: l.templateRemarks || "",
+          supply: l.supply || null,
           qtyPerKit: l.qtyPerKit,
           unit: l.part?.unit || "",
           required,
@@ -770,6 +829,13 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                             <XCircle className="h-3 w-3" />
                             Short {st.short}
                           </Badge>
+                        )}
+                        {/* Only when main stock itself can't cover what's still needed. */}
+                        {st.kind === "short" && r4((Number(p.required) || 0) - st.prev) > (Number(p.available) || 0) + 1e-9 && (
+                          <ShortageHints
+                            supply={p.supply}
+                            shortBy={r4((Number(p.required) || 0) - st.prev - (Number(p.available) || 0))}
+                          />
                         )}
                         {/* Close the part out by hand, even if the required qty is not met. */}
                         {!(st.manual && !st.thisEdit) && st.kind !== "over" && !(st.kind === "completed" && !st.manual) && (
@@ -2812,6 +2878,12 @@ export default function IssueKit() {
                                 <XCircle className="h-3 w-3" />
                                 Short
                               </Badge>
+                            )}
+                            {!p.ok && (
+                              <ShortageHints
+                                supply={p.supply}
+                                shortBy={r4((Number(p.required) || 0) - (Number(p.available) || 0))}
+                              />
                             )}
                           </td>
                         </tr>

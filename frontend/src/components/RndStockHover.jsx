@@ -96,7 +96,12 @@ export default function RndStockHover({ issues, children }) {
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium truncate">{it.personName}</span>
                       <span className="font-mono-tech text-xs text-muted-foreground shrink-0">
-                        {fmtQty(it.quantity)}
+                        {fmtQty((Number(it.quantity) || 0) - (Number(it.returnedQuantity) || 0))}
+                        {Number(it.returnedQuantity) > 0 && (
+                          <span className="ml-1 text-[10px] text-emerald-600">
+                            ({fmtQty(it.returnedQuantity)} of {fmtQty(it.quantity)} returned)
+                          </span>
+                        )}
                       </span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
