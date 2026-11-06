@@ -10,6 +10,7 @@ import { useAutoExtractOnUpload } from "@/lib/useAutoExtractOnUpload";
 import { findMismatches } from "@/lib/documentVerify";
 import DocumentMismatchWarning from "@/components/DocumentMismatchWarning";
 import FieldError from "@/components/FieldError";
+import FamilySelect from "@/components/ui/FamilySelect";
 import { useFormValidation } from "@/lib/useFormValidation";
 import { UploadCloud, SkipForward, Link2, RefreshCw, Loader2 } from "lucide-react";
 
@@ -27,6 +28,17 @@ const PO_DOC_MAPPING = [
   { extractedKey: "documentNumber", enteredKey: "documentNumber", label: "PO number", type: "text" },
   { extractedKey: "totalQuantity", enteredKey: "totalQuantity", label: "Total quantity", type: "number" },
 ];
+
+// Grouping key / option text for the open-document picker — "PO-12", "PO-12a"
+// and "PO-12-b" share one entry in the first dropdown.
+const docNumberOf = (d) => d.documentNumber || "(no number)";
+const docOptionLabel = (d, vendor) =>
+  docNumberOf(d) +
+  " · " +
+  (d.vendor?.companyName || vendor?.companyName || "") +
+  " · " +
+  fmtDate(d.createdAt) +
+  (d.totalQuantity != null ? ` · Qty ${d.totalQuantity}` : "");
 
 export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
   const [mode, setMode] = useState("existing"); // "existing" | "upload"
@@ -195,30 +207,20 @@ export default function POStep({ vendor, onUploaded, onSkip, onBack }) {
                   Refresh
                 </button>
               </div>
-              <select
+              <FamilySelect
+                items={openDocs}
+                getNumber={docNumberOf}
+                getLabel={(d) => docOptionLabel(d, vendor)}
                 value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
-                style={{ backgroundColor: "#ffffff" }}
-                className="flex h-10 w-full items-center rounded-md border border-input bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">
-                  {loadingDocs
+                onChange={setSelectedId}
+                placeholder={
+                  loadingDocs
                     ? "Loading open purchase orders..."
                     : openDocs.length === 0
                     ? "No open purchase orders for this vendor"
-                    : "Select an open purchase order"}
-                </option>
-                {openDocs.map((d) => (
-                  <option key={d._id} value={d._id}>
-                    {(d.documentNumber || "(no number)") +
-                      " · " +
-                      (d.vendor?.companyName || vendor.companyName) +
-                      " · " +
-                      fmtDate(d.createdAt) +
-                      (d.totalQuantity != null ? ` · Qty ${d.totalQuantity}` : "")}
-                  </option>
-                ))}
-              </select>
+                    : "Select an open purchase order"
+                }
+              />
               <p className="text-xs text-muted-foreground">
                 Only purchase orders with an <strong>open</strong> status are listed.
               </p>

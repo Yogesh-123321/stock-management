@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import FamilySelect from "@/components/ui/FamilySelect";
+import { kitNumberOf, kitOptionLabel } from "@/lib/kitLabels";
 import {
   Table,
   TableHeader,
@@ -365,20 +366,15 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                     <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Copy from an existing template (optional)
                     </label>
-                    <Select value={copySourceId} onValueChange={setCopySourceId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose a kit to copy…" />
-                      </SelectTrigger>
-                      {/* The editor overlay is z-[120]; the dropdown list is portaled to
-                          <body>, so it needs to sit above it or it opens hidden behind. */}
-                      <SelectContent className="z-[200]">
-                        {existingTemplates.map((t) => (
-                          <SelectItem key={t._id} value={t._id}>
-                            {t.kitName} {t.kitCode ? `(${t.kitCode})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FamilySelect
+                      items={existingTemplates}
+                      getNumber={kitNumberOf}
+                      getLabel={kitOptionLabel}
+                      value={copySourceId}
+                      onChange={setCopySourceId}
+                      placeholder="Choose a kit to copy…"
+                      memberPlaceholder="Choose the exact kit (base or variant)…"
+                    />
                   </div>
                   <Button
                     type="button"

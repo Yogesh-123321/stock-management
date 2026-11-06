@@ -5,7 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import FamilySelect from "@/components/ui/FamilySelect";
+import FamilyNumberCell from "@/components/FamilyNumberCell";
+import { useFamilyRows } from "@/lib/useFamilyRows";
+import { kitNumberOf, kitOptionLabel } from "@/lib/kitLabels";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import VendorSearchSelect from "@/components/VendorSearchSelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
@@ -1159,7 +1162,14 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }
                       )}
                     </td>
                     <td className="px-2.5 py-1.5 text-xs text-muted-foreground">
-                      {formatBatchBreakdown(l.batchBreakdown)}
+                      {l.batchBreakdown?.length > 0 || !l.previousBatches?.length
+                        ? formatBatchBreakdown(l.batchBreakdown)
+                        : null}
+                      {l.previousBatches?.length > 0 && (
+                        <div className="text-[10px] italic" title="Batches this part was drawn from on earlier entries of this kit">
+                          Earlier: {formatBatchBreakdown(l.previousBatches)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
                       {lineManuallyCompleted(l) && !(overBy > 0) ? (
@@ -1177,6 +1187,27 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }
                           {l.qtyShort > 0 && l.manuallyCompleted && (
                             <div className="text-[10px] font-normal text-muted-foreground">{l.qtyShort} short, closed</div>
                           )}
+                          {/* The remark entered when the part was closed — on this entry, or carried
+                              forward from the earlier entry of the kit that closed it. */}
+                          {(() => {
+                            const d = l.manuallyCompleted
+                              ? { reason: l.manuallyCompletedReason, by: l.manuallyCompletedBy, at: l.manuallyCompletedAt, issueCode: "" }
+                              : l.manuallyCompletedEarlierDetail;
+                            if (!d) return null;
+                            return (
+                              <div className="mt-0.5 max-w-[220px] whitespace-pre-wrap break-words text-left text-[10px] font-normal italic text-muted-foreground">
+                                {d.reason ? `Remark: ${d.reason}` : "No remark entered"}
+                                {(d.by || d.issueCode || d.at) && (
+                                  <span className="not-italic opacity-80">
+                                    {" "}
+                                    — {[d.issueCode && `in ${d.issueCode}`, d.by && `by ${d.by}`, d.at && fmtDateTime(d.at)]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </span>
                       ) : l.qtyShort > 0 ? (
                         <span className="text-destructive">{l.qtyShort}</span>
@@ -1691,6 +1722,8 @@ function KitsPanel({
     qty: (i) => Number(i.quantity),
     issuedBy: (i) => i.issuedBy,
   });
+  // 12, 12-A, 12-B collapse into one row; the variants open underneath.
+  const issueFam = useFamilyRows(sortedIssues, (i) => i.issueCode, {});
   const draftSort = useSort();
   const sortedDrafts = draftSort.apply(drafts, {
     date: (d) => (d.updatedAt ? new Date(d.updatedAt).getTime() : null),
@@ -1844,10 +1877,10 @@ function KitsPanel({
                   <TableEmpty colSpan={canManage ? 8 : 7}>No kits issued yet.</TableEmpty>
                 )}
                 {!loadingIssues &&
-                  sortedIssues.map((iss) => (
+                  issueFam.rows.map(({ row: iss, ...entry }) => (
                     <TableRow
                       key={iss._id}
-                      className="cursor-pointer hover:bg-secondary/40"
+                      className={`cursor-pointer hover:bg-secondary/40 ${entry.depth ? "bg-secondary/20" : ""}`}
                       title="Click to preview this kit issue"
                       onClick={() => setPreviewingIssue(iss)}
                     >
@@ -1863,6 +1896,7 @@ function KitsPanel({
                         )}
                       </TableCell>
                       <TableCell>
+                        <FamilyNumberCell entry={entry} onToggle={issueFam.toggle}>
                         <div className="flex flex-wrap items-center gap-1">
                           <span
                             className="inline-block break-all rounded border border-border bg-[hsl(220_20%_97%)] px-1.5 py-0.5 font-mono-tech text-xs tracking-wide"
@@ -1894,6 +1928,7 @@ function KitsPanel({
                             </Badge>
                           )}
                         </div>
+                        </FamilyNumberCell>
                       </TableCell>
                       <TableCell className="truncate">{iss.vendor?.companyName || "—"}</TableCell>
                       <TableCell className="text-right font-mono-tech">{iss.quantity}</TableCell>
@@ -2582,18 +2617,15 @@ export default function IssueKit() {
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Kit template
                 </label>
-                <Select value={templateId} onValueChange={chooseTemplate}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a kit…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {templates.map((t) => (
-                      <SelectItem key={t._id} value={t._id}>
-                        {t.kitName} {t.kitCode ? `(${t.kitCode})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FamilySelect
+                  items={templates}
+                  getNumber={kitNumberOf}
+                  getLabel={kitOptionLabel}
+                  value={templateId}
+                  onChange={chooseTemplate}
+                  placeholder="Choose a kit…"
+                  memberPlaceholder="Choose the exact kit (base or variant)…"
+                />
                 {templates.length === 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     No active kit templates yet — ask an admin to create one under "Templates".

@@ -19,6 +19,10 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import FamilySelect from "@/components/ui/FamilySelect";
+import FamilyNumberCell from "@/components/FamilyNumberCell";
+import FamilyDocumentViewer from "@/components/FamilyDocumentViewer";
+import { useFamilyRows } from "@/lib/useFamilyRows";
 import {
   FileText,
   FileSpreadsheet,
@@ -127,6 +131,8 @@ function DocumentTable({ documentType, emptyLabel }) {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const fam = useFamilyRows(sortedRows, (r) => r.documentNumber, { expandAll: !!search.trim() });
+  const [viewing, setViewing] = useState(null); // { id, members }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -205,16 +211,16 @@ function DocumentTable({ documentType, emptyLabel }) {
                 </td>
               </tr>
             ) : (
-              sortedRows.map((row) => (
-                <tr key={row._id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{row.documentNumber || "—"}</td>
+              fam.rows.map(({ row, ...entry }) => (
+                <tr key={row._id} className={`cursor-pointer hover:bg-accent/40 ${entry.depth ? "border-t bg-muted/20" : "border-t"}`} onClick={() => setViewing({ id: row._id, members: entry.members })} title="Click to view this document here">
+                  <td className="px-3 py-2 font-medium"><FamilyNumberCell entry={entry} onToggle={fam.toggle}>{row.documentNumber || "—"}</FamilyNumberCell></td>
                   <td className="px-3 py-2">{row.vendor?.companyName || row.vendor?.name || "—"}</td>
                   <td className="px-3 py-2">{fmtDate(row.receivedDate || row.createdAt)}</td>
                   <td className="px-3 py-2">
                     <StatusPill status={row.lifecycleStatus} />
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button variant="outline" size="sm" asChild>
                         <a href={fileUrl(row.documentUrl)} target="_blank" rel="noreferrer">
                           <Download className="mr-1 h-4 w-4" /> File
@@ -244,6 +250,19 @@ function DocumentTable({ documentType, emptyLabel }) {
           </tbody>
         </table>
       </div>
+
+      {viewing && (
+        <FamilyDocumentViewer
+          open
+          onClose={() => setViewing(null)}
+          kind="upload"
+          describe={(r) => `${r.vendor?.companyName || r.vendor?.name || "Vendor"} · ${fmtDate(r.receivedDate || r.createdAt)}${r.lifecycleStatus ? ` · ${r.lifecycleStatus === "closed" ? "Closed" : "Open"}` : ""}`}
+          members={viewing.members}
+          startId={viewing.id}
+          numberOf={(r) => r.documentNumber}
+          title="Document"
+        />
+      )}
     </div>
   );
 }
@@ -295,6 +314,8 @@ function GeneratedPoTable() {
     total: (r) => Number(r.totalAmount),
     status: (r) => r.status,
   });
+  const fam = useFamilyRows(sortedVisible, (r) => r.voucherNo, { expandAll: !!search.trim() });
+  const [viewing, setViewing] = useState(null); // { id, members }
 
   const toggle = async (row) => {
     const next = row.status === "closed" ? "open" : "closed";
@@ -365,9 +386,9 @@ function GeneratedPoTable() {
                 </td>
               </tr>
             ) : (
-              sortedVisible.map((row, i) => (
-                <tr key={row._id} className={i % 2 ? "border-t bg-muted/30" : "border-t"}>
-                  <td className="px-3 py-1.5 font-medium">{row.voucherNo}</td>
+              fam.rows.map(({ row, ...entry }, i) => (
+                <tr key={row._id} className={`cursor-pointer hover:bg-accent/40 ${entry.depth ? "border-t bg-muted/20" : i % 2 ? "border-t bg-muted/30" : "border-t"}`} onClick={() => setViewing({ id: row._id, members: entry.members })} title="Click to view this document here">
+                  <td className="px-3 py-1.5 font-medium"><FamilyNumberCell entry={entry} onToggle={fam.toggle}>{row.voucherNo}</FamilyNumberCell></td>
                   <td className="px-3 py-1.5">{row.supplierName || "—"}</td>
                   <td className="px-3 py-1.5">{fmtDate(row.voucherDate)}</td>
                   <td className="px-3 py-1.5 text-right">₹ {fmtAmount(row.totalAmount)}</td>
@@ -375,7 +396,7 @@ function GeneratedPoTable() {
                     <StatusPill status={row.status} />
                   </td>
                   <td className="px-3 py-1.5">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button variant="outline" size="sm" onClick={() => download(row)}>
                         <Download className="mr-1 h-4 w-4" /> PDF
                       </Button>
@@ -403,6 +424,19 @@ function GeneratedPoTable() {
           </tbody>
         </table>
       </div>
+
+      {viewing && (
+        <FamilyDocumentViewer
+          open
+          onClose={() => setViewing(null)}
+          kind="po"
+          describe={(r) => `${r.supplierName || "Supplier"} · ${fmtDate(r.voucherDate)}${r.status ? ` · ${r.status === "closed" ? "Closed" : "Open"}` : ""}`}
+          members={viewing.members}
+          startId={viewing.id}
+          numberOf={(r) => r.voucherNo}
+          title="Purchase order"
+        />
+      )}
     </div>
   );
 }
@@ -424,6 +458,8 @@ function GeneratedPiTable() {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const fam = useFamilyRows(sortedRows, (r) => r.invoiceNo, { expandAll: !!search.trim() });
+  const [viewing, setViewing] = useState(null); // { id, members }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -513,9 +549,9 @@ function GeneratedPiTable() {
                 </td>
               </tr>
             ) : (
-              sortedRows.map((row) => (
-                <tr key={row._id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{row.invoiceNo}</td>
+              fam.rows.map(({ row, ...entry }) => (
+                <tr key={row._id} className={`cursor-pointer hover:bg-accent/40 ${entry.depth ? "border-t bg-muted/20" : "border-t"}`} onClick={() => setViewing({ id: row._id, members: entry.members })} title="Click to view this document here">
+                  <td className="px-3 py-2 font-medium"><FamilyNumberCell entry={entry} onToggle={fam.toggle}>{row.invoiceNo}</FamilyNumberCell></td>
                   <td className="px-3 py-2">{row.buyerName}</td>
                   <td className="px-3 py-2">{fmtDate(row.invoiceDate)}</td>
                   <td className="px-3 py-2 text-right">₹ {fmtAmount(row.totalAmount)}</td>
@@ -523,7 +559,7 @@ function GeneratedPiTable() {
                     <StatusPill status={row.status} />
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button variant="outline" size="sm" onClick={() => download(row)}>
                         <Download className="mr-1 h-4 w-4" /> PDF
                       </Button>
@@ -551,6 +587,19 @@ function GeneratedPiTable() {
           </tbody>
         </table>
       </div>
+
+      {viewing && (
+        <FamilyDocumentViewer
+          open
+          onClose={() => setViewing(null)}
+          kind="pi"
+          describe={(r) => `${r.buyerName || "Buyer"} · ${fmtDate(r.invoiceDate)}${r.status ? ` · ${r.status === "closed" ? "Closed" : "Open"}` : ""}`}
+          members={viewing.members}
+          startId={viewing.id}
+          numberOf={(r) => r.invoiceNo}
+          title="Proforma invoice"
+        />
+      )}
     </div>
   );
 }
@@ -1243,6 +1292,7 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
   });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const fam = useFamilyRows(sortedRows, (r) => r.invoiceNumber, { expandAll: !!search.trim() });
   const [open, setOpen] = useState(false);
   const [openDocs, setOpenDocs] = useState([]);
   const [docType, setDocType] = useState("Proforma Invoice");
@@ -1431,18 +1481,20 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
                 </td>
               </tr>
             ) : (
-              sortedRows.map((row) => (
+              fam.rows.map(({ row, ...entry }) => (
                 <tr
                   key={row._id}
-                  className="cursor-pointer border-t odd:bg-muted/20 hover:bg-accent/40"
+                  className={`cursor-pointer border-t odd:bg-muted/20 hover:bg-accent/40 ${entry.depth ? "bg-muted/20" : ""}`}
                   onClick={() => setStockFor(row)}
                   title="Click to see the material booked against this invoice"
                 >
                   <td className="px-3 py-2 font-medium">
-                    <span className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">
-                      <Boxes className="h-3.5 w-3.5" />
-                      {row.invoiceNumber || "—"}
-                    </span>
+                    <FamilyNumberCell entry={entry} onToggle={fam.toggle}>
+                      <span className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">
+                        <Boxes className="h-3.5 w-3.5" />
+                        {row.invoiceNumber || "—"}
+                      </span>
+                    </FamilyNumberCell>
                   </td>
                   <td className="px-3 py-2">{row.vendor?.companyName || row.vendor?.name || "—"}</td>
                   <td className="px-3 py-2">
@@ -1519,22 +1571,20 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
               <label className="text-sm font-medium">
                 {docType === "Purchase Order" ? "Open PO" : "Open PI"}
               </label>
-              <select
+              <FamilySelect
+                items={openDocs}
+                getNumber={(d) => d.documentNumber || "(no number)"}
+                getLabel={(d) =>
+                  (d.documentNumber || "(no number)") +
+                  " — " +
+                  (d.vendor?.companyName || d.vendor?.name || "vendor") +
+                  " — " +
+                  fmtDate(d.receivedDate || d.createdAt)
+                }
                 value={selectedDoc}
-                onChange={(e) => setSelectedDoc(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
-              >
-                <option value="">Select…</option>
-                {openDocs.map((d) => (
-                  <option key={d._id} value={d._id}>
-                    {(d.documentNumber || "(no number)") +
-                      " — " +
-                      (d.vendor?.companyName || d.vendor?.name || "vendor") +
-                      " — " +
-                      fmtDate(d.receivedDate || d.createdAt)}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedDoc}
+                placeholder="Select…"
+              />
               {openDocs.length === 0 && (
                 <p className="text-xs text-muted-foreground">Nothing open in this category right now.</p>
               )}

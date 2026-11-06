@@ -4,6 +4,8 @@ import { PackageOpen, PackagePlus, Plus, Search, Trash2, Loader2, ArrowRight, Ar
 import api from "@/lib/api";
 import { SortableHead, useSort } from "@/components/SortableHead";
 import { cn } from "@/lib/utils";
+import { ChevronRight } from "lucide-react";
+import { useFamilyRows } from "@/lib/useFamilyRows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,6 +99,8 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
   const [kits, setKits] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState([]); // kit issue ids
+  // Issued kits fold into families: 12, 12-A, 12-B share one row until expanded.
+  const kitFam = useFamilyRows(kits, (k) => k.issueCode, {});
   const [returnQty, setReturnQty] = useState({}); // partId -> string
   const [produced, setProduced] = useState([]); // { key, part, quantity, unit, price }
   const [saving, setSaving] = useState(false);
@@ -267,10 +271,23 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
             </p>
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2">
-              {kits.map((k) => {
+              {kitFam.rows.map(({ row: k, ...entry }) => {
                 const on = selected.includes(k._id);
+                const hasVariants = entry.depth === 0 && entry.count > 1;
                 return (
-                  <li key={k._id}>
+                  <li key={k._id} className={cn(entry.depth > 0 && "sm:col-span-2 sm:ml-6")}>
+                    {hasVariants && (
+                      <button
+                        type="button"
+                        onClick={() => kitFam.toggle(entry.key)}
+                        aria-expanded={entry.isOpen}
+                        className="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", entry.isOpen && "rotate-90")} />
+                        {entry.isOpen ? "Hide" : "Show"} {entry.count - 1} other version{entry.count - 1 === 1 ? "" : "s"} (
+                        {k.issueCode} …)
+                      </button>
+                    )}
                     <label
                       className={cn(
                         "flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors",

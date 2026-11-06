@@ -418,7 +418,7 @@ async function attachPreviouslyIssued(list) {
 
   const pool = or.length
     ? await KitIssue.find({ status: "issued", $or: or })
-        .select("kitTemplate kitCode createdAt lines.ttUniquePartNumber lines.qtyIssued lines.manuallyCompleted")
+        .select("kitTemplate kitCode issueCode createdAt lines.ttUniquePartNumber lines.qtyIssued lines.manuallyCompleted lines.manuallyCompletedReason lines.manuallyCompletedBy lines.manuallyCompletedAt lines.batchBreakdown")
         .lean()
     : [];
   const entries = pool.map((d) => ({
@@ -430,6 +430,34 @@ async function attachPreviouslyIssued(list) {
     manual: new Set(
       (d.lines || []).filter((l) => l.manuallyCompleted && l.ttUniquePartNumber).map((l) => l.ttUniquePartNumber)
     ),
+    // part -> batch -> quantity drawn on this entry
+    batches: (() => {
+      const m = new Map();
+      for (const l of d.lines || []) {
+        if (!l.ttUniquePartNumber) continue;
+        const per = m.get(l.ttUniquePartNumber) || new Map();
+        for (const b of l.batchBreakdown || []) {
+          const k = b.batchCode ?? null;
+          per.set(k, qr((per.get(k) || 0) + (Number(b.quantity) || 0)));
+        }
+        m.set(l.ttUniquePartNumber, per);
+      }
+      return m;
+    })(),
+    // part -> who closed it, when, and the remark that was entered with it
+    manualDetail: new Map(
+      (d.lines || [])
+        .filter((l) => l.manuallyCompleted && l.ttUniquePartNumber)
+        .map((l) => [
+          l.ttUniquePartNumber,
+          {
+            reason: l.manuallyCompletedReason || "",
+            by: l.manuallyCompletedBy || "",
+            at: l.manuallyCompletedAt || null,
+            issueCode: d.issueCode || "",
+          },
+        ])
+    ),
   }));
 
   for (const iss of list) {
@@ -438,16 +466,33 @@ async function attachPreviouslyIssued(list) {
     const at = iss.createdAt ? new Date(iss.createdAt).getTime() : 0;
     const prev = {};
     const manualEarlier = new Set();
+    const manualEarlierDetail = new Map(); // earliest entry that closed the part wins
+    const batchesEarlier = new Map(); // part -> batch -> qty drawn on EARLIER entries
     for (const e of entries) {
       if (e.id === String(iss._id) || e.at >= at) continue;
       if (!((tpl && e.tpl === tpl) || (code && e.code === code))) continue;
       for (const [part, qty] of Object.entries(e.totals)) prev[part] = qr((prev[part] || 0) + qty);
-      e.manual.forEach((part) => manualEarlier.add(part));
+      e.batches.forEach((per, part) => {
+        const acc = batchesEarlier.get(part) || new Map();
+        per.forEach((qty, code) => acc.set(code, qr((acc.get(code) || 0) + qty)));
+        batchesEarlier.set(part, acc);
+      });
+      e.manual.forEach((part) => {
+        manualEarlier.add(part);
+        if (!manualEarlierDetail.has(part)) manualEarlierDetail.set(part, e.manualDetail.get(part));
+      });
     }
     for (const line of iss.lines || []) {
       line.qtyPreviouslyIssued = prev[line.ttUniquePartNumber] || 0;
       // Part was manually closed on an EARLIER entry of this kit.
       line.manuallyCompletedEarlier = manualEarlier.has(line.ttUniquePartNumber);
+      // The remark entered when it was closed, so every later entry can show it too.
+      line.manuallyCompletedEarlierDetail = manualEarlierDetail.get(line.ttUniquePartNumber) || null;
+      // Batches this part was drawn from on earlier entries of the kit, so a
+      // batch number stays visible on every later (edited) entry.
+      line.previousBatches = [...(batchesEarlier.get(line.ttUniquePartNumber) || new Map())]
+        .filter(([, qty]) => qty > 0)
+        .map(([batchCode, quantity]) => ({ batchCode, quantity }));
     }
   }
   return list;
@@ -1009,6 +1054,18 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     return null;
   };
 
+  // "Remark: <why> (by X, 12-A)" for a part that was closed by hand — on this
+  // entry or on an earlier entry of the same kit.
+  const manualRemarkText = (ln) => {
+    const d = ln.manuallyCompleted
+      ? { reason: ln.manuallyCompletedReason, by: ln.manuallyCompletedBy, issueCode: "" }
+      : ln.manuallyCompletedEarlier
+      ? ln.manuallyCompletedEarlierDetail
+      : null;
+    if (!d || !d.reason) return "";
+    const who = [d.by, d.issueCode].filter(Boolean).join(", ");
+    return `\nRemark: ${d.reason}${who ? ` (${who})` : ""}`;
+  };
   const firstDataRow = header.number + 1;
   lines.forEach((ln, i) => {
     const st = statusOf(ln);
@@ -1022,8 +1079,11 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
       ln.qtyPreviouslyIssued || 0,
       ln.qtyIssued,
       ln.qtyShort || 0,
-      st ? st.tag : "",
-      batchText(ln.batchBreakdown),
+      st ? st.tag + manualRemarkText(ln) : "",
+      batchText(ln.batchBreakdown) +
+        (ln.previousBatches?.length
+          ? `${ln.batchBreakdown?.length ? "\n" : ""}Earlier: ${batchText(ln.previousBatches)}`
+          : ""),
     ]);
     row.alignment = { vertical: "top", wrapText: true };
     [1, 5, 6, 7, 8, 9, 10].forEach((c) => {
