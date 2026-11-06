@@ -16,10 +16,14 @@
  *   END of the line's batch breakdown (the newest batches it drew from), so
  *   batch balances come out right too.
  *
+ * Works both ways: when the qty per kit goes UP (e.g. 0 -> 1) nothing is
+ * issued extra — the part simply shows as short by what is still missing, and
+ * the kit's "shortage" flag is refreshed. Saved (draft) kits of the template
+ * are corrected too (qty per kit, qty required, short); they never touch stock.
+ *
  * Skipped with a message (nothing changes for them): lines that have had stock
  * reverted, and kits where parts have already been returned by the vendor
- * beyond what the corrected quantity allows. Saved (draft) kits are not
- * touched — they only report.
+ * beyond what the corrected quantity allows.
  */
 import "dotenv/config";
 import mongoose from "mongoose";
@@ -80,6 +84,20 @@ const issues = await KitIssue.find({
 
 const returned = await returnedMap(issues.map((i) => i._id));
 
+// Issued by earlier entries of the same edit chain (only used for partial edits).
+const prevIssuedFor = (issue) => {
+  if (issue.editMode !== "partial") return 0;
+  const root = String(issue.rootIssue || issue._id);
+  let total = 0;
+  for (const other of issues) {
+    if (other.status !== "issued" || String(other._id) === String(issue._id)) continue;
+    if (String(other.rootIssue || other._id) !== root) continue;
+    if ((other.editIndex || 0) >= (issue.editIndex || 0)) continue;
+    for (const l of other.lines) if (l.ttUniquePartNumber === pn) total += Number(l.qtyIssued) || 0;
+  }
+  return total;
+};
+
 const plan = [];
 let totalRefund = 0;
 console.log("Issued kit      kits  per-kit  required  issued          refund");
@@ -100,8 +118,9 @@ for (const issue of issues) {
       console.log(`${name}  SKIPPED — vendor already returned ${back}, more than the corrected issued ${newIssued}.`);
       continue;
     }
-    const wasShort = (line.qtyShort || 0) > 0;
-    const newShort = wasShort ? qr(Math.max(0, newRequired - newIssued)) : 0;
+    // A PARTIAL edit measures what is missing after what earlier entries of its
+    // chain already issued; everything else is measured against the whole kit.
+    const newShort = qr(Math.max(0, newRequired - prevIssuedFor(issue) - newIssued));
 
     // Trim the batch breakdown from the END (newest batch first).
     let remaining = newIssued;
@@ -127,9 +146,18 @@ const drafts = await KitIssue.find({
   status: "draft",
   $or: [{ kitTemplate: template._id }, { kitCode: template.kitCode || "__none__" }],
   "lines.ttUniquePartNumber": pn,
-}).select("kitName kitCode");
-if (drafts.length) {
-  console.log(`\n${drafts.length} saved (draft) kit(s) also carry ${pn} at the old quantity — not touched. Discard and re-make them after this fix.`);
+}).sort({ createdAt: 1 });
+const draftPlan = [];
+for (const d of drafts) {
+  for (const line of d.lines) {
+    if (line.ttUniquePartNumber !== pn) continue;
+    const newRequired = qr(perKit * (Number(d.quantity) || 0));
+    const planned = Number(line.qtyIssued) || 0;
+    const prev = d.editedFrom && d.editMode === "partial" ? prevIssuedFor({ ...d.toObject(), rootIssue: d.rootIssue, editIndex: Infinity }) : 0;
+    const newShort = qr(Math.max(0, newRequired - prev - planned));
+    draftPlan.push({ d, line, newRequired, newShort });
+    console.log(`${(d.issueCode || d.kitName).padEnd(14)}  [saved kit]  required ${line.qtyRequired}->${newRequired}  short ${line.qtyShort || 0}->${newShort}`);
+  }
 }
 
 console.log(`\nStock to give back: ${totalRefund}   (stock ${part.quantityInStock} -> ${qr(part.quantityInStock + totalRefund)})`);
@@ -160,6 +188,21 @@ for (const p of plan) {
     { $set: { hasShortage: fresh.lines.some((l) => (l.qtyShort || 0) > 0) } }
   );
 }
+for (const p of draftPlan) {
+  await KitIssue.updateOne(
+    { _id: p.d._id },
+    {
+      $set: {
+        "lines.$[l].qtyPerKit": perKit,
+        "lines.$[l].qtyRequired": p.newRequired,
+        "lines.$[l].qtyShort": p.newShort,
+      },
+    },
+    { arrayFilters: [{ "l._id": p.line._id }] }
+  );
+  const fresh = await KitIssue.findById(p.d._id).select("lines.qtyShort");
+  await KitIssue.updateOne({ _id: p.d._id }, { $set: { hasShortage: fresh.lines.some((l) => (l.qtyShort || 0) > 0) } });
+}
 if (totalRefund > 0) await Part.updateOne({ _id: part._id }, { $inc: { quantityInStock: totalRefund } });
 for (const it of items) {
   await KitTemplate.updateOne(
@@ -168,5 +211,5 @@ for (const it of items) {
     { arrayFilters: [{ "i._id": it._id }] }
   );
 }
-console.log(`\nDone — ${plan.length} kit line(s) corrected, template updated, ${totalRefund} returned to stock.`);
+console.log(`\nDone — ${plan.length} kit line(s) corrected, ${draftPlan.length} saved kit line(s) corrected, template updated, ${totalRefund} returned to stock.`);
 await mongoose.disconnect();

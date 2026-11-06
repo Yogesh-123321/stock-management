@@ -43,6 +43,17 @@ const kitIssueLineSchema = new mongoose.Schema(
       default: [],
     },
 
+    // Manual completion. Set by hand when a part is being closed even though
+    // the required quantity was never reached (e.g. the part is discontinued
+    // midway through the order). It changes NO stock — it only makes this part
+    // show as "Completed" (here and in every later entry of the same kit)
+    // instead of "Short". Can be undone.
+    manuallyCompleted: { type: Boolean, default: false },
+    manuallyCompletedAt: { type: Date, default: null },
+    manuallyCompletedBy: { type: String, trim: true, default: "" },
+    manuallyCompletedByUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    manuallyCompletedReason: { type: String, trim: true, default: "" },
+
     // Stock put BACK into main stock after the kit was issued ("Revert stock").
     // qtyIssued is reduced by the reverted amount (so every total, the batch
     // balances and the next entry's "previously issued" stay correct); this

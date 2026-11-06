@@ -239,6 +239,28 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
     }
     return init;
   });
+  // Parts ticked "Mark completed" — closed even though the required qty is not
+  // met (e.g. discontinued midway). Saved with the edit; every later kit then
+  // shows the part as completed. A saved edit resumes with what it had.
+  const [manualComplete, setManualComplete] = useState(() => {
+    const init = {};
+    if (isDraft) {
+      (issue.lines || []).forEach((l) => {
+        if (l.manuallyCompleted) init[l.ttUniquePartNumber] = true;
+      });
+    }
+    return init;
+  });
+  // Why each part was closed — compulsory for every ticked part.
+  const [completeRemarks, setCompleteRemarks] = useState(() => {
+    const init = {};
+    if (isDraft) {
+      (issue.lines || []).forEach((l) => {
+        if (l.manuallyCompleted) init[l.ttUniquePartNumber] = l.manuallyCompletedReason || "";
+      });
+    }
+    return init;
+  });
   // Parts added on this edit that weren't part of the original issue.
   const [extraLines, setExtraLines] = useState([]);
   const [addingPart, setAddingPart] = useState(false);
@@ -262,10 +284,10 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         // Older servers answered with the flat chain map only.
         const chain = data?.chain ?? data ?? {};
         const kit = data?.kit ?? chain;
-        setPreviousTotals({ chain, kit });
+        setPreviousTotals({ chain, kit, completed: data?.completed ?? [], completedDetails: data?.completedDetails ?? {} });
       })
       .catch(() => {
-        if (!cancelled) setPreviousTotals({ chain: {}, kit: {} });
+        if (!cancelled) setPreviousTotals({ chain: {}, kit: {}, completed: [] });
       });
     return () => {
       cancelled = true;
@@ -311,6 +333,8 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         return {
           ttUniquePartNumber: l.ttUniquePartNumber,
           itemDescription: l.part?.itemDescription || l.itemDescription,
+          // Note / remarks on this part's row of the kit template.
+          remarks: l.templateRemarks || "",
           qtyPerKit: l.qtyPerKit,
           unit: l.part?.unit || "",
           required,
@@ -381,6 +405,13 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
     if (required > 0 && total >= required - 1e-9) {
       return { kind: "completed", issuing, prev, total, already: prev >= required - 1e-9 };
     }
+    // Closed by hand: ticked on this edit, or on an earlier entry of this kit.
+    if (manualComplete[p.ttUniquePartNumber]) {
+      return { kind: "completed", issuing, prev, total, already: false, manual: true, thisEdit: true };
+    }
+    if ((previousTotals?.completed || []).includes(p.ttUniquePartNumber)) {
+      return { kind: "completed", issuing, prev, total, already: true, manual: true };
+    }
     return { kind: "short", issuing, prev, total, short: r4(required - total) };
   };
 
@@ -411,6 +442,15 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
       return;
     }
 
+    // A remark is compulsory for every part marked completed.
+    const missingRemark = preview.find(
+      (p) => manualComplete[p.ttUniquePartNumber] && !(completeRemarks[p.ttUniquePartNumber] || "").trim()
+    );
+    if (missingRemark) {
+      toast.error(`Enter a remark for ${missingRemark.ttUniquePartNumber} — a reason is required to mark it completed`);
+      return;
+    }
+
     const linesPayload = [];
     for (const p of preview) {
       const q = qtyToIssueFor(p);
@@ -424,7 +464,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         );
         return;
       }
-      linesPayload.push({ ttUniquePartNumber: p.ttUniquePartNumber, qtyIssued: q });
+      linesPayload.push({
+        ttUniquePartNumber: p.ttUniquePartNumber,
+        qtyIssued: q,
+        manuallyCompleted: !!manualComplete[p.ttUniquePartNumber],
+        manuallyCompletedReason: manualComplete[p.ttUniquePartNumber]
+          ? (completeRemarks[p.ttUniquePartNumber] || "").trim()
+          : "",
+      });
     }
 
     const extraItemsPayload = [];
@@ -662,7 +709,14 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                       }
                     >
                       <td className="break-all px-1.5 py-1.5 text-xs font-mono-tech">{p.ttUniquePartNumber}</td>
-                      <td className="break-words px-1.5 py-1.5 text-xs">{p.itemDescription || "—"}</td>
+                      <td className="break-words px-1.5 py-1.5 text-xs">
+                        {p.itemDescription || "—"}
+                        {p.remarks && (
+                          <div className="mt-0.5 whitespace-pre-wrap text-[10px] italic text-muted-foreground" title="Note on the kit template">
+                            Note: {p.remarks}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.qtyPerKit}</td>
                       <td className="break-words px-1.5 py-1.5 text-xs text-muted-foreground">{p.unit || "—"}</td>
                       <td className="px-1.5 py-1.5 text-xs text-right font-mono-tech">{p.required}</td>
@@ -696,7 +750,11 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                             variant="success"
                             className="gap-1"
                             title={
-                              st.already
+                              st.thisEdit
+                                ? "Marked completed manually on this edit"
+                                : st.manual
+                                ? "Marked completed manually earlier — no more needed"
+                                : st.already
                                 ? `Already complete — ${st.prev} of ${p.required} issued earlier`
                                 : `${st.prev} issued earlier + ${st.issuing} now = ${p.required} required`
                             }
@@ -709,6 +767,46 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                             <XCircle className="h-3 w-3" />
                             Short {st.short}
                           </Badge>
+                        )}
+                        {/* Close the part out by hand, even if the required qty is not met. */}
+                        {!(st.manual && !st.thisEdit) && st.kind !== "over" && !(st.kind === "completed" && !st.manual) && (
+                          <label
+                            className="mt-1 flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground"
+                            title="Mark this part completed even though the required quantity was not met (e.g. discontinued). Later kits will show it as completed."
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-3 w-3"
+                              checked={!!manualComplete[p.ttUniquePartNumber]}
+                              onChange={(e) =>
+                                setManualComplete((prev) => ({ ...prev, [p.ttUniquePartNumber]: e.target.checked }))
+                              }
+                            />
+                            Mark completed
+                          </label>
+                        )}
+                        {manualComplete[p.ttUniquePartNumber] && !(st.manual && !st.thisEdit) && (
+                          <Input
+                            className="mt-1 h-7 px-1.5 text-[11px]"
+                            placeholder="Remark (required) — why?"
+                            maxLength={300}
+                            required
+                            value={completeRemarks[p.ttUniquePartNumber] || ""}
+                            onChange={(e) =>
+                              setCompleteRemarks((prev) => ({ ...prev, [p.ttUniquePartNumber]: e.target.value }))
+                            }
+                          />
+                        )}
+                        {st.manual && !st.thisEdit && (
+                          <div className="mt-1 whitespace-pre-wrap text-[10px] italic text-muted-foreground">
+                            {(() => {
+                              const d = previousTotals?.completedDetails?.[p.ttUniquePartNumber];
+                              if (!d) return "Marked completed earlier";
+                              return `Marked completed${d.issueCode ? ` in ${d.issueCode}` : ""}${d.by ? ` by ${d.by}` : ""}${
+                                d.reason ? `: ${d.reason}` : ""
+                              }`;
+                            })()}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -869,7 +967,14 @@ export function lineOverIssue(l, allLines) {
   return required > 0 && over > 1e-9 ? over : 0;
 }
 
+// A part closed by hand (manually completed on this entry, or on an earlier
+// entry of the same kit) counts as completed even when the quantity falls short.
+export function lineManuallyCompleted(l) {
+  return !!(l && (l.manuallyCompleted || l.manuallyCompletedEarlier));
+}
+
 export function lineCompletedHere(l) {
+  if (lineManuallyCompleted(l)) return true;
   const prev = Number(l.qtyPreviouslyIssued || 0);
   const issued = Number(l.qtyIssued || 0);
   const required = Number(l.qtyRequired || 0);
@@ -913,7 +1018,7 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }
                   Reverted
                 </Badge>
               )}
-              {issue.hasShortage && (
+              {issue.hasShortage && lines.some((l) => (l.qtyShort || 0) > 0 && !lineManuallyCompleted(l)) && (
                 <Badge variant="destructive" className="gap-1">
                   <AlertTriangle className="h-3 w-3" />
                   Shortage
@@ -1057,7 +1162,23 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }
                       {formatBatchBreakdown(l.batchBreakdown)}
                     </td>
                     <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech">
-                      {l.qtyShort > 0 ? (
+                      {lineManuallyCompleted(l) && !(overBy > 0) ? (
+                        <span
+                          className="font-semibold text-green-700 dark:text-green-400"
+                          title={
+                            l.manuallyCompleted
+                              ? `Marked completed manually${l.manuallyCompletedBy ? ` by ${l.manuallyCompletedBy}` : ""}${
+                                  l.manuallyCompletedAt ? ` on ${fmtDateTime(l.manuallyCompletedAt)}` : ""
+                                }${l.manuallyCompletedReason ? ` — ${l.manuallyCompletedReason}` : ""}`
+                              : "Marked completed manually on an earlier entry of this kit"
+                          }
+                        >
+                          Completed (manual)
+                          {l.qtyShort > 0 && l.manuallyCompleted && (
+                            <div className="text-[10px] font-normal text-muted-foreground">{l.qtyShort} short, closed</div>
+                          )}
+                        </span>
+                      ) : l.qtyShort > 0 ? (
                         <span className="text-destructive">{l.qtyShort}</span>
                       ) : overBy > 0 ? (
                         <span

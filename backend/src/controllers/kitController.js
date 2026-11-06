@@ -108,6 +108,25 @@ async function resolveAndDeductLines(items, qty, overrideLines, previousByCode =
     }
   }
 
+  // Parts the person ticked "Mark completed" for on the edit screen: closed
+  // even though the required qty is not met (e.g. discontinued midway). They
+  // are not reported as shortages.
+  // A remark saying WHY is compulsory for every part closed this way.
+  const manualByCode = new Map(); // part number -> remark
+  if (Array.isArray(overrideLines)) {
+    for (const line of overrideLines) {
+      if (!line?.manuallyCompleted) continue;
+      const code = String(line.ttUniquePartNumber || "").trim().toUpperCase();
+      const reason = String(line.manuallyCompletedReason || "").trim().slice(0, 300);
+      if (!reason) {
+        const err = new Error(`Enter a remark for ${code} — a reason is required to mark a part completed`);
+        err.status = 400;
+        throw err;
+      }
+      manualByCode.set(code, reason);
+    }
+  }
+
   const resolvedLines = [];
   const shortages = [];
   // Batches fetched per part are cached and mutated across this whole
@@ -139,7 +158,9 @@ async function resolveAndDeductLines(items, qty, overrideLines, previousByCode =
     const alreadyIssued = previousByCode ? previousByCode.get(item.ttUniquePartNumber) || 0 : 0;
     const short = qr(Math.max(0, required - alreadyIssued - toDeduct));
 
-    if (short > 0) {
+    const manuallyCompleted = manualByCode.has(item.ttUniquePartNumber);
+    const manualReason = manualByCode.get(item.ttUniquePartNumber) || "";
+    if (short > 0 && !manuallyCompleted) {
       shortages.push({
         ttUniquePartNumber: item.ttUniquePartNumber,
         itemDescription: partDoc?.itemDescription || "",
@@ -160,7 +181,7 @@ async function resolveAndDeductLines(items, qty, overrideLines, previousByCode =
       batchBreakdown = allocateFromBatches(batchCache.get(key), toDeduct);
     }
 
-    resolvedLines.push({ item, partDoc, required, toDeduct, short, batchBreakdown });
+    resolvedLines.push({ item, partDoc, required, toDeduct, short, batchBreakdown, manuallyCompleted, manualReason });
   }
 
   // Deduct whatever's available for every line — nothing to deduct for a
@@ -199,6 +220,25 @@ async function resolveDraftLines(items, qty, overrideLines, previousByCode = nul
     }
   }
 
+  // Parts the person ticked "Mark completed" for on the edit screen: closed
+  // even though the required qty is not met (e.g. discontinued midway). They
+  // are not reported as shortages.
+  // A remark saying WHY is compulsory for every part closed this way.
+  const manualByCode = new Map(); // part number -> remark
+  if (Array.isArray(overrideLines)) {
+    for (const line of overrideLines) {
+      if (!line?.manuallyCompleted) continue;
+      const code = String(line.ttUniquePartNumber || "").trim().toUpperCase();
+      const reason = String(line.manuallyCompletedReason || "").trim().slice(0, 300);
+      if (!reason) {
+        const err = new Error(`Enter a remark for ${code} — a reason is required to mark a part completed`);
+        err.status = 400;
+        throw err;
+      }
+      manualByCode.set(code, reason);
+    }
+  }
+
   const resolvedLines = [];
   const shortages = [];
   const batchCache = new Map();
@@ -213,7 +253,9 @@ async function resolveDraftLines(items, qty, overrideLines, previousByCode = nul
     const alreadyIssued = previousByCode ? previousByCode.get(item.ttUniquePartNumber) || 0 : 0;
     const short = qr(Math.max(0, required - alreadyIssued - planned));
 
-    if (short > 0) {
+    const manuallyCompleted = manualByCode.has(item.ttUniquePartNumber);
+    const manualReason = manualByCode.get(item.ttUniquePartNumber) || "";
+    if (short > 0 && !manuallyCompleted) {
       shortages.push({
         ttUniquePartNumber: item.ttUniquePartNumber,
         itemDescription: partDoc?.itemDescription || "",
@@ -238,15 +280,19 @@ async function resolveDraftLines(items, qty, overrideLines, previousByCode = nul
       batchBreakdown = allocateFromBatches(batchCache.get(key), planned);
     }
 
-    resolvedLines.push({ item, partDoc, required, toDeduct: planned, short, batchBreakdown });
+    resolvedLines.push({ item, partDoc, required, toDeduct: planned, short, batchBreakdown, manuallyCompleted, manualReason });
   }
 
   return { resolvedLines, shortages };
 }
 
 // Shapes resolveAndDeductLines' output into KitIssue.lines' schema.
-const linesPayloadFrom = (resolvedLines) =>
-  resolvedLines.map(({ item, partDoc, required, toDeduct, short, batchBreakdown }) => ({
+const linesPayloadFrom = (resolvedLines, by = "") =>
+  resolvedLines.map(({ item, partDoc, required, toDeduct, short, batchBreakdown, manuallyCompleted, manualReason }) => ({
+    manuallyCompletedReason: manuallyCompleted ? manualReason || "" : "",
+    manuallyCompleted: !!manuallyCompleted,
+    manuallyCompletedAt: manuallyCompleted ? new Date() : null,
+    manuallyCompletedBy: manuallyCompleted ? by : "",
     part: partDoc ? partDoc._id : null,
     ttUniquePartNumber: item.ttUniquePartNumber,
     itemDescription: partDoc ? partDoc.itemDescription : item.value || "",
@@ -372,7 +418,7 @@ async function attachPreviouslyIssued(list) {
 
   const pool = or.length
     ? await KitIssue.find({ status: "issued", $or: or })
-        .select("kitTemplate kitCode createdAt lines.ttUniquePartNumber lines.qtyIssued")
+        .select("kitTemplate kitCode createdAt lines.ttUniquePartNumber lines.qtyIssued lines.manuallyCompleted")
         .lean()
     : [];
   const entries = pool.map((d) => ({
@@ -381,6 +427,9 @@ async function attachPreviouslyIssued(list) {
     code: codeKey(d.kitCode),
     at: d.createdAt ? new Date(d.createdAt).getTime() : 0,
     totals: sumIssuedByPart([d]),
+    manual: new Set(
+      (d.lines || []).filter((l) => l.manuallyCompleted && l.ttUniquePartNumber).map((l) => l.ttUniquePartNumber)
+    ),
   }));
 
   for (const iss of list) {
@@ -388,19 +437,49 @@ async function attachPreviouslyIssued(list) {
     const code = codeKey(iss.kitCode);
     const at = iss.createdAt ? new Date(iss.createdAt).getTime() : 0;
     const prev = {};
+    const manualEarlier = new Set();
     for (const e of entries) {
       if (e.id === String(iss._id) || e.at >= at) continue;
       if (!((tpl && e.tpl === tpl) || (code && e.code === code))) continue;
       for (const [part, qty] of Object.entries(e.totals)) prev[part] = qr((prev[part] || 0) + qty);
+      e.manual.forEach((part) => manualEarlier.add(part));
     }
     for (const line of iss.lines || []) {
       line.qtyPreviouslyIssued = prev[line.ttUniquePartNumber] || 0;
+      // Part was manually closed on an EARLIER entry of this kit.
+      line.manuallyCompletedEarlier = manualEarlier.has(line.ttUniquePartNumber);
     }
   }
   return list;
 }
 
 // Case-insensitive: is this code already carried by an ISSUED kit?
+// Adds `templateRemarks` (the BOM row's note/remarks on the kit template) to
+// every line of every issue in `list`, matched by part number (and reference
+// designator when the part sits on several rows). Shown in the edit window.
+async function attachTemplateRemarks(list) {
+  const arr = Array.isArray(list) ? list : [list];
+  const ids = new Set();
+  for (const iss of arr) {
+    const id = iss.kitTemplate?._id || iss.kitTemplate;
+    if (id) ids.add(String(id));
+  }
+  if (!ids.size) return list;
+  const templates = await KitTemplate.find({ _id: { $in: [...ids] } })
+    .select("items.ttUniquePartNumber items.referenceDesignator items.remarks")
+    .lean();
+  const byTpl = new Map(templates.map((t) => [String(t._id), t.items || []]));
+  for (const iss of arr) {
+    const items = byTpl.get(String(iss.kitTemplate?._id || iss.kitTemplate)) || [];
+    for (const line of iss.lines || []) {
+      const rows = items.filter((it) => it.ttUniquePartNumber === line.ttUniquePartNumber);
+      const row = rows.find((it) => (it.referenceDesignator || "") === (line.referenceDesignator || "")) || rows[0];
+      line.templateRemarks = (row?.remarks || "").trim();
+    }
+  }
+  return list;
+}
+
 async function issueCodeTaken(code, excludeId = null) {
   const filter = { status: "issued", issueCode: new RegExp(`^${escapeRegExp(code)}$`, "i") };
   if (excludeId) filter._id = { $ne: excludeId };
@@ -751,6 +830,7 @@ export const getKitIssues = asyncHandler(async (req, res) => {
   const plain = issues.map((i) => i.toObject());
   await attachEditLock(plain);
   await attachPreviouslyIssued(plain);
+  await attachTemplateRemarks(plain);
   res.json(plain);
 });
 
@@ -919,8 +999,11 @@ export const exportKitIssueById = asyncHandler(async (req, res) => {
     const prev = Number(ln.qtyPreviouslyIssued) || 0;
     const t = totalsByPart.get(ln.ttUniquePartNumber) || { required: 0, issued: 0 };
     const over = rnd(prev + t.issued - t.required);
-    if ((Number(ln.qtyShort) || 0) > 0) return { kind: "short", tag: `SHORT ${ln.qtyShort}` };
     if (t.required > 0 && over > 1e-9) return { kind: "over", tag: `OVER-ISSUE +${over}` };
+    if (ln.manuallyCompleted || ln.manuallyCompletedEarlier) {
+      return { kind: "completed", tag: "COMPLETED (MANUAL)" };
+    }
+    if ((Number(ln.qtyShort) || 0) > 0) return { kind: "short", tag: `SHORT ${ln.qtyShort}` };
     if (t.required > 0 && prev + t.issued >= t.required - 1e-9) return { kind: "completed", tag: "COMPLETED" };
     if ((Number(ln.qtyReverted) || 0) > 0 && !(Number(ln.qtyIssued) > 0)) return { kind: "reverted", tag: "REVERTED" };
     return null;
@@ -1062,6 +1145,7 @@ export const getKitIssueById = asyncHandler(async (req, res) => {
   const plain = issue.toObject();
   await attachEditLock(plain);
   await attachPreviouslyIssued([plain]);
+  await attachTemplateRemarks([plain]);
   res.json(plain);
 });
 
@@ -1152,7 +1236,7 @@ export const issueKit = asyncHandler(async (req, res) => {
     issuedByUser: req.user?._id || null,
     remarks: remarks || "",
     hasShortage: shortages.length > 0,
-    lines: linesPayloadFrom(resolvedLines),
+    lines: linesPayloadFrom(resolvedLines, req.user?.name || req.user?.username || ""),
   });
 
   const populated = await KitIssue.findById(issue._id)
@@ -1304,7 +1388,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     issuedByUser: req.user?._id || null,
     remarks: remarks || "",
     hasShortage: shortages.length > 0,
-    lines: linesPayloadFrom(resolvedLines),
+    lines: linesPayloadFrom(resolvedLines, req.user?.name || req.user?.username || ""),
   });
 
   const populated = await KitIssue.findById(draft._id)
@@ -1372,7 +1456,29 @@ export const getKitIssueChainTotals = asyncHandler(async (req, res) => {
     if ((kit[part] || 0) < qty) kit[part] = qty;
   }
 
-  res.json({ chain, kit });
+  // Parts already closed by hand on any entry of this kit, with who / when / why.
+  const completed = [];
+  const completedDetails = {};
+  if (kitFilter) {
+    const docs = await KitIssue.find(kitFilter)
+      .sort({ createdAt: 1 })
+      .select("issueCode lines.ttUniquePartNumber lines.manuallyCompleted lines.manuallyCompletedReason lines.manuallyCompletedBy lines.manuallyCompletedAt")
+      .lean();
+    for (const d of docs) {
+      for (const l of d.lines || []) {
+        if (!l.manuallyCompleted || !l.ttUniquePartNumber) continue;
+        if (!completedDetails[l.ttUniquePartNumber]) completed.push(l.ttUniquePartNumber);
+        completedDetails[l.ttUniquePartNumber] = {
+          reason: l.manuallyCompletedReason || "",
+          by: l.manuallyCompletedBy || "",
+          at: l.manuallyCompletedAt || null,
+          issueCode: d.issueCode || "",
+        };
+      }
+    }
+  }
+
+  res.json({ chain, kit, completed, completedDetails });
 });
 
 /*
@@ -1650,7 +1756,7 @@ export const saveKitDraft = asyncHandler(async (req, res) => {
     issuedByUser: req.user?._id || null,
     remarks: remarks || "",
     hasShortage: shortages.length > 0,
-    lines: linesPayloadFrom(resolvedLines),
+    lines: linesPayloadFrom(resolvedLines, req.user?.name || req.user?.username || ""),
   });
 
   const populated = await KitIssue.findById(draft._id)
@@ -1728,7 +1834,7 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
   draft.vendor = vendorDoc ? vendorDoc._id : null;
   draft.remarks = remarks || "";
   draft.hasShortage = shortages.length > 0;
-  draft.lines = linesPayloadFrom(resolvedLines);
+  draft.lines = linesPayloadFrom(resolvedLines, req.user?.name || req.user?.username || "");
   draft.issuedBy = req.user?.name || req.user?.username || draft.issuedBy;
   draft.issuedByUser = req.user?._id || draft.issuedByUser;
   await draft.save();
@@ -1755,7 +1861,9 @@ export const getKitDrafts = asyncHandler(async (req, res) => {
     .populate("lines.part", "ttUniquePartNumber itemDescription quantityInStock unit")
     .sort({ updatedAt: -1 })
     .limit(limit);
-  res.json(drafts.map((d) => d.toObject()));
+  const plain = drafts.map((d) => d.toObject());
+  await attachTemplateRemarks(plain);
+  res.json(plain);
 });
 
 // GET /api/kits/drafts/:draftId — full saved kit, for resuming it in the
@@ -1770,7 +1878,9 @@ export const getKitDraftById = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Saved kit not found");
   }
-  res.json(draft.toObject());
+  const plain = draft.toObject();
+  await attachTemplateRemarks([plain]);
+  res.json(plain);
 });
 
 // DELETE /api/kits/drafts/:draftId — discards a saved kit. Safe to delete
@@ -1868,7 +1978,12 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
   const linesToUse =
     Array.isArray(overrideLines) && overrideLines.length
       ? withSavedExtraQty(overrideLines, draft.lines)
-      : draft.lines.map((l) => ({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: l.qtyIssued }));
+      : draft.lines.map((l) => ({
+          ttUniquePartNumber: l.ttUniquePartNumber,
+          qtyIssued: l.qtyIssued,
+          manuallyCompleted: !!l.manuallyCompleted,
+          manuallyCompletedReason: l.manuallyCompletedReason || "",
+        }));
 
   // A saved EDIT of an issued kit (made from the edit screen) takes the
   // next code in that kit's edit series when it's issued: Kit 1 -> Kit 1A ->
@@ -1934,7 +2049,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
   draft.vendor = vendorDoc._id;
   draft.remarks = remarks !== undefined ? remarks : draft.remarks;
   draft.hasShortage = shortages.length > 0;
-  draft.lines = linesPayloadFrom(resolvedLines);
+  draft.lines = linesPayloadFrom(resolvedLines, req.user?.name || req.user?.username || "");
   draft.issuedBy = req.user?.name || req.user?.username || draft.issuedBy;
   draft.issuedByUser = req.user?._id || draft.issuedByUser;
   await draft.save();

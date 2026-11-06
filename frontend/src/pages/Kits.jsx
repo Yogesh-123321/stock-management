@@ -688,12 +688,15 @@ function TemplateIssuesDialog({ template, onClose }) {
               </TableHeader>
               <TableBody>
                 {sortedIssues.map((iss) => {
-                  const shortLines = (iss.lines || []).filter((l) => (l.qtyShort || 0) > 0);
+                  const shortLines = (iss.lines || []).filter(
+                    (l) => (l.qtyShort || 0) > 0 && !l.manuallyCompleted && !l.manuallyCompletedEarlier
+                  );
                   // Parts complete as of this entry that earlier entries had already started (prev + issued >= required).
                   const completedLines = (iss.lines || []).filter((l) => {
                     const prev = Number(l.qtyPreviouslyIssued || 0);
                     const issued = Number(l.qtyIssued || 0);
                     const required = Number(l.qtyRequired || 0);
+                    if (l.manuallyCompleted || l.manuallyCompletedEarlier) return true; // closed by hand
                     return prev > 0 && required > 0 && prev + issued >= required - 1e-6;
                   });
                   return (
