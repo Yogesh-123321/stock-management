@@ -683,6 +683,89 @@ export const adjustPartStock = asyncHandler(async (req, res) => {
 });
 
 /*
+  GET /api/parts/rnd-issues-by-user
+  User-wise view of the R&D stock ledger: every person R&D stock has been
+  issued to, with each part they were given, the quantity, the date, who
+  issued it and the remarks (if any). Built from each part's rndIssues, so
+  it always matches what the Parts master shows per part.
+  Optional query: ?search= — matches the person's name, or a part number /
+  description / remarks.
+*/
+export const getRndIssuesByUser = asyncHandler(async (req, res) => {
+  const search = String(req.query.search || "").trim().toLowerCase();
+
+  const parts = await Part.find({ "rndIssues.0": { $exists: true } })
+    .select("ttUniquePartNumber itemDescription unit rndIssues")
+    .lean();
+
+  const byPerson = new Map();
+  for (const p of parts) {
+    for (const r of p.rndIssues || []) {
+      const key = r.person ? String(r.person) : `name:${r.personName}`;
+      let group = byPerson.get(key);
+      if (!group) {
+        group = {
+          personId: r.person ? String(r.person) : null,
+          personName: r.personName || "Unknown",
+          totalQuantity: 0,
+          issueCount: 0,
+          lastIssuedAt: null,
+          issues: [],
+        };
+        byPerson.set(key, group);
+      }
+      group.totalQuantity += Number(r.quantity) || 0;
+      group.issueCount += 1;
+      if (!group.lastIssuedAt || new Date(r.date) > new Date(group.lastIssuedAt)) {
+        group.lastIssuedAt = r.date;
+      }
+      group.issues.push({
+        _id: r._id,
+        partId: p._id,
+        ttUniquePartNumber: p.ttUniquePartNumber,
+        itemDescription: p.itemDescription,
+        unit: p.unit || "",
+        quantity: r.quantity,
+        date: r.date,
+        issuedBy: r.issuedBy || "",
+        remarks: r.remarks || "",
+      });
+    }
+  }
+
+  let groups = [...byPerson.values()];
+  if (search) {
+    groups = groups
+      .map((g) => {
+        if (g.personName.toLowerCase().includes(search)) return g;
+        const issues = g.issues.filter((i) =>
+          [i.ttUniquePartNumber, i.itemDescription, i.remarks, i.issuedBy]
+            .join(" ")
+            .toLowerCase()
+            .includes(search)
+        );
+        return issues.length
+          ? {
+              ...g,
+              issues,
+              issueCount: issues.length,
+              totalQuantity: issues.reduce((n, i) => n + (Number(i.quantity) || 0), 0),
+            }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
+  for (const g of groups) {
+    g.issues.sort((a, b) => new Date(b.date) - new Date(a.date));
+    g.partCount = new Set(g.issues.map((i) => String(i.partId))).size;
+  }
+  groups.sort((a, b) => a.personName.localeCompare(b.personName));
+
+  res.json(groups);
+});
+
+/*
   PATCH /api/parts/:id/rnd-stock  (issue quantity out of the main stock
   into the R&D stock, against a named person)
   Body: { quantity, personId, remarks }

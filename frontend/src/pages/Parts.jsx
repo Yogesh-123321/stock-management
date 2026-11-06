@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1389,10 +1389,10 @@ const DETAIL_FIELDS = [
   { key: "price", label: "Price per unit" },
 ];
 
-function PartDetailsDialog({ partId, onClose, onPartUpdated }) {
+function PartDetailsDialog({ partId, onClose, onPartUpdated, initialShowHistory = false }) {
   const [part, setPart] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(!!initialShowHistory);
 
   useEffect(() => {
     let cancelled = false;
@@ -2205,7 +2205,16 @@ useEffect(() => {
                                     className="flex max-w-full items-center gap-1 truncate text-primary hover:underline"
                                     title="Open the tax invoice this delivery was booked against"
                                     onClick={() =>
-                                      navigate(`/documents?tab=tax&invoiceId=${e.taxInvoiceId}`)
+                                      navigate(`/documents?tab=tax&invoiceId=${e.taxInvoiceId}`, {
+                                        // So closing the invoice brings the user back to this
+                                        // same part's history instead of leaving them on the
+                                        // Documents page.
+                                        state: {
+                                          returnTo: "/parts",
+                                          reopenPartId: part._id,
+                                          reopenHistory: true,
+                                        },
+                                      })
                                     }
                                   >
                                     <ExternalLink className="h-3 w-3 shrink-0" />
@@ -3443,7 +3452,18 @@ export default function Parts() {
   const isMultiTermSearch = search.trim().split(/\s+/).filter(Boolean).length > 1;
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(null);
-  const [viewingId, setViewingId] = useState(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Coming back from a tax invoice opened out of Part history: reopen that
+  // same part's details with its History dialog already showing.
+  const returnState = location.state?.reopenPartId ? location.state : null;
+  const [viewingId, setViewingId] = useState(() => returnState?.reopenPartId || null);
+  const [reopenHistory] = useState(() => !!returnState?.reopenHistory);
+  useEffect(() => {
+    // Drop the router state so a manual refresh doesn't reopen it again.
+    if (returnState) navigate(location.pathname + location.search, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [showNewPartRequest, setShowNewPartRequest] = useState(false);
@@ -3975,6 +3995,7 @@ export default function Parts() {
       {viewingId && (
         <PartDetailsDialog
           partId={viewingId}
+          initialShowHistory={reopenHistory}
           onClose={() => setViewingId(null)}
           onPartUpdated={(updated) =>
             setParts((list) => list.map((p) => (p._id === updated._id ? { ...p, ...updated } : p)))

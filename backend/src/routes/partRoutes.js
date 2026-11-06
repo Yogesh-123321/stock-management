@@ -11,6 +11,7 @@ import {
   createPart,
   adjustPartStock,
   issueRndStock,
+  getRndIssuesByUser,
   getDuplicateParts,
   getDuplicateCriteria,
   deletePart,
@@ -39,6 +40,7 @@ const partDocFields = uploadPartDoc.fields([
 router.get("/duplicates", getDuplicateParts);
 router.get("/duplicate-criteria", getDuplicateCriteria);
 router.get("/count", getPartsCount);
+router.get("/rnd-issues-by-user", protect, getRndIssuesByUser);
 
 // CSV export for the "Download parts" button on the Parts master —
 // ADMIN ONLY, same as editing/deleting parts. Declared before "/:id" so

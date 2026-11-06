@@ -109,6 +109,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
   const [kitCode, setKitCode] = useState(template?.kitCode || "");
   const [revision, setRevision] = useState(template?.revision || "");
   const [description, setDescription] = useState(template?.description || "");
+  const [notes, setNotes] = useState(template?.notes || "");
   const [items, setItems] = useState(isEdit ? [] : [blankItem()]);
 
   useEffect(() => {
@@ -122,6 +123,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
         setKitCode(data.kitCode || "");
         setRevision(data.revision || "");
         setDescription(data.description || "");
+        setNotes(data.notes || "");
         setItems(toEditorRows(data.items));
         setLocked(!!data.hasIssues);
       })
@@ -150,6 +152,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
       setKitCode(data.kitCode || "");
       setRevision(data.revision || "");
       setDescription(data.description || "");
+      setNotes(data.notes || "");
       const copied = toEditorRows(data.items);
       setItems(copied);
       toast.success(`Copied "${data.kitName}" — review before saving`);
@@ -261,7 +264,21 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (locked) return;
+    if (locked) {
+      // Composition is frozen once issued, but notes can still be saved.
+      setSaving(true);
+      try {
+        const { data } = await api.patch(`/kits/${template._id}`, { notes });
+        toast.success("Notes saved");
+        onSaved?.(data);
+        onClose();
+      } catch (err) {
+        toast.error(err.response?.data?.message || "Could not save the notes");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (!kitName.trim()) {
       toast.error("Kit name is required");
       return;
@@ -297,6 +314,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
       kitCode,
       revision,
       description,
+      notes,
       items: usableItems.map((r) => ({
         srNo: r.srNo === "" ? null : Number(r.srNo),
         referenceDesignator: r.referenceDesignator,
@@ -356,7 +374,7 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                   This kit has already been issued at least once, so its name, code, revision,
                   description and items are locked — issues (and edits made to them) rely on this
                   staying exactly as it was. Deactivate it and create a new kit template if
-                  anything needs to change.
+                  anything needs to change. You can still add or edit the notes below.
                 </div>
               )}
 
@@ -422,6 +440,17 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     disabled={locked}
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Notes (optional)
+                  </label>
+                  <Textarea
+                    rows={3}
+                    placeholder="Anything worth remembering about this kit…"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
                   />
                 </div>
               </div>
@@ -597,12 +626,10 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
               <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
                 Cancel
               </Button>
-              {!locked && (
-                <Button type="submit" disabled={saving}>
-                  <Save className="mr-1.5 h-4 w-4" />
-                  {saving ? "Saving…" : isEdit ? "Save changes" : "Create kit template"}
-                </Button>
-              )}
+              <Button type="submit" disabled={saving}>
+                <Save className="mr-1.5 h-4 w-4" />
+                {saving ? "Saving…" : locked ? "Save notes" : isEdit ? "Save changes" : "Create kit template"}
+              </Button>
             </div>
           </form>
         )}
@@ -840,6 +867,12 @@ function KitPreviewDialog({ template, onClose, onEdit }) {
           {!loading && kit && (
             <>
               {kit.description && <p className="text-sm text-muted-foreground">{kit.description}</p>}
+              {kit.notes && (
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Notes</span>
+                  <p className="whitespace-pre-wrap">{kit.notes}</p>
+                </div>
+              )}
 
               <p className="text-xs text-muted-foreground">
                 {items.length} item(s) total
@@ -1105,8 +1138,7 @@ export default function Kits() {
                           size="sm"
                           variant="outline"
                           className="h-8 w-8 p-0"
-                          title={t.hasIssues ? "Already issued — locked from editing" : "Edit kit"}
-                          disabled={t.hasIssues}
+                          title={t.hasIssues ? "Already issued — only notes can be edited" : "Edit kit"}
                           onClick={() => setEditing(t)}
                         >
                           <Pencil className="h-3.5 w-3.5" />

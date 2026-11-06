@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { fileKind } from "@/lib/filePreview";
@@ -1270,8 +1270,11 @@ function BillCell({ row }) {
   );
 }
 
-function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
+function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice, returnTo, onReturn }) {
   const { can } = useAuth();
+  // True when the invoice dialog was opened via a deep link from another page
+  // (e.g. Part history); closing it should then go back there.
+  const openedViaDeepLinkRef = useRef(false);
   const canDelete = can?.("part.approve");
   const [deletingId, setDeletingId] = useState(null);
   const [rows, setRows] = useState([]);
@@ -1373,7 +1376,10 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
     api
       .get(`/tax-invoices/${openInvoiceId}`)
       .then(({ data }) => {
-        if (!cancelled && data) setStockFor(data);
+        if (!cancelled && data) {
+          openedViaDeepLinkRef.current = true;
+          setStockFor(data);
+        }
       })
       .catch(() => {
         if (!cancelled) toast.error("Could not open that tax invoice");
@@ -1618,7 +1624,17 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
         </DialogContent>
       </Dialog>
 
-      <InvoiceStockDialog invoice={stockFor} onClose={() => setStockFor(null)} />
+      <InvoiceStockDialog
+        invoice={stockFor}
+        onClose={() => {
+          setStockFor(null);
+          // Opened from Part history? Go back to it rather than staying here.
+          if (openedViaDeepLinkRef.current && returnTo) {
+            openedViaDeepLinkRef.current = false;
+            onReturn?.();
+          }
+        }}
+      />
     </div>
 
   );
@@ -1626,6 +1642,11 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
 
 export default function Documents() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Where to go back to when a deep-linked invoice is closed (set by Part
+  // history). Captured once, since clearing the URL params drops router state.
+  const [returnState] = useState(() => location.state?.returnTo ? location.state : null);
   // Supports a deep link from Part history's "Stock movements" ledger:
   // /documents?tab=tax&invoiceId=<id> lands here already on the Tax
   // invoices tab, with that specific invoice opened below.
@@ -1733,7 +1754,19 @@ export default function Documents() {
           )}
 
           {tab === "tax" && (
-            <TaxInvoiceTab openInvoiceId={openInvoiceId} onOpenedInvoice={clearOpenInvoiceParam} />
+            <TaxInvoiceTab
+              openInvoiceId={openInvoiceId}
+              onOpenedInvoice={clearOpenInvoiceParam}
+              returnTo={returnState?.returnTo}
+              onReturn={() =>
+                navigate(returnState.returnTo, {
+                  state: {
+                    reopenPartId: returnState.reopenPartId,
+                    reopenHistory: returnState.reopenHistory,
+                  },
+                })
+              }
+            />
           )}
         </CardContent>
       </Card>

@@ -43,6 +43,10 @@ const kitTemplateSchema = new mongoose.Schema(
     kitCode: { type: String, trim: true, default: "" },
     revision: { type: String, trim: true, default: "" },
     description: { type: String, trim: true, default: "" },
+    // Free-text notes about the kit. Unlike name/code/revision/description/items,
+    // notes don't affect what an issue is built from, so they stay editable even
+    // after the kit has been issued.
+    notes: { type: String, trim: true, default: "" },
 
     items: { type: [kitItemSchema], default: [] },
 

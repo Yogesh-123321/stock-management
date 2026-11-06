@@ -706,7 +706,7 @@ export const getKitTemplateById = asyncHandler(async (req, res) => {
 
 // POST /api/kits  (admin only — kit.manage)
 export const createKitTemplate = asyncHandler(async (req, res) => {
-  const { kitName, kitCode, revision, description, items } = req.body;
+  const { kitName, kitCode, revision, description, notes, items } = req.body;
   if (!kitName || !kitName.trim()) {
     res.status(400);
     throw new Error("Kit name is required");
@@ -730,6 +730,7 @@ export const createKitTemplate = asyncHandler(async (req, res) => {
     kitCode: (kitCode || "").trim().toUpperCase(),
     revision: (revision || "").trim().toUpperCase(),
     description: (description || "").trim(),
+    notes: (notes || "").trim(),
     items: sanitizedItems,
     createdBy: req.user?.name || req.user?.username || "",
     createdByUser: req.user?._id || null,
@@ -751,7 +752,7 @@ export const updateKitTemplate = asyncHandler(async (req, res) => {
     throw new Error("Kit template not found");
   }
 
-  const { kitName, kitCode, revision, description, items, isActive } = req.body;
+  const { kitName, kitCode, revision, description, notes, items, isActive } = req.body;
 
   const changingComposition =
     kitName !== undefined ||
@@ -779,6 +780,8 @@ export const updateKitTemplate = asyncHandler(async (req, res) => {
   if (kitCode !== undefined) template.kitCode = String(kitCode).trim().toUpperCase();
   if (revision !== undefined) template.revision = String(revision).trim().toUpperCase();
   if (description !== undefined) template.description = String(description).trim();
+  // Notes are not part of the kit's composition, so they are never locked.
+  if (notes !== undefined) template.notes = String(notes).trim();
   if (isActive !== undefined) template.isActive = !!isActive;
 
   if (items !== undefined) {
