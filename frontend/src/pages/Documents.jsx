@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { fileKind } from "@/lib/filePreview";
+import WordPreview from "@/components/WordPreview";
 import { useAuth } from "@/lib/auth";
 import { SortableHead, useSort } from "@/components/SortableHead";
 import { Button } from "@/components/ui/button";
@@ -55,6 +57,11 @@ const partDescriptionOf = (part) =>
 const isPdfFile = (invoice) =>
   /\.pdf(\?|$)/i.test(invoice?.documentUrl || "") ||
   /\.pdf$/i.test(invoice?.originalFileName || "");
+
+// Word (.docx) invoices are read too (their text is sent to the AI). Older
+// uploads have no extension in the stored URL, so the file name is checked.
+const isDocxFile = (invoice) =>
+  /\.docx(\?|$)/i.test(invoice?.documentUrl || "") || /\.docx$/i.test(invoice?.originalFileName || "");
 
 const fmtDate = (d) => {
   if (!d) return "—";
@@ -638,7 +645,9 @@ function InvoiceStockDialog({ invoice, onClose }) {
 
   const entries = data?.entries || [];
   const fileHref = fileUrl(invoice?.documentUrl);
-  const canPreview = isPdfFile(invoice);
+  // Whether the invoice file can be read by AI for the Matched / Differences tabs.
+  const canPreview = isPdfFile(invoice) || isDocxFile(invoice);
+  const isWord = fileKind(invoice) === "word";
 
   // "Imply" the match automatically as soon as the dialog opens for a PDF
   // invoice — no button to click first. runMatch(true) re-reads the PDF
@@ -840,7 +849,9 @@ function InvoiceStockDialog({ invoice, onClose }) {
               </Button>
             </div>
             <div className="flex-1 overflow-hidden bg-muted/20">
-              {canPreview ? (
+              {isWord ? (
+                <WordPreview key={invoice?._id} url={fileHref} name={invoice?.originalFileName} />
+              ) : canPreview ? (
                 <iframe title="Tax invoice PDF" src={fileHref} className="h-full w-full" />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
@@ -879,7 +890,7 @@ function InvoiceStockDialog({ invoice, onClose }) {
                       className="h-7 px-2"
                       disabled={matchLoading}
                       onClick={() => runMatch(true)}
-                      title="Re-read the invoice PDF with AI and re-run the line-item matching"
+                      title="Re-read the invoice file with AI and re-run the line-item matching"
                     >
                       <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${matchLoading ? "animate-spin" : ""}`} />
                       {matchLoading ? "Reading…" : "Regenerate extraction"}
@@ -1445,13 +1456,13 @@ function TaxInvoiceTab({ openInvoiceId, onOpenedInvoice }) {
                   </td>
                   <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-2">
-                      {isPdfFile(row) && (
+                      {(isPdfFile(row) || isDocxFile(row)) && (
                         <Button
                           variant="outline"
                           size="sm"
                           disabled={regenId === row._id}
                           onClick={() => regenerateRow(row)}
-                          title="Re-read this invoice's PDF with AI"
+                          title="Re-read this invoice's file with AI"
                         >
                           <RefreshCw className={`mr-1 h-4 w-4 ${regenId === row._id ? "animate-spin" : ""}`} />
                           {regenId === row._id ? "Reading…" : "Regenerate"}

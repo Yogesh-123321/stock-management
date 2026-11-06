@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Banknote, Download, ExternalLink, FileText, Loader2 } from "lucide-react";
-import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +8,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  downloadFile,
+  downloadName,
+  fileKind,
+  fileUrl,
+} from "@/lib/filePreview";
+import WordPreview from "@/components/WordPreview";
 
 /*
   In-page preview of a tax invoice's uploaded file (used on the Billing page).
@@ -19,48 +25,23 @@ import {
 
     - PDF   -> shown in an <iframe>
     - image -> shown with <img>
+    - Word  -> (.doc / .docx) drawn in the page (online viewer as a fallback)
     - other -> can't be embedded, so a "Open in new tab" fallback is shown
 */
-
-// Same idea as Documents.jsx: stored URLs are normally absolute (Cloudinary),
-// but a relative "/uploads/..." path is resolved against the API origin.
-const API_ORIGIN = (api?.defaults?.baseURL || "").replace(/\/api\/?$/, "");
-const fileUrl = (u) => (!u ? "" : /^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u}`);
-
-const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-
-const extOf = (value = "") => {
-  const clean = String(value).split("?")[0].split("#")[0];
-  const dot = clean.lastIndexOf(".");
-  return dot === -1 ? "" : clean.slice(dot + 1).toLowerCase();
-};
-
-const kindOf = (invoice) => {
-  const exts = [extOf(invoice?.documentUrl), extOf(invoice?.originalFileName)];
-  if (exts.includes("pdf")) return "pdf";
-  if (exts.some((e) => IMAGE_EXT.includes(e))) return "image";
-  return "other";
-};
-
-// Cloudinary can force a download by adding the fl_attachment flag to the URL.
-// Anything else falls back to the plain URL (opens in a new tab).
-const downloadUrl = (url) =>
-  /res\.cloudinary\.com\/.+\/upload\//.test(url)
-    ? url.replace("/upload/", "/upload/fl_attachment/")
-    : url;
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 
 export default function InvoicePreviewDialog({ invoice, onClose, onMarkPaid }) {
   const [loaded, setLoaded] = useState(false);
 
-  // Show the spinner again whenever a different invoice is opened.
+  // Show the spinner again whenever a different invoice (or viewer) is opened.
   useEffect(() => {
     setLoaded(false);
   }, [invoice?._id]);
 
   const url = fileUrl(invoice?.documentUrl);
-  const kind = kindOf(invoice);
+  const kind = fileKind(invoice);
+
   const paid = invoice?.payment?.status === "paid";
   const partial = invoice?.payment?.status === "partial";
 
@@ -106,6 +87,10 @@ export default function InvoicePreviewDialog({ invoice, onClose, onMarkPaid }) {
             </>
           )}
 
+          {url && kind === "word" && (
+            <WordPreview key={invoice?._id} url={url} name={invoice?.originalFileName} />
+          )}
+
           {url && kind === "image" && (
             <div className="h-full overflow-auto p-4">
               <img
@@ -141,10 +126,12 @@ export default function InvoicePreviewDialog({ invoice, onClose, onMarkPaid }) {
                     <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Open in new tab
                   </a>
                 </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href={downloadUrl(url)} download>
-                    <Download className="mr-1.5 h-3.5 w-3.5" /> Download
-                  </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadFile(url, downloadName(invoice, url))}
+                >
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Download
                 </Button>
               </>
             )}

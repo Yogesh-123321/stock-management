@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import PoPreview from "@/components/PoPreview";
 import PiPreview from "@/components/PiPreview";
 import { DocSummary, PartyDetails } from "@/components/ApprovalPreviewDialog";
+import { fileKind, fileUrl } from "@/lib/filePreview";
+import WordPreview from "@/components/WordPreview";
 import { docKindLabel, fmtDate, humanizeKey, inr } from "@/lib/activityFormat";
 
 /*
@@ -29,24 +31,6 @@ const ENDPOINT = {
   buyer: (id) => `/buyers/${id}`,
   part: (id) => `/parts/${id}`,
   "kit-issue": (id) => `/kits/issues/${id}`,
-};
-
-// Stored file URLs are normally absolute (Cloudinary); a relative "/uploads/…"
-// path is resolved against the API's own origin.
-const API_ORIGIN = (api?.defaults?.baseURL || "").replace(/\/api\/?$/, "");
-const fileUrl = (u) => (!u ? "" : /^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u}`);
-
-const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-const extOf = (value = "") => {
-  const clean = String(value).split("?")[0].split("#")[0];
-  const dot = clean.lastIndexOf(".");
-  return dot === -1 ? "" : clean.slice(dot + 1).toLowerCase();
-};
-const fileKind = (doc) => {
-  const exts = [extOf(doc?.documentUrl), extOf(doc?.originalFileName)];
-  if (exts.includes("pdf")) return "pdf";
-  if (exts.some((e) => IMAGE_EXT.includes(e))) return "image";
-  return "other";
 };
 
 function Facts({ rows }) {
@@ -85,6 +69,11 @@ function FileViewer({ doc }) {
           src={url}
           className="h-[68vh] w-full rounded-md border border-border bg-white"
         />
+      )}
+      {kind === "word" && (
+        <div className="h-[68vh] overflow-hidden rounded-md border border-border">
+          <WordPreview url={url} name={doc.originalFileName} />
+        </div>
       )}
       {kind === "image" && (
         <img

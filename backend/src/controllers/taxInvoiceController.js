@@ -252,6 +252,12 @@ export const getTaxInvoiceStockEntries = asyncHandler(async (req, res) => {
 const isPdfUrlOrName = (invoice) =>
   /\.pdf(\?|$)/i.test(invoice?.documentUrl || "") || /\.pdf$/i.test(invoice?.originalFileName || "");
 
+// Word (.docx) invoices can be read too — their text is extracted and sent to
+// the AI (see docxToText in utils/aiDocumentExtract.js). Older uploads have no
+// extension in the stored URL, so the original file name is checked as well.
+const isDocxUrlOrName = (invoice) =>
+  /\.docx(\?|$)/i.test(invoice?.documentUrl || "") || /\.docx$/i.test(invoice?.originalFileName || "");
+
 const partDescriptionOf = (part) => part?.itemDescription || "";
 const partNumberOf = (part) => part?.ttUniquePartNumber || part?.manufacturerPartNumber || "";
 
@@ -327,9 +333,11 @@ export const getTaxInvoiceLineMatch = asyncHandler(async (req, res) => {
     throw new Error("Tax invoice not found");
   }
 
-  if (!isPdfUrlOrName(invoice)) {
+  const isPdf = isPdfUrlOrName(invoice);
+  const isDocx = !isPdf && isDocxUrlOrName(invoice);
+  if (!isPdf && !isDocx) {
     res.status(400);
-    throw new Error("Only PDF invoices can be read for line-item matching right now");
+    throw new Error("Only PDF and Word (.docx) invoices can be read for line-item matching right now");
   }
 
   const forceRefresh = String(req.query.refresh || "") === "true";
@@ -352,8 +360,10 @@ export const getTaxInvoiceLineMatch = asyncHandler(async (req, res) => {
     try {
       const { lineItems, modelUsed } = await extractInvoiceLineItems({
         buffer,
-        mimeType: "application/pdf",
-        fileName: invoice.originalFileName || "invoice.pdf",
+        mimeType: isDocx
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/pdf",
+        fileName: invoice.originalFileName || (isDocx ? "invoice.docx" : "invoice.pdf"),
       });
       invoice.extractedLines = lineItems;
       invoice.lineExtractionModel = modelUsed;

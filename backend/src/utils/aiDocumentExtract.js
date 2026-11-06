@@ -40,6 +40,7 @@
   used on.
 */
 import { pdf as renderPdfPages } from "pdf-to-img";
+import JSZip from "jszip";
 import {
   OPENROUTER_API_KEY,
   OPENROUTER_BASE_URL,
@@ -388,6 +389,8 @@ const callGemini = async ({
   model,
   buffer,
   mimeType,
+  // When set, this text is sent instead of the file (used for Word documents).
+  documentText = null,
   systemPrompt,
   promptText,
   timeoutMs,
@@ -421,7 +424,12 @@ const callGemini = async ({
           contents: [
             {
               role: "user",
-              parts: [{ inlineData: { mimeType, data: buffer.toString("base64") } }, { text: promptText }],
+              parts: [
+                documentText != null
+                  ? { text: `${promptText}\n\n--- DOCUMENT TEXT ---\n${documentText}` }
+                  : { inlineData: { mimeType, data: buffer.toString("base64") } },
+                ...(documentText != null ? [] : [{ text: promptText }]),
+              ],
             },
           ],
           generationConfig: config,
@@ -465,16 +473,72 @@ const callGemini = async ({
   }
 };
 
+// ---- Word (.docx) -------------------------------------------------------
+// A .docx is a zip holding word/document.xml. Models can't be sent a Word file
+// the way they are a PDF, so the invoice's text is pulled out here and sent as
+// text instead. Table rows are written "cell | cell | cell" so the column
+// structure of an item table survives.
+const DOCX_EXTS = [".docx"];
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const MAX_DOC_TEXT_CHARS = 60000;
+
+const decodeXml = (t) =>
+  t
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, "&");
+
+const paragraphText = (xml) =>
+  decodeXml(
+    xml
+      .replace(/<w:tab\b[^>]*\/>/g, "\t")
+      .replace(/<w:(br|cr)\b[^>]*\/>/g, "\n")
+      .replace(/<\/w:t>/g, "</w:t>")
+      .replace(/<(?!\/?w:t[ >])[^>]*>/g, "") // drop every tag except the text runs
+      .replace(/<\/?w:t[^>]*>/g, "")
+  ).trim();
+
+export const docxToText = async (buffer) => {
+  const zip = await JSZip.loadAsync(buffer);
+  const file = zip.file("word/document.xml");
+  if (!file) throw new Error("This doesn't look like a valid .docx file");
+  const xml = await file.async("string");
+
+  const lines = [];
+  // Walk top-level paragraphs and tables in document order.
+  const blockRe = /<w:tbl\b[\s\S]*?<\/w:tbl>|<w:p\b[\s\S]*?<\/w:p>/g;
+  let m;
+  while ((m = blockRe.exec(xml))) {
+    const block = m[0];
+    if (block.startsWith("<w:tbl")) {
+      for (const row of block.match(/<w:tr\b[\s\S]*?<\/w:tr>/g) || []) {
+        const cells = (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || []).map((c) =>
+          (c.match(/<w:p\b[\s\S]*?<\/w:p>/g) || []).map(paragraphText).filter(Boolean).join(" ")
+        );
+        if (cells.some(Boolean)) lines.push(cells.join(" | "));
+      }
+    } else {
+      const t = paragraphText(block);
+      if (t) lines.push(t);
+    }
+  }
+  return lines.join("\n").slice(0, MAX_DOC_TEXT_CHARS);
+};
+
 // What kind of file this is, for choosing a route. null = unsupported.
 const fileKind = ({ mimeType, fileName }) => {
   if (mimeType === "application/pdf" || PDF_EXTS.includes(extOf(fileName))) return { kind: "pdf", mime: "application/pdf" };
   if (mimeType?.startsWith(IMAGE_MIME_PREFIX)) return { kind: "image", mime: mimeType };
+  if (mimeType === DOCX_MIME || DOCX_EXTS.includes(extOf(fileName))) return { kind: "docx", mime: DOCX_MIME };
   return null;
 };
 
 const unsupportedError = ({ mimeType, fileName }) =>
   new AiExtractionError(
-    `Unsupported file type for AI extraction: ${mimeType || extOf(fileName) || "unknown"} (images and PDFs only)`,
+    `Unsupported file type for AI extraction: ${mimeType || extOf(fileName) || "unknown"} (PDFs, images and Word .docx files only)`,
     []
   );
 
@@ -707,6 +771,81 @@ export async function extractInvoiceLineItems({ buffer, mimeType, fileName }) {
   const attempts = [];
   const deadline = Date.now() + AI_TOTAL_DEADLINE_MS;
   const timeLeft = () => Math.max(1000, Math.min(AI_EXTRACT_TIMEOUT_MS * 2, deadline - Date.now()));
+
+  // Word documents: read the text out of the file and send that. One request
+  // per model — there are no "pages" to split on.
+  if (kind.kind === "docx") {
+    let docText;
+    try {
+      docText = await docxToText(buffer);
+    } catch (err) {
+      throw new AiExtractionError(`Couldn't read this Word file: ${err.message}`, []);
+    }
+    if (!docText.trim()) {
+      throw new AiExtractionError("This Word file has no readable text in it.", []);
+    }
+    const textPrompt =
+      "The invoice below was supplied as TEXT taken from a Word document (.docx); table rows are written with ' | ' between cells. " +
+      "If it is an item table, read one line item per row. If it instead lists a single item as labelled fields " +
+      "(for example COMPONENT / QTY / rate lines), treat that as ONE line item, using the component name as the description. " +
+      "Extract the line items as instructed and return only the JSON object.";
+
+    if (isGeminiConfigured()) {
+      for (const model of GEMINI_MODELS) {
+        if (Date.now() >= deadline) break;
+        const parsed = await guarded({ modelKey: `gemini:${model}`, providerKey: "gemini" }, attempts, () =>
+          callGemini({
+            model,
+            documentText: docText,
+            mimeType: DOCX_MIME,
+            systemPrompt: WHOLE_DOC_PROMPT,
+            promptText: textPrompt,
+            timeoutMs: timeLeft(),
+            maxTokens: LINE_ITEMS_MAX_TOKENS_GEMINI,
+            requireArrayKey: "lineItems",
+          })
+        );
+        if (!parsed) continue;
+        const items = cleanLineItems(parsed.lineItems);
+        if (items.length) return { lineItems: items.map((it) => ({ ...it, page: 1 })), modelUsed: `gemini/${model}` };
+        attempts.push({ model: `gemini:${model}`, error: "replied with no line items" });
+      }
+    }
+
+    if (isOpenRouterConfigured() && Date.now() < deadline) {
+      const liveModels = OPENROUTER_MODELS.filter(
+        (m) => !isCoolingDown(`openrouter:${m}`) && !isCoolingDown("openrouter")
+      );
+      for (const model of liveModels) {
+        if (Date.now() >= deadline) break;
+        const parsed = await guarded({ modelKey: `openrouter:${model}`, providerKey: "openrouter" }, attempts, () =>
+          callOpenRouter({
+            model,
+            imageUrls: [],
+            promptText: `${textPrompt}\n\n--- DOCUMENT TEXT ---\n${docText}`,
+            systemPrompt: WHOLE_DOC_PROMPT,
+            timeoutMs: timeLeft(),
+            maxTokens: LINE_ITEMS_MAX_TOKENS,
+            requireArrayKey: "lineItems",
+          })
+        );
+        if (!parsed) continue;
+        const items = cleanLineItems(parsed.lineItems);
+        if (items.length) return { lineItems: items.map((it) => ({ ...it, page: 1 })), modelUsed: model };
+        attempts.push({ model: `openrouter:${model}`, error: "replied with no line items" });
+      }
+    }
+
+    if (!attempts.some((a) => !/^skipped/.test(a.error))) throw allPausedError(attempts);
+    const summary = [...new Map(attempts.map((a) => [`${a.model}|${a.error}`, a])).values()]
+      .slice(0, 8)
+      .map((a) => `${a.model} — ${a.error}`)
+      .join("; ");
+    throw new AiExtractionError(
+      `Couldn't read the line items from this Word invoice — every free AI source failed or is at its limit (${summary}). Try again in a few minutes.`,
+      attempts
+    );
+  }
 
   // 1. Gemini — whole document, one request.
   if (isGeminiConfigured() && buffer.length <= GEMINI_MAX_INLINE_BYTES) {

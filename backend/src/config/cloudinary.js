@@ -84,6 +84,16 @@ export const partyFolder = (party = {}, kind = "vendor") => {
 const isPreviewable = (mimetype = "") =>
   mimetype.startsWith("image/") || mimetype === "application/pdf";
 
+// Cloudinary "raw" files (Word, Excel...) are stored under the exact public_id
+// we give them and, unlike images/PDFs, NO extension is added to the URL.
+// Without ".docx" at the end the saved link is just a blob: the app can't tell
+// it is a Word file, viewers refuse it, and a download has no file extension.
+// So for raw uploads the original extension is kept in the public_id.
+const rawExtension = (name = "") => {
+  const m = /\.([a-zA-Z0-9]{1,8})$/.exec(String(name));
+  return m ? `.${m[1].toLowerCase()}` : "";
+};
+
 /**
  * Uploads a multer (memoryStorage) file to Cloudinary.
  *
@@ -126,11 +136,14 @@ export const uploadFileToCloudinary = (file, options = "misc") =>
 
     const folder = `${ROOT_FOLDER}/${subfolder}`;
 
+    const previewable = isPreviewable(file.mimetype || "");
     const stream = cloudinary.uploader.upload_stream(
       {
         folder,
-        resource_type: isPreviewable(file.mimetype || "") ? "image" : "raw",
-        public_id: `${Date.now()}-${sanitize(file.originalname)}`,
+        resource_type: previewable ? "image" : "raw",
+        public_id: `${Date.now()}-${sanitize(file.originalname)}${
+          previewable ? "" : rawExtension(file.originalname)
+        }`,
         use_filename: false,
         unique_filename: false,
         overwrite: false,
