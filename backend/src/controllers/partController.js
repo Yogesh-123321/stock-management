@@ -562,6 +562,9 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     entryType: "invoice_deletion",
   }));
 
+  // Zero-quantity rows (e.g. a kit line where nothing was issued, "-0") carry
+  // no information and don't move the balance, so they are left out of the
+  // ledger — only movements with a quantity above 0 are shown, in or out.
   const movements = [
     ...receiptMovements,
     ...kitMovements,
@@ -570,7 +573,7 @@ export const getPartHistory = asyncHandler(async (req, res) => {
     ...rndReturnMovements,
     ...sampleMovements,
     ...invoiceDeletionMovements,
-  ];
+  ].filter((m) => Number(m.quantity) > 0);
   movements.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // A line that hasn't been applied yet (tax invoice not uploaded) was

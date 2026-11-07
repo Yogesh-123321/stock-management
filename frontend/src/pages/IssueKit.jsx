@@ -549,8 +549,13 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
         );
         return;
       }
-      if (q > 0) {
-        extraItemsPayload.push({ ttUniquePartNumber: l.ttUniquePartNumber });
+      const perKit = l.qtyPerKit === "" || l.qtyPerKit == null ? 0 : Number(l.qtyPerKit);
+      if (!Number.isFinite(perKit) || perKit < 0) {
+        toast.error(`Qty required per kit for ${l.ttUniquePartNumber} must be a number of 0 or more`);
+        return;
+      }
+      if (q > 0 || perKit > 0) {
+        extraItemsPayload.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyPerKit: perKit });
         linesPayload.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: q });
       }
     }
@@ -927,6 +932,7 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                             itemDescription: p.itemDescription,
                             available: p.quantityInStock ?? 0,
                             unit: p.unit || "",
+                            qtyPerKit: "0",
                             qty: "1",
                           },
                         ]);
@@ -949,6 +955,17 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
               {extraLines.length > 0 && (
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="w-full text-sm">
+                    <thead className="bg-secondary">
+                      <tr className="border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="px-2.5 py-1.5 text-left">TT part #</th>
+                        <th className="px-2.5 py-1.5 text-left">Description</th>
+                        <th className="px-2.5 py-1.5 text-right">Stock</th>
+                        <th className="px-2.5 py-1.5 text-right whitespace-nowrap">Qty reqd / kit</th>
+                        <th className="px-2.5 py-1.5 text-right">Required</th>
+                        <th className="px-2.5 py-1.5 text-right whitespace-nowrap">Qty issuing</th>
+                        <th className="px-2.5 py-1.5" />
+                      </tr>
+                    </thead>
                     <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
                       {extraLines.map((l) => (
                         <tr key={l._key} className="border-b border-border">
@@ -956,6 +973,27 @@ function EditKitIssueDialog({ issue, onClose, onSaved }) {
                           <td className="px-2.5 py-1.5 text-xs">{l.itemDescription || "—"}</td>
                           <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground whitespace-nowrap">
                             {l.available}{l.unit ? ` ${l.unit}` : ""} in stock
+                          </td>
+                          <td className="px-2.5 py-1.5">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="any"
+                              inputMode="decimal"
+                              className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
+                              title="Quantity of this part required per kit"
+                              value={l.qtyPerKit ?? ""}
+                              onChange={(e) =>
+                                setExtraLines((prev) =>
+                                  prev.map((x) =>
+                                    x._key === l._key ? { ...x, qtyPerKit: e.target.value } : x
+                                  )
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground whitespace-nowrap">
+                            {r4((Number(l.qtyPerKit) || 0) * qtyNum)}
                           </td>
                           <td className="px-2.5 py-1.5">
                             <Input

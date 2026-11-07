@@ -22,6 +22,9 @@ const kitIssueLineSchema = new mongoose.Schema(
     itemDescription: { type: String, trim: true, default: "" },
     referenceDesignator: { type: String, trim: true, default: "" },
     qtyPerKit: { type: Number, required: true, min: 0 },
+    // true for a part added to this one kit on the edit screen (not on the
+    // kit template). Its qtyPerKit is whatever was typed as "Qty reqd / kit".
+    isExtra: { type: Boolean, default: false },
     qtyRequired: { type: Number, required: true, min: 0 }, // qtyPerKit * quantity issued
     qtyIssued: { type: Number, required: true, min: 0 }, // actually deducted from stock — may be less than qtyRequired
     qtyShort: { type: Number, default: 0 }, // qtyRequired - qtyIssued; >0 means this line was short

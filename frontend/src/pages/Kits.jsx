@@ -92,6 +92,104 @@ const describeDuplicates = (dups) =>
   [...dups].map(([code, rows]) => `${code} (rows ${rows.join(", ")})`).join("; ");
 
 /* ------------------------------------------------------------------ *
+ * Search the Parts master and add a part straight into the kit's item
+ * table — type a part number or any word from the description, click a
+ * match. Same /parts search the rest of the app uses, debounced.
+ * ------------------------------------------------------------------ */
+function KitPartSearch({ onPick, disabled, inKit }) {
+  const [term, setTerm] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  useEffect(() => {
+    const q = term.trim();
+    if (!q) {
+      setResults([]);
+      setSearching(false);
+      return undefined;
+    }
+    setSearching(true);
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/parts", { params: { search: q, limit: 30 } });
+        if (alive) setResults(Array.isArray(data) ? data : []);
+      } catch {
+        if (alive) setResults([]);
+      } finally {
+        if (alive) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [term]);
+
+  const pick = (part) => {
+    onPick(part);
+    // Stay open so several parts can be added one after another; the picked
+    // part just shows as "added" in the list.
+    setOpen(true);
+  };
+
+  return (
+    <div ref={boxRef} className="relative">
+      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        className="pl-8"
+        placeholder="Search the parts master by part no. or description, and click to add…"
+        value={term}
+        disabled={disabled}
+        onChange={(e) => {
+          setTerm(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && term.trim() && (
+        <div className="absolute left-0 top-full z-[200] mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-card text-card-foreground shadow-xl">
+          {searching && <p className="px-3 py-2 text-xs text-muted-foreground">Searching…</p>}
+          {!searching && results.length === 0 && (
+            <p className="px-3 py-2 text-xs text-muted-foreground">No matching parts</p>
+          )}
+          {results.map((part) => {
+            const added = inKit(part);
+            return (
+              <button
+                key={part._id}
+                type="button"
+                onClick={() => !added && pick(part)}
+                disabled={added}
+                className="flex w-full items-start justify-between gap-3 border-b border-border px-3 py-2 text-left text-xs last:border-0 bg-card hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="min-w-0">
+                  <span className="font-mono font-medium">{part.ttUniquePartNumber}</span>
+                  <span className="block truncate text-muted-foreground">{part.itemDescription}</span>
+                </span>
+                <span className="shrink-0 text-muted-foreground">
+                  {added ? "Already in kit" : `${part.quantityInStock ?? 0}${part.unit ? ` ${part.unit}` : ""} in stock`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * Create / edit a kit template — manual item table, with an "Import
  * from Excel" shortcut that drops parsed rows straight into the same
  * table for review before Save is ever pressed.
@@ -172,6 +270,31 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
     setItems((rows) => rows.map((r) => (r._key === key ? { ...r, [field]: value } : r)));
 
   const addRow = () => setItems((rows) => [...rows, blankItem()]);
+
+  // Adds a part picked from the search box. Fills the first empty row if
+  // there is one, otherwise appends a new row. Qty/kit starts at 1.
+  const addPartFromSearch = (part) => {
+    const code = String(part.ttUniquePartNumber || "").trim().toUpperCase();
+    if (!code) return;
+    if (items.some((r) => partCode(r) === code)) {
+      toast.error(`${code} is already in this kit — change that row's quantity instead.`);
+      return;
+    }
+    const filled = {
+      ttUniquePartNumber: part.ttUniquePartNumber,
+      manufacturerPartNumber: part.manufacturerPartNumber || "",
+      qtyPerKit: "1",
+      matchedPart: part,
+    };
+    setItems((rows) => {
+      const isBlank = (r) =>
+        !r.ttUniquePartNumber.trim() && !r.referenceDesignator.trim() && !r.value.trim() && !r.manufacturerPartNumber.trim();
+      const blankIdx = rows.findIndex(isBlank);
+      if (blankIdx >= 0) return rows.map((r, i) => (i === blankIdx ? { ...r, ...filled } : r));
+      return [...rows, { ...blankItem(), ...filled }];
+    });
+    toast.success(`${part.ttUniquePartNumber} added`);
+  };
 
   // Every part may be listed only once in a kit template.
   const duplicateParts = useMemo(() => findDuplicateParts(items), [items]);
@@ -474,6 +597,12 @@ function KitEditor({ template, existingTemplates = [], onClose, onSaved }) {
                   </Button>
                 </div>
               </div>
+
+              <KitPartSearch
+                onPick={addPartFromSearch}
+                disabled={locked}
+                inKit={(part) => items.some((r) => partCode(r) === String(part.ttUniquePartNumber || "").trim().toUpperCase())}
+              />
 
               {duplicateParts.size > 0 && (
                 <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

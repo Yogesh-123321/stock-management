@@ -128,12 +128,22 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
   const toggleKit = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  // One row per part across every selected kit.
+  // One row per part across every selected kit. A part is issued only once, so
+  // for kit versions like Kit 13 and Kit 13-A the quantity is shown as
+  // "prev. issued" (everything issued on the earlier selected versions) plus
+  // "issued" (what the latest selected version issued) = total issued.
   const partRows = useMemo(() => {
+    const picked = kits
+      .filter((x) => selected.includes(x._id))
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const latestId = picked.length ? picked[picked.length - 1]._id : null;
     const map = new Map();
-    for (const k of kits.filter((x) => selected.includes(x._id))) {
+    for (const k of picked) {
       for (const l of k.lines) {
-        const row = map.get(l.part._id) || { part: l.part, issued: 0, returned: 0, returnable: 0 };
+        const row =
+          map.get(l.part._id) || { part: l.part, prevIssued: 0, issuedNow: 0, issued: 0, returned: 0, returnable: 0 };
+        if (k._id === latestId) row.issuedNow += l.issued;
+        else row.prevIssued += l.issued;
         row.issued += l.issued;
         row.returned += l.returned;
         row.returnable += l.returnable;
@@ -146,6 +156,8 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
   const { sort, toggle, apply } = useSort();
   const sortedPartRows = apply(partRows, {
     part: (r) => r.part.ttUniquePartNumber,
+    prevIssued: (r) => Number(r.prevIssued),
+    issuedNow: (r) => Number(r.issuedNow),
     issued: (r) => Number(r.issued),
     returned: (r) => Number(r.returned),
     returnable: (r) => Number(r.returnable),
@@ -339,7 +351,9 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
               <TableHeader>
                 <TableRow>
                   <SortableHead label="Part" sortKey="part" sort={sort} onSort={toggle} />
-                  <SortableHead label="Issued" sortKey="issued" sort={sort} onSort={toggle} className="w-[90px]" align="right" />
+                  <SortableHead label="Prev. issued" sortKey="prevIssued" sort={sort} onSort={toggle} className="w-[90px]" align="right" />
+                  <SortableHead label="Issued" sortKey="issuedNow" sort={sort} onSort={toggle} className="w-[80px]" align="right" />
+                  <SortableHead label="Total issued" sortKey="issued" sort={sort} onSort={toggle} className="w-[90px]" align="right" />
                   <SortableHead label="Already returned" sortKey="returned" sort={sort} onSort={toggle} className="w-[110px]" align="right" />
                   <SortableHead label="Can return" sortKey="returnable" sort={sort} onSort={toggle} className="w-[100px]" align="right" />
                   <SortableHead label="Returned now" sortKey="now" sort={sort} onSort={toggle} className="w-[130px]" align="right" />
@@ -355,8 +369,10 @@ export default function KitStep({ vendor, sessionId, onDone, onSkip, onChangeVen
                         <span className="font-mono text-xs">{r.part.ttUniquePartNumber}</span>
                         <span className="block max-w-xs truncate text-xs text-muted-foreground">{r.part.itemDescription}</span>
                       </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums">
-                        {show(r.issued)} {r.part.unit}
+                      <TableCell className="text-right text-xs tabular-nums">{show(r.prevIssued)}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">{show(r.issuedNow)}</TableCell>
+                      <TableCell className="text-right text-xs font-medium tabular-nums">
+                        {show(r.prevIssued)} + {show(r.issuedNow)} = {show(r.issued)} {r.part.unit}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums">{show(r.returned)}</TableCell>
                       <TableCell className="text-right text-xs font-medium tabular-nums">{show(r.returnable)}</TableCell>

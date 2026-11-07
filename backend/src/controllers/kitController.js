@@ -299,6 +299,7 @@ const linesPayloadFrom = (resolvedLines, by = "") =>
     itemDescription: partDoc ? partDoc.itemDescription : item.value || "",
     referenceDesignator: item.referenceDesignator,
     qtyPerKit: item.qtyPerKit,
+    isExtra: !!item.isExtra,
     qtyRequired: required,
     qtyIssued: toDeduct,
     qtyShort: short,
@@ -597,30 +598,40 @@ async function suggestEditIssueCode(rootDoc) {
   return { nextIndex, baseCode, issueCode };
 }
 
-// Parts added to ONE kit on top of its template (the "Add part" button on
-// the edit screen) are stored as lines with qtyPerKit 0, since they aren't
-// on the template. Saving / issuing a saved kit rebuilds its item list from
-// the template, so these extras have to be carried over explicitly or they
-// would silently drop off. `savedLines` = the kit's existing lines,
-// `extraItems` = parts newly added in this request.
+// Parts added to ONE kit on top of its template (the "Add a part" button on
+// the edit screen) are stored as lines flagged `isExtra`, since they aren't
+// on the template. They carry their own "Qty required per kit" (0 = no fixed
+// per-kit requirement, the quantity then comes purely from what is issued).
+// Saving / issuing a saved kit rebuilds its item list from the template, so
+// these extras have to be carried over explicitly or they would silently
+// drop off. `savedLines` = the kit's existing lines, `extraItems` = parts
+// newly added in this request ({ ttUniquePartNumber, qtyPerKit }).
+const isExtraLine = (l) => !!l?.isExtra || (l?.qtyPerKit || 0) === 0;
+const cleanQtyPerKit = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
 const withExtraItems = (baseItems, savedLines = [], extraItems = []) => {
   const items = [...baseItems];
   const have = new Set(items.map((it) => it.ttUniquePartNumber));
-  const add = (code, referenceDesignator, value) => {
+  const add = (code, referenceDesignator, value, qtyPerKit) => {
     const c = String(code || "").trim().toUpperCase();
     if (!c || have.has(c)) return;
     have.add(c);
     items.push({
       ttUniquePartNumber: c,
       referenceDesignator: String(referenceDesignator || "").trim(),
-      qtyPerKit: 0,
+      qtyPerKit: cleanQtyPerKit(qtyPerKit),
       value: value || "",
+      isExtra: true,
     });
   };
+  // A part re-sent in this request wins over what was saved, so the
+  // "Qty required per kit" can be changed on an already-added part too.
+  for (const ex of extraItems || []) add(ex?.ttUniquePartNumber, ex?.referenceDesignator, "", ex?.qtyPerKit);
   for (const l of savedLines || []) {
-    if ((l.qtyPerKit || 0) === 0) add(l.ttUniquePartNumber, l.referenceDesignator, l.itemDescription);
+    if (isExtraLine(l)) add(l.ttUniquePartNumber, l.referenceDesignator, l.itemDescription, l.qtyPerKit);
   }
-  for (const ex of extraItems || []) add(ex?.ttUniquePartNumber, ex?.referenceDesignator, "");
   return items;
 };
 
@@ -630,7 +641,7 @@ const withSavedExtraQty = (overrideLines, savedLines = []) => {
   const out = Array.isArray(overrideLines) ? [...overrideLines] : [];
   const named = new Set(out.map((l) => String(l?.ttUniquePartNumber || "").trim().toUpperCase()));
   for (const l of savedLines || []) {
-    if ((l.qtyPerKit || 0) === 0 && !named.has(l.ttUniquePartNumber)) {
+    if (isExtraLine(l) && !named.has(l.ttUniquePartNumber)) {
       out.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: l.qtyIssued });
     }
   }
@@ -1443,6 +1454,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
       ttUniquePartNumber: l.ttUniquePartNumber,
       referenceDesignator: l.referenceDesignator,
       qtyPerKit: l.qtyPerKit,
+      isExtra: !!l.isExtra,
       value: l.itemDescription,
     }));
   }
@@ -1893,6 +1905,7 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
       ttUniquePartNumber: l.ttUniquePartNumber,
       referenceDesignator: l.referenceDesignator,
       qtyPerKit: l.qtyPerKit,
+      isExtra: !!l.isExtra,
       value: l.itemDescription,
     }));
   }
@@ -2056,6 +2069,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
       ttUniquePartNumber: l.ttUniquePartNumber,
       referenceDesignator: l.referenceDesignator,
       qtyPerKit: l.qtyPerKit,
+      isExtra: !!l.isExtra,
       value: l.itemDescription,
     }));
   }
