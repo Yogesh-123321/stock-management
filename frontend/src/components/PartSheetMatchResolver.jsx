@@ -21,13 +21,30 @@ import { Loader2, PackagePlus, PackageSearch, Sparkles } from "lucide-react";
   an existing part is picked here, or the operator has to actively click
   through to create one.
 */
-export default function PartSheetMatchResolver({ itemDescription, onSelectExisting, onCreateNew }) {
-  const [suggestions, setSuggestions] = useState([]);
+export default function PartSheetMatchResolver({
+  itemDescription,
+  onSelectExisting,
+  onCreateNew,
+  // Optional: ready-made suggestions from the server (kit import ranks parts
+  // by manufacturer part number, then description — each has score + reason).
+  // When given and non-empty they replace the description look-up below.
+  serverSuggestions,
+  // Optional: replaces the default intro sentence.
+  message,
+}) {
+  const [fetched, setFetched] = useState([]);
   const [checking, setChecking] = useState(false);
 
   const descTerm = String(itemDescription || "").trim();
+  const hasServerList = Array.isArray(serverSuggestions) && serverSuggestions.length > 0;
+  const suggestions = hasServerList ? serverSuggestions : fetched;
+  const setSuggestions = setFetched;
 
   useEffect(() => {
+    if (hasServerList) {
+      setChecking(false);
+      return undefined;
+    }
     if (!descTerm || descTerm.length < 3) {
       setSuggestions([]);
       return undefined;
@@ -44,13 +61,13 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
       }
     }, 300);
     return () => clearTimeout(t);
-  }, [descTerm]);
+  }, [descTerm, hasServerList]);
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-amber-300 bg-amber-50 p-2.5 space-y-2.5">
       <p className="text-xs text-amber-900">
-        This row's part number isn't in the master yet. Search for the part it should match, or pick one of the
-        suggestions below before creating a new part number.
+        {message ||
+          "This row's part number isn't in the master yet. Search for the part it should match, or pick one of the suggestions below before creating a new part number."}
       </p>
 
       <div className="space-y-1">
@@ -73,7 +90,7 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
         <div className="space-y-1">
           <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-900">
             <Sparkles className="h-3 w-3" />
-            Suggested matches by description
+            {hasServerList ? "Suggested matches" : "Suggested matches by description"}
           </p>
           <ul className="space-y-1">
             {suggestions.map((p) => (
@@ -91,6 +108,12 @@ export default function PartSheetMatchResolver({ itemDescription, onSelectExisti
                     )}
                   </span>
                   <span className="block [overflow-wrap:anywhere]">{p.itemDescription}</span>
+                  {p.reason && (
+                    <span className="block text-[11px] text-muted-foreground">
+                      {p.reason}
+                      {typeof p.score === "number" ? ` · ${p.score}% match` : ""}
+                    </span>
+                  )}
                 </span>
                 <Button
                   type="button"

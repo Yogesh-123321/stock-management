@@ -21,6 +21,12 @@ import {
   iMoniCAM BOM template), it's parsed read-only on the server — nothing is
   saved yet.
 
+  The sheet does NOT need a TTZ part number column. Rows without a (known)
+  TTZ code are matched on the server by manufacturer part number — an exact,
+  unique hit is filled in automatically ("Matched by Mfr part no.", with a
+  Change button) — and otherwise get a ranked suggestion list built from the
+  manufacturer part number and the row's value / type / package size.
+
   Every row the sheet's ttUniquePartNumber column didn't match to a part
   already in the master needs a decision before it's handed off: search the
   master (part number or description/value) and pick the part it should
@@ -94,6 +100,7 @@ export default function KitImportPanel({ onImported, onClose }) {
   const includedRows = rows.filter((r) => r.included);
   const excludedCount = rows.length - includedRows.length;
   const matchedCount = includedRows.filter((r) => r.matchedPart).length;
+  const autoMatchedCount = includedRows.filter((r) => r.matchedPart && r.matchSource === "mfr-part-number").length;
   const unresolvedCount = rows.filter((r) => !isResolved(r)).length;
   const newCount = includedRows.filter((r) => !r.matchedPart && r.showCreateForm).length;
 
@@ -110,7 +117,7 @@ export default function KitImportPanel({ onImported, onClose }) {
     }
     onImported({
       ...parsed,
-      rows: includedRows.map(({ showCreateForm, included, ...r }) => r),
+      rows: includedRows.map(({ showCreateForm, included, suggestions, matchSource, ...r }) => r),
     });
   };
 
@@ -149,8 +156,9 @@ export default function KitImportPanel({ onImported, onClose }) {
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
             <p className="text-xs text-muted-foreground">
-              Column headers like "TTZ Part" / "Qty" (or common variants) are auto-detected wherever they sit on
-              the sheet — the header row itself doesn't need to be in a fixed spot.
+              A "TTZ Part" column is optional. Column headers like "MFR_PART_NUMBER" / "Qty" (or common variants)
+              are auto-detected wherever they sit on the sheet. Rows without a TTZ number are matched to the parts
+              master by manufacturer part number, and you confirm the suggestions before anything is imported.
             </p>
           </div>
           <div className="flex justify-between pt-2">
@@ -172,6 +180,7 @@ export default function KitImportPanel({ onImported, onClose }) {
               <Badge variant="success" className="gap-1">
                 <PackageCheck className="h-3 w-3" />
                 {matchedCount} matched to an existing part
+                {autoMatchedCount > 0 ? ` (${autoMatchedCount} by Mfr part no.)` : ""}
               </Badge>
               {newCount > 0 && (
                 <Badge variant="warning" className="gap-1">
@@ -204,8 +213,8 @@ export default function KitImportPanel({ onImported, onClose }) {
 
             {unresolvedCount > 0 && (
               <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
-                {unresolvedCount} row(s) below didn't match anything in the master — search for the part each one
-                should be, or confirm it as a new part number, before these rows can be used.
+                {unresolvedCount} row(s) below couldn't be matched with certainty — pick one of the suggested parts,
+                search for the right one, or confirm it as a new part number, before these rows can be used.
               </p>
             )}
 
@@ -246,8 +255,8 @@ function KitImportRow({ row, updateRow }) {
         (row.included ? "" : " opacity-60")
       }
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-        <label className="flex shrink-0 items-center gap-1.5" title="Include this row when importing">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-1 text-xs">
+        <label className="flex shrink-0 items-center gap-1.5 pt-0.5" title="Include this row when importing">
           <input
             type="checkbox"
             className="h-3.5 w-3.5"
@@ -255,16 +264,21 @@ function KitImportRow({ row, updateRow }) {
             onChange={(e) => updateRow(row.rowIndex, { included: e.target.checked })}
           />
         </label>
-        <span className="text-muted-foreground w-16 shrink-0">{row.referenceDesignator || "—"}</span>
-        <span className="min-w-0 flex-1 break-words">{row.value || "—"}</span>
-        <span className="font-mono-tech shrink-0">
+        <span
+          className="w-36 shrink-0 text-muted-foreground [overflow-wrap:anywhere]"
+          title={row.referenceDesignator || ""}
+        >
+          {row.referenceDesignator || "—"}
+        </span>
+        <span className="min-w-[6rem] flex-1 [overflow-wrap:anywhere]">{row.value || "—"}</span>
+        <span className="font-mono-tech shrink-0 max-w-full [overflow-wrap:anywhere]">
           {row.ttUniquePartNumber || <span className="text-amber-700 font-sans">no code on sheet</span>}
         </span>
         <span className="shrink-0">
           {!row.included ? (
             <Badge variant="secondary">Excluded</Badge>
           ) : row.matchedPart ? (
-            <Badge variant="success">Matched</Badge>
+            <Badge variant="success">{row.matchSource === "mfr-part-number" ? "Matched by Mfr part no." : "Matched"}</Badge>
           ) : row.showCreateForm ? (
             <Badge variant="warning" className="gap-1">
               <PackagePlus className="h-3 w-3" />
@@ -276,12 +290,47 @@ function KitImportRow({ row, updateRow }) {
         </span>
       </div>
 
+      {row.included && row.matchedPart && row.matchSource === "mfr-part-number" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-xs">
+          <span className="min-w-0 break-words">
+            <span className="font-mono-tech">{row.matchedPart.ttUniquePartNumber}</span>
+            {row.matchedPart.itemDescription ? <> — {row.matchedPart.itemDescription}</> : null}
+            {row.manufacturerPartNumber ? (
+              <span className="text-muted-foreground"> (same Mfr part no. {row.manufacturerPartNumber})</span>
+            ) : null}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs"
+            onClick={() =>
+              updateRow(row.rowIndex, {
+                matchedPart: null,
+                matchSource: null,
+                ttUniquePartNumber: "",
+                showCreateForm: false,
+              })
+            }
+          >
+            Change
+          </Button>
+        </div>
+      )}
+
       {row.included && !row.matchedPart && !row.showCreateForm && (
         <PartSheetMatchResolver
           itemDescription={descriptionTerm}
+          serverSuggestions={row.suggestions}
+          message={
+            row.ttUniquePartNumber
+              ? undefined
+              : "No TTZ part number on this row. Pick one of the suggested parts (matched on manufacturer part number / description), search the master yourself, or create a new part number."
+          }
           onSelectExisting={(part) =>
             updateRow(row.rowIndex, {
               matchedPart: part,
+              matchSource: "picked",
               ttUniquePartNumber: part.ttUniquePartNumber,
               showCreateForm: false,
             })

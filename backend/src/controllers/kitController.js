@@ -6,6 +6,7 @@ import KitIssue from "../models/KitIssue.js";
 import Part from "../models/Part.js";
 import Vendor from "../models/Vendor.js";
 import { parseKitWorkbook } from "../utils/parseKitSheet.js";
+import { attachPartSuggestions } from "../utils/kitPartSuggest.js";
 import { getAvailableBatches, allocateFromBatches } from "../utils/batchAllocation.js";
 import { returnedMap } from "../utils/kitReturn.js";
 import { supplyHintsByPart } from "../utils/supplyHints.js";
@@ -896,10 +897,15 @@ export const parseKitImport = asyncHandler(async (req, res) => {
   }
 
   const byCode = await resolvePartsByCode(parsed.rows);
-  const rows = parsed.rows.map((r) => ({
-    ...r,
-    matchedPart: r.ttUniquePartNumber ? byCode.get(r.ttUniquePartNumber) || null : null,
-  }));
+  const rows = parsed.rows.map((r) => {
+    const matchedPart = r.ttUniquePartNumber ? byCode.get(r.ttUniquePartNumber) || null : null;
+    return { ...r, matchedPart, matchSource: matchedPart ? "ttz-code" : null };
+  });
+
+  // Rows with no TTZ code (or one that isn't in the master): match by
+  // manufacturer part number, else suggest parts by description. Read-only —
+  // the admin confirms every non-exact suggestion in the import panel.
+  await attachPartSuggestions(rows);
 
   res.json({ ...parsed, rows });
 });

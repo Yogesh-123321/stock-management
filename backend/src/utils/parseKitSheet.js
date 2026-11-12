@@ -107,16 +107,19 @@ const norm = (v) =>
 const normKey = (v) => norm(v).toLowerCase();
 
 // Scans the first 25 rows for the row that looks like the real header (has
-// both a part-number column and a Qty column) — kit sheets have a variable
-// number of title/metadata rows above the header.
+// a part-number column AND a Qty column) — kit sheets have a variable
+// number of title/metadata rows above the header. The part-number column
+// may be a TTZ code OR a manufacturer part number: sheets that come straight
+// from a PCB tool carry only the MPN, and the importer then suggests the
+// matching TTZ part from the master (see utils/kitPartSuggest.js).
 const findHeaderRow = (grid) => {
-  const wantedTT = HEADER_CANDIDATES.ttPart.map(normKey);
+  const wantedPart = [...HEADER_CANDIDATES.ttPart, ...HEADER_CANDIDATES.mfrPart].map(normKey);
   const wantedQty = HEADER_CANDIDATES.qty.map(normKey);
   for (let r = 0; r < Math.min(grid.length, 25); r++) {
     const cells = (grid[r] || []).map(normKey);
-    const hasTT = cells.some((c) => wantedTT.includes(c));
+    const hasPart = cells.some((c) => wantedPart.includes(c));
     const hasQty = cells.some((c) => wantedQty.includes(c));
-    if (hasTT && hasQty) return r;
+    if (hasPart && hasQty) return r;
   }
   return -1;
 };
@@ -212,7 +215,7 @@ export function parseKitWorkbook(wb, { sheetName } = {}) {
   const headerRowIdx = findHeaderRow(grid);
   if (headerRowIdx === -1) {
     throw new Error(
-      'Could not find a header row with a part-number column ("TTZ Part" or similar) and a "Qty" column on this sheet.'
+      'Could not find a header row with a part-number column ("TTZ Part" or "MFR_PART_NUMBER" or similar) and a "Qty" column on this sheet.'
     );
   }
   const header = (grid[headerRowIdx] || []).map(norm);
@@ -229,20 +232,28 @@ export function parseKitWorkbook(wb, { sheetName } = {}) {
     qty: findCol(header, HEADER_CANDIDATES.qty),
     dnp: findCol(header, HEADER_CANDIDATES.dnp),
   };
-  if (idx.ttPart === -1 || idx.qty === -1) {
-    throw new Error('Could not locate the "TTZ Part" / "Qty" columns on this sheet.');
+  // A TTZ column is no longer mandatory: with only a manufacturer part
+  // number column the rows come back without a TTZ code and the import
+  // endpoint suggests matches from the parts master instead.
+  if ((idx.ttPart === -1 && idx.mfrPart === -1) || idx.qty === -1) {
+    throw new Error('Could not locate a part-number ("TTZ Part" or "MFR_PART_NUMBER") column and a "Qty" column on this sheet.');
   }
 
   const rows = [];
   for (let r = headerRowIdx + 1; r < grid.length; r++) {
     const line = grid[r] || [];
-    const ttUniquePartNumber = cleanCode(line[idx.ttPart]);
+    const ttUniquePartNumber = idx.ttPart > -1 ? cleanCode(line[idx.ttPart]) : null;
+    const mfrPartNumber = idx.mfrPart > -1 ? norm(line[idx.mfrPart]) : "";
     const reference = idx.reference > -1 ? norm(line[idx.reference]) : "";
     const value = idx.value > -1 ? norm(line[idx.value]) : "";
     const qtyPerKit = toNumber(line[idx.qty]);
 
     // Fully blank row (nothing usable at all) — end-of-table filler, skip.
     if (!ttUniquePartNumber && !reference && !value && qtyPerKit == null) continue;
+    // A line with neither a part code (TTZ or manufacturer) nor a quantity
+    // is a note, not a BOM line — e.g. a "PA5 Changes: ..." list under the
+    // table. Skip it instead of turning it into a bogus row.
+    if (!ttUniquePartNumber && !mfrPartNumber && qtyPerKit == null) continue;
 
     rows.push({
       rowIndex: r + 1, // 1-indexed spreadsheet row, kept for traceability in the UI
@@ -251,7 +262,7 @@ export function parseKitWorkbook(wb, { sheetName } = {}) {
       value,
       partType: idx.partType > -1 ? norm(line[idx.partType]) : "",
       ttUniquePartNumber,
-      manufacturerPartNumber: idx.mfrPart > -1 ? norm(line[idx.mfrPart]) : "",
+      manufacturerPartNumber: mfrPartNumber,
       manufacturer: idx.manufacturer > -1 ? norm(line[idx.manufacturer]) : "",
       footprint: idx.footprint > -1 ? norm(line[idx.footprint]) : "",
       qtyPerKit: qtyPerKit ?? 0,
