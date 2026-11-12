@@ -59,7 +59,7 @@ function PartPicker({ onPick }) {
         autoComplete="off"
       />
       {open && term.trim() && (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+        <div className="absolute left-0 top-full z-[200] mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-card text-card-foreground shadow-xl">
           {searching && (
             <p className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching…

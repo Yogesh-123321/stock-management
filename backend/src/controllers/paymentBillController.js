@@ -1,3 +1,4 @@
+import { isAdminRole } from "../config/permissions.js";
 import asyncHandler from "express-async-handler";
 import mongoose from "mongoose";
 import PaymentBill, { PAYMENT_MODES } from "../models/PaymentBill.js";
@@ -44,7 +45,7 @@ async function findCashiers() {
     permissions: "payment.pay",
   }).select("_id");
   if (cashiers.length) return cashiers;
-  return User.find({ isActive: true, role: "admin" }).select("_id");
+  return User.find({ isActive: true, role: { $in: ["admin", "super_admin"] } }).select("_id");
 }
 
 /** What the signed-in user may do with a bill — the server is the single source of truth. */
@@ -169,7 +170,7 @@ export const createBill = asyncHandler(async (req, res) => {
 export const listBills = asyncHandler(async (req, res) => {
   const held = req.permissions || [];
   // Admins and cashiers work the whole queue; everyone else sees only their own uploads.
-  const seeAll = req.user.role === "admin" || held.includes("payment.pay");
+  const seeAll = isAdminRole(req.user.role) || held.includes("payment.pay");
   const base = seeAll ? {} : { submittedBy: req.user._id };
 
   const filter = { ...base };
@@ -207,7 +208,7 @@ export const listBills = asyncHandler(async (req, res) => {
 export const pendingCount = asyncHandler(async (req, res) => {
   const held = req.permissions || [];
   let count = 0;
-  if (req.user.role === "admin") count = await PaymentBill.countDocuments({ status: "pending_approval" });
+  if (isAdminRole(req.user.role)) count = await PaymentBill.countDocuments({ status: "pending_approval" });
   else if (held.includes("payment.pay")) count = await PaymentBill.countDocuments({ status: "approved" });
   res.json({ count });
 });

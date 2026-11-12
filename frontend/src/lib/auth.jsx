@@ -93,12 +93,15 @@ export function AuthProvider({ children }) {
       signOut,
       bootstrap,
       refresh: load,
-      isAdmin: user?.role === "admin",
+      isAdmin: user?.role === "admin" || user?.role === "super_admin",
+      isSuperAdmin: user?.role === "super_admin",
+      // The server sends the EFFECTIVE rights (an admin's revoked rights are
+      // already removed), so only a super admin skips the list.
       can: (permission) =>
-        Boolean(user) && (user.role === "admin" || (user.permissions || []).includes(permission)),
+        Boolean(user) && (user.role === "super_admin" || (user.permissions || []).includes(permission)),
       canAny: (...list) =>
         Boolean(user) &&
-        (user.role === "admin" || list.some((p) => (user.permissions || []).includes(p))),
+        (user.role === "super_admin" || list.some((p) => (user.permissions || []).includes(p))),
     }),
     [user, loading, needsSetup, signIn, signOut, bootstrap, load]
   );

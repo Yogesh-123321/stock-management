@@ -103,6 +103,9 @@ const kitIssueSchema = new mongoose.Schema(
     kitTemplate: { type: mongoose.Schema.Types.ObjectId, ref: "KitTemplate", default: null },
     kitName: { type: String, required: true, trim: true }, // snapshot
     kitCode: { type: String, trim: true, default: "" }, // snapshot
+    // Revision of this kit as issued (e.g. "B"). Defaults to the template's
+    // revision but can be set per issue.
+    revision: { type: String, trim: true, default: "" },
 
     // Display code for THIS issue action specifically — defaults to the
     // kit's own code (or its name, if it has none) at the moment this

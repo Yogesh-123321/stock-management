@@ -7,7 +7,7 @@ import User from "../models/User.js";
  * notification, sent by notifyRequester.)
  */
 export async function findApprovers() {
-  return User.find({ isActive: true, role: "admin" }).select("_id");
+  return User.find({ isActive: true, role: { $in: ["admin", "super_admin"] } }).select("_id");
 }
 
 export async function notifyUsers(recipients, payload) {

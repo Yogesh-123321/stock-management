@@ -5,10 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import FamilySelect from "@/components/ui/FamilySelect";
 import FamilyNumberCell from "@/components/FamilyNumberCell";
 import { useFamilyRows } from "@/lib/useFamilyRows";
-import { kitNumberOf, kitOptionLabel } from "@/lib/kitLabels";
+import { kitOptionLabel } from "@/lib/kitLabels";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import VendorSearchSelect from "@/components/VendorSearchSelect";
 import AlternatePartPicker from "@/components/AlternatePartPicker";
@@ -1119,6 +1118,9 @@ function KitIssuePreviewDialog({ issue, onClose, onEdit, onRevert, onRevertAll }
             <h2 className="font-display text-base font-semibold flex items-center gap-2">
               <PackageOpen className="h-4 w-4 text-accent" />
               {issue.kitName}
+              {issue.revision && (
+                <span className="font-mono-tech text-xs font-normal text-muted-foreground">Rev {issue.revision}</span>
+              )}
               {issue.revertedAt && (
                 <Badge variant="destructive" className="gap-1">
                   <RotateCcw className="h-3 w-3" />
@@ -1992,7 +1994,10 @@ function KitsPanel({
                         {fmtDateTime(iss.createdAt)}
                       </TableCell>
                       <TableCell className="overflow-hidden">
-                        <p className="truncate font-medium">{iss.kitName}</p>
+                        <p className="truncate font-medium">
+                          {iss.kitName}
+                          {iss.revision ? <span className="ml-1.5 font-mono-tech text-[11px] text-muted-foreground">Rev {iss.revision}</span> : null}
+                        </p>
                         {iss.kitCode && (
                           <p className="truncate text-xs text-muted-foreground font-mono-tech">
                             {iss.kitCode}
@@ -2146,7 +2151,10 @@ function KitsPanel({
                         {fmtDateTime(d.updatedAt)}
                       </TableCell>
                       <TableCell className="overflow-hidden">
-                        <p className="truncate font-medium">{d.kitName}</p>
+                        <p className="truncate font-medium">
+                          {d.kitName}
+                          {d.revision ? <span className="ml-1.5 font-mono-tech text-[11px] text-muted-foreground">Rev {d.revision}</span> : null}
+                        </p>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1">
                           {d._id === activeDraftId && (
                             <Badge variant="warning" className="gap-1">
@@ -2324,6 +2332,13 @@ export default function IssueKit() {
   const [issueCode, setIssueCode] = useState("");
   const [codeCustom, setCodeCustom] = useState(false);
   const [codeRefresh, setCodeRefresh] = useState(0);
+  // Revision of the kit being issued. Pre-filled from the template's revision;
+  // typing over it makes it this kit's own revision.
+  const [revision, setRevision] = useState("");
+  const [revisionCustom, setRevisionCustom] = useState(false);
+  // Parts added to THIS kit on top of the template (not saved to the template).
+  const [extraLines, setExtraLines] = useState([]);
+  const [addingPart, setAddingPart] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [shortages, setShortages] = useState(null);
@@ -2376,32 +2391,21 @@ export default function IssueKit() {
       .finally(() => setLoadingTemplate(false));
   }, [templateId]);
 
-  // Everything already ISSUED from the chosen template (every earlier kit and
-  // its edits, all vendors). Drives the "Prev. issued" column, so while the
-  // next kit is being filled in you can see how much of each part has already
-  // gone out. Drafts aren't included — they haven't deducted anything.
-  const [issueHistory, setIssueHistory] = useState([]);
-  useEffect(() => {
-    if (!templateId) {
-      setIssueHistory([]);
-      return undefined;
-    }
-    let cancelled = false;
-    api
-      .get(`/kits/${templateId}/issues`)
-      .then(({ data }) => {
-        if (!cancelled) setIssueHistory(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setIssueHistory([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [templateId, reloadKey]);
+  // Issuing from a template starts a NEW, independent kit (its own number, e.g.
+  // KIT 15) — nothing issued earlier from the same template carries over, so
+  // "Prev. issued" starts at 0. Earlier issues of the template and their
+  // edits (KIT 13, KIT 13-A …) are only continued through "Edit" on that
+  // issued kit. Kept as state so the rest of the form needs no change.
+  const [issueHistory] = useState([]);
 
-  // Suggested code for the chosen template (its kit code, or KIT_05-2 … when
-  // that one is already taken). Not applied over a code the person typed or
+  // Revision follows the chosen template until the person types their own.
+  useEffect(() => {
+    if (!revisionCustom) setRevision(template?.revision || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template]);
+
+  // Suggested code for the chosen template (its kit code, or the next free kit number — KIT 15,
+  // KIT 16 … — when that one is already taken). Not applied over a code the person typed or
   // one saved on a resumed kit.
   useEffect(() => {
     if (!templateId) {
@@ -2426,6 +2430,9 @@ export default function IssueKit() {
   const chooseTemplate = (id) => {
     setCodeCustom(false);
     setIssueCode("");
+    setRevisionCustom(false);
+    setExtraLines([]); // added parts belong to one kit, not to the next template
+    setAddingPart(false);
     setTemplateId(id);
   };
 
@@ -2520,6 +2527,10 @@ export default function IssueKit() {
     setDraftId(null);
     setIssueCode("");
     setCodeCustom(false);
+    setRevision("");
+    setRevisionCustom(false);
+    setExtraLines([]);
+    setAddingPart(false);
     pendingResumeRef.current = null;
   };
 
@@ -2541,6 +2552,24 @@ export default function IssueKit() {
     setIssueCode(draft.issueCode || "");
     setCodeCustom(!!draft.issueCode);
     if (!draft.issueCode) setCodeRefresh((n) => n + 1);
+    // Revision saved on the kit stays; otherwise follow the template's.
+    setRevision(draft.revision || "");
+    setRevisionCustom(!!draft.revision);
+    // Parts that were added to this kit (they aren't on the template).
+    setExtraLines(
+      (draft.lines || [])
+        .filter((l) => l.isExtra || (l.qtyPerKit || 0) === 0)
+        .map((l) => ({
+          _key: Math.random().toString(36).slice(2),
+          ttUniquePartNumber: l.ttUniquePartNumber,
+          itemDescription: l.part?.itemDescription || l.itemDescription || "",
+          available: l.part?.quantityInStock ?? 0,
+          unit: l.part?.unit || "",
+          qtyPerKit: String(l.qtyPerKit ?? 0),
+          qty: String(l.qtyIssued ?? 0),
+        }))
+    );
+    setAddingPart(false);
     const nextTemplateId = draft.kitTemplate?._id || draft.kitTemplate || "";
     if (nextTemplateId === templateId) {
       // Same template already loaded — the fetch effect won't re-fire,
@@ -2564,6 +2593,35 @@ export default function IssueKit() {
     }
   };
 
+  // Validates the parts added to this kit and builds what the server needs:
+  // `extraItems` (the part + its qty required per kit) and the matching
+  // `lines`. `checkStock` is off when saving for later (stock may still arrive).
+  const buildExtras = (checkStock) => {
+    const extraItems = [];
+    const lines = [];
+    for (const l of extraLines) {
+      const q = l.qty === "" || l.qty == null ? 0 : Number(l.qty);
+      if (!Number.isFinite(q) || q < 0) {
+        toast.error(`Qty for added part ${l.ttUniquePartNumber} must be a number of 0 or more`);
+        return null;
+      }
+      if (checkStock && q > l.available) {
+        toast.error(`Qty for ${l.ttUniquePartNumber} (${q}) can't exceed available stock (${l.available})`);
+        return null;
+      }
+      const perKit = l.qtyPerKit === "" || l.qtyPerKit == null ? 0 : Number(l.qtyPerKit);
+      if (!Number.isFinite(perKit) || perKit < 0) {
+        toast.error(`Qty required per kit for ${l.ttUniquePartNumber} must be a number of 0 or more`);
+        return null;
+      }
+      if (q > 0 || perKit > 0) {
+        extraItems.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyPerKit: perKit });
+        lines.push({ ttUniquePartNumber: l.ttUniquePartNumber, qtyIssued: q });
+      }
+    }
+    return { extraItems, lines };
+  };
+
   // Saves (or updates) this kit's progress without touching stock. A qty
   // above what's currently available isn't blocked here — the whole point
   // of saving is that stock may still arrive before it's actually issued.
@@ -2581,6 +2639,9 @@ export default function IssueKit() {
       }
       linesPayload.push({ ttUniquePartNumber: p.ttUniquePartNumber, qtyIssued: q });
     }
+    const extras = buildExtras(false);
+    if (!extras) return;
+    linesPayload.push(...extras.lines);
 
     setSavingDraft(true);
     try {
@@ -2589,6 +2650,8 @@ export default function IssueKit() {
         vendor: vendor?._id || null,
         remarks,
         lines: linesPayload,
+        extraItems: extras.extraItems,
+        revision: revision.trim(),
         issueCode: codeCustom ? issueCode.trim() : "",
       };
       const { data } = draftId
@@ -2649,25 +2712,25 @@ export default function IssueKit() {
       }
       linesPayload.push({ ttUniquePartNumber: p.ttUniquePartNumber, qtyIssued: q });
     }
+    const extras = buildExtras(true);
+    if (!extras) return;
+    linesPayload.push(...extras.lines);
 
     setSubmitting(true);
     setShortages(null);
     try {
+      const body = {
+        quantity: qtyNum,
+        vendor: vendor._id,
+        remarks,
+        lines: linesPayload,
+        extraItems: extras.extraItems,
+        revision: revision.trim(),
+        issueCode: codeCustom ? issueCode.trim() : "",
+      };
       const { data } = draftId
-        ? await api.post(`/kits/drafts/${draftId}/issue`, {
-            quantity: qtyNum,
-            vendor: vendor._id,
-            remarks,
-            lines: linesPayload,
-            issueCode: codeCustom ? issueCode.trim() : "",
-          })
-        : await api.post(`/kits/${template._id}/issue`, {
-            quantity: qtyNum,
-            vendor: vendor._id,
-            remarks,
-            lines: linesPayload,
-            issueCode: codeCustom ? issueCode.trim() : "",
-          });
+        ? await api.post(`/kits/drafts/${draftId}/issue`, body)
+        : await api.post(`/kits/${template._id}/issue`, body);
       const shortLines = (data.lines || []).filter((l) => (l.qtyShort || 0) > 0);
       if (shortLines.length > 0) {
         toast.error(
@@ -2721,15 +2784,29 @@ export default function IssueKit() {
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Kit template
                 </label>
-                <FamilySelect
-                  items={templates}
-                  getNumber={kitNumberOf}
-                  getLabel={kitOptionLabel}
-                  value={templateId}
-                  onChange={chooseTemplate}
-                  placeholder="Choose a kit…"
-                  memberPlaceholder="Choose the exact kit (base or variant)…"
-                />
+                {/* One flat list of the active kit TEMPLATES — every template shows on
+                    its own as "name (code)", never grouped into "(n versions)". */}
+                <select
+                  value={templateId || ""}
+                  onChange={(e) => chooseTemplate(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                >
+                  <option className="bg-background text-foreground" value="">
+                    Choose a kit…
+                  </option>
+                  {[...templates]
+                    .sort((a, b) =>
+                      kitOptionLabel(a).localeCompare(kitOptionLabel(b), undefined, {
+                        numeric: true,
+                        sensitivity: "base",
+                      })
+                    )
+                    .map((t) => (
+                      <option className="bg-background text-foreground" key={t._id} value={t._id}>
+                        {kitOptionLabel(t)}
+                      </option>
+                    ))}
+                </select>
                 {templates.length === 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     No active kit templates yet — ask an admin to create one under "Templates".
@@ -2750,7 +2827,7 @@ export default function IssueKit() {
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Issue to vendor
                 </label>
@@ -2780,6 +2857,27 @@ export default function IssueKit() {
                     : issueCode
                     ? `From the kit's code. Edits become ${issueCode}-A, ${issueCode}-B …`
                     : "From the kit's code."}
+                </p>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Revision
+                </label>
+                <Input
+                  className="font-mono-tech uppercase"
+                  maxLength={20}
+                  value={revision}
+                  onChange={(e) => {
+                    setRevision(e.target.value);
+                    setRevisionCustom(e.target.value.trim() !== "");
+                  }}
+                  placeholder={templateId ? "e.g. A, B, 1.03" : "Choose a kit first"}
+                  disabled={!templateId}
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {template?.revision && !revisionCustom
+                    ? "From the kit template."
+                    : "Revision of this kit as issued."}
                 </p>
               </div>
               <div className="sm:col-span-3">
@@ -2930,6 +3028,155 @@ export default function IssueKit() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {!loadingTemplate && template && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Additional parts (not on the kit template)
+                  </p>
+                  {!addingPart && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      onClick={() => setAddingPart(true)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add a part
+                    </Button>
+                  )}
+                </div>
+
+                {addingPart && (
+                  <div className="flex items-start gap-2 rounded-md border border-dashed border-border p-2">
+                    <div className="min-w-0 flex-1">
+                      <AlternatePartPicker
+                        value={null}
+                        placeholder="Search a part to add to this kit…"
+                        onChange={(p) => {
+                          if (!p) return;
+                          const already =
+                            preview.some((pr) => pr.ttUniquePartNumber === p.ttUniquePartNumber) ||
+                            extraLines.some((l) => l.ttUniquePartNumber === p.ttUniquePartNumber);
+                          if (already) {
+                            toast.error(`${p.ttUniquePartNumber} is already on this kit`);
+                            return;
+                          }
+                          setExtraLines((prev) => [
+                            ...prev,
+                            {
+                              _key: Math.random().toString(36).slice(2),
+                              ttUniquePartNumber: p.ttUniquePartNumber,
+                              itemDescription: p.itemDescription,
+                              available: p.quantityInStock ?? 0,
+                              unit: p.unit || "",
+                              qtyPerKit: "1",
+                              qty: "1",
+                            },
+                          ]);
+                          setAddingPart(false);
+                        }}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => setAddingPart(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+
+                {extraLines.length > 0 && (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-secondary">
+                        <tr className="border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          <th className="px-2.5 py-1.5 text-left">TT part #</th>
+                          <th className="px-2.5 py-1.5 text-left">Description</th>
+                          <th className="px-2.5 py-1.5 text-right">Stock</th>
+                          <th className="px-2.5 py-1.5 text-right whitespace-nowrap">Qty reqd / kit</th>
+                          <th className="px-2.5 py-1.5 text-right">Required</th>
+                          <th className="px-2.5 py-1.5 text-right whitespace-nowrap">Qty issuing</th>
+                          <th className="px-2.5 py-1.5" />
+                        </tr>
+                      </thead>
+                      <tbody className="[&_tr:last-child]:border-0 [&_tr:nth-child(odd)]:bg-card [&_tr:nth-child(even)]:bg-muted/50">
+                        {extraLines.map((l) => (
+                          <tr key={l._key} className="border-b border-border">
+                            <td className="px-2.5 py-1.5 text-xs font-mono-tech">{l.ttUniquePartNumber}</td>
+                            <td className="px-2.5 py-1.5 text-xs">{l.itemDescription || "—"}</td>
+                            <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground whitespace-nowrap">
+                              {l.available}{l.unit ? ` ${l.unit}` : ""} in stock
+                            </td>
+                            <td className="px-2.5 py-1.5">
+                              <Input
+                                type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
+                                title="Quantity of this part required per kit"
+                                value={l.qtyPerKit ?? ""}
+                                onChange={(e) =>
+                                  setExtraLines((prev) =>
+                                    prev.map((x) =>
+                                      x._key === l._key ? { ...x, qtyPerKit: e.target.value } : x
+                                    )
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="px-2.5 py-1.5 text-xs text-right font-mono-tech text-muted-foreground whitespace-nowrap">
+                              {r4((Number(l.qtyPerKit) || 0) * qtyNum)}
+                            </td>
+                            <td className="px-2.5 py-1.5">
+                              <Input
+                                type="number"
+                                min="0"
+                                max={l.available}
+                                step="any"
+                                className="h-7 w-20 ml-auto font-mono-tech text-xs text-right"
+                                value={l.qty}
+                                onChange={(e) =>
+                                  setExtraLines((prev) =>
+                                    prev.map((x) => (x._key === l._key ? { ...x, qty: e.target.value } : x))
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="px-2.5 py-1.5 text-right">
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                title="Remove this added part"
+                                onClick={() =>
+                                  setExtraLines((prev) => prev.filter((x) => x._key !== l._key))
+                                }
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {extraLines.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Added parts apply to this kit only — the kit template is not changed.
+                  </p>
+                )}
               </div>
             )}
 

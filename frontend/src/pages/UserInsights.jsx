@@ -297,8 +297,8 @@ function busiestDay(daily = []) {
 
 function RolePill({ role }) {
   return (
-    <Badge variant={role === "admin" ? "default" : "outline"} className="capitalize">
-      {role}
+    <Badge variant={role === "admin" || role === "super_admin" ? "default" : "outline"}>
+      {role === "super_admin" ? "Super admin" : role === "admin" ? "Admin" : "User"}
     </Badge>
   );
 }
@@ -1088,8 +1088,10 @@ function UserDetail({ id }) {
           <Panel
             title="Rights granted"
             hint={
-              user.role === "admin"
-                ? "Admins hold every right"
+              user.role === "super_admin"
+                ? "Super admins hold every right"
+                : user.role === "admin"
+                ? `${user.permissions.length} of ${PERMISSIONS.length} rights`
                 : `${user.permissions.length} of ${PERMISSIONS.length} rights`
             }
             right={<UserIcon className="h-4 w-4 text-muted-foreground" />}

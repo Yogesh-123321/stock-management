@@ -1,4 +1,5 @@
 // backend/src/controllers/piGeneratorController.js
+import { isAdminRole } from "../config/permissions.js";
 import ProformaInvoiceGen from "../models/ProformaInvoiceGen.js";
 import Vendor from "../models/Vendor.js";
 import Buyer from "../models/Buyer.js";
@@ -172,7 +173,7 @@ export async function generatePi(req, res) {
     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
 
     const userRole = req.user?.role;
-    const isAdmin = userRole === "admin";
+    const isAdmin = isAdminRole(userRole);
 
     const pi = await ProformaInvoiceGen.create({
       ...body,
@@ -301,7 +302,7 @@ export async function downloadPi(req, res) {
     const pi = await ProformaInvoiceGen.findById(req.params.id);
     if (!pi) return res.status(404).json({ message: "PI not found" });
 
-    if (pi.approvalStatus && pi.approvalStatus !== "approved" && req.user?.role !== "admin") {
+    if (pi.approvalStatus && pi.approvalStatus !== "approved" && !isAdminRole(req.user?.role)) {
       return res.status(403).json({
         message: `This PI is ${pi.approvalStatus}. PDF download unlocks after admin approval.`,
       });

@@ -166,7 +166,7 @@ export default function Approvals() {
           <div>
             <CardTitle>Approvals</CardTitle>
             <CardDescription>
-              {user?.role === "admin"
+              {user?.role === "admin" || user?.role === "super_admin"
                 ? "Everything users have sent in for your sign-off."
                 : "Requests you raised, and anything you are allowed to approve."}
             </CardDescription>

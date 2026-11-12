@@ -32,6 +32,7 @@ import gstRoutes from "./src/routes/gstRoutes.js";
 import { notFound, errorHandler } from "./src/middleware/errorHandler.js";
 import activityLogger from "./src/middleware/activityLogger.js";
 import { ensureDefaultPartCategories } from "./src/utils/seedPartCategories.js";
+import { ensureSuperAdmin } from "./src/utils/ensureSuperAdmin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +46,10 @@ connectDB();
 ensureDefaultPartCategories().catch((err) =>
   console.error("Could not ensure default part categories:", err)
 );
+
+// One-time, idempotent: the original central admin becomes the super admin
+// (the level that controls other admins' rights) if none exists yet.
+ensureSuperAdmin();
 
 const app = express();
 

@@ -183,7 +183,7 @@ export async function backfillPartyApprovals() {
   if (partiesBackfilled) return;
   partiesBackfilled = true;
   try {
-    const admin = await User.findOne({ role: "admin" }).select("_id").lean();
+    const admin = await User.findOne({ role: { $in: ["super_admin", "admin"] } }).select("_id").lean();
     for (const kind of ["vendor", "buyer"]) {
       const Model = mongoose.models[META[kind].model];
       if (!Model) continue;

@@ -6,41 +6,92 @@ import {
   ADMIN_ONLY_PERMISSIONS,
   DEFAULT_PERMISSIONS,
   ROLES,
+  ROLE_LABEL,
   effectivePermissions,
+  canManageUser,
+  isAdminRole,
 } from "../config/permissions.js";
 
-function shape(u) {
+/**
+ * Multi-level admins
+ *  - super_admin: creates / edits / deactivates admins AND users, controls every
+ *                 admin's rights (including approval rights and users.manage).
+ *  - admin:       manages normal users only; can't see-through to other admins'
+ *                 rights, can't create admins, and can only hand a user rights
+ *                 the admin holds themselves.
+ *  - user:        no access to this module.
+ */
+
+function shape(u, actor) {
   return {
     _id: u._id,
     name: u.name,
     username: u.username,
     email: u.email,
     role: u.role,
+    roleLabel: ROLE_LABEL[u.role] || u.role,
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,
     lastLoginAt: u.lastLoginAt,
     createdAt: u.createdAt,
     permissions: effectivePermissions(u),
     storedPermissions: u.permissions || [],
+    revokedPermissions: u.revokedPermissions || [],
+    // Whether the signed-in person may edit this account (drives the UI).
+    canManage: actor ? canManageUser(actor, u) || false : false,
+    isSelf: actor ? String(actor._id) === String(u._id) : false,
   };
 }
 
-/**
- * Keeps only real permission keys, and — for anyone who isn't an admin —
- * strips every admin-only right (all `*.approve` keys and `users.manage`).
- * Approving is reserved for the central admin, so it can't be granted here.
- */
-const clean = (list, role = "user") => {
+/** Real permission keys only; users never keep admin-only rights. */
+const cleanFor = (list, role) => {
   const keys = [...new Set((Array.isArray(list) ? list : []).filter((p) => PERMISSION_KEYS.includes(p)))];
-  if (role === "admin") return keys;
-  return keys.filter((p) => !ADMIN_ONLY_PERMISSIONS.includes(p));
+  return role === "user" ? keys.filter((p) => !ADMIN_ONLY_PERMISSIONS.includes(p)) : keys;
 };
 
+/** Roles the actor is allowed to hand out. */
+const assignableRoles = (actor) => (actor.role === "super_admin" ? ROLES : ["user"]);
+
+const activeSuperAdmins = () => User.countDocuments({ role: "super_admin", isActive: true });
+
+/**
+ * Applies a requested permission list to `user`.
+ *  - super_admin target: nothing to store (holds everything).
+ *  - admin target: stored as the revoked list (everything not ticked is revoked).
+ *  - user target: stored as the granted list. A non-super actor can only grant
+ *    rights they hold themselves, and can't strip rights they don't hold.
+ */
+function applyPermissions(user, requested, actor) {
+  if (user.role === "super_admin") return;
+  const wanted = cleanFor(requested, user.role);
+
+  if (user.role === "admin") {
+    user.revokedPermissions = PERMISSION_KEYS.filter((k) => !wanted.includes(k));
+    return;
+  }
+
+  if (actor.role === "super_admin") {
+    user.permissions = wanted;
+    return;
+  }
+  const mine = new Set(effectivePermissions(actor));
+  const kept = (user.permissions || []).filter((p) => !mine.has(p)); // rights this actor can't touch
+  user.permissions = [...new Set([...wanted.filter((p) => mine.has(p)), ...kept])];
+}
+
 /** GET /api/users */
-export const listUsers = async (_req, res) => {
+export const listUsers = async (req, res) => {
   try {
     const users = await User.find().sort({ role: 1, name: 1 });
-    res.json({ users: users.map(shape), permissionCatalog: PERMISSIONS });
+    // super_admin sorts after admin alphabetically; show the top level first.
+    const order = { super_admin: 0, admin: 1, user: 2 };
+    users.sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || a.name.localeCompare(b.name));
+    res.json({
+      users: users.map((u) => shape(u, req.user)),
+      permissionCatalog: PERMISSIONS,
+      assignableRoles: assignableRoles(req.user),
+      myPermissions: effectivePermissions(req.user),
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -62,6 +113,8 @@ export const createUser = async (req, res) => {
     if (!name || !username || !password)
       return res.status(400).json({ message: "Name, username and password are required" });
     if (!ROLES.includes(role)) return res.status(400).json({ message: "Invalid role" });
+    if (!assignableRoles(req.user).includes(role))
+      return res.status(403).json({ message: "Only a super admin can create admin accounts" });
     if (String(password).length < 6)
       return res.status(400).json({ message: "Password must be at least 6 characters" });
 
@@ -73,10 +126,16 @@ export const createUser = async (req, res) => {
       username,
       email,
       role,
-      permissions: permissions ? clean(permissions, role) : [...DEFAULT_PERMISSIONS[role]],
+      permissions: role === "user" ? [...DEFAULT_PERMISSIONS.user] : [...PERMISSION_KEYS],
       mustChangePassword: Boolean(mustChangePassword),
       createdBy: req.user?._id || null,
     });
+    if (Array.isArray(permissions)) applyPermissions(user, permissions, req.user);
+    else if (role === "user" && req.user.role !== "super_admin") {
+      // default rights, limited to what this admin themselves hold
+      const mine = new Set(effectivePermissions(req.user));
+      user.permissions = user.permissions.filter((p) => mine.has(p));
+    }
     await user.setPassword(password);
     await user.save();
 
@@ -88,7 +147,7 @@ export const createUser = async (req, res) => {
       actor: req.user?._id || null,
     });
 
-    res.status(201).json(shape(user));
+    res.status(201).json(shape(user, req.user));
   } catch (err) {
     res.status(500).json({ message: err.message || "Could not create the user" });
   }
@@ -100,33 +159,47 @@ export const updateUser = async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const { name, email, role, permissions, isActive } = req.body || {};
     const isSelf = String(user._id) === String(req.user._id);
+    if (!canManageUser(req.user, user) && !isSelf)
+      return res.status(403).json({ message: "You cannot manage this account — only a super admin can manage admins" });
+
+    const { name, email, role, permissions, isActive } = req.body || {};
+
+    // Your own account: only the profile — never your own role, rights or status.
+    if (isSelf && !canManageUser(req.user, user)) {
+      if (typeof name === "string" && name.trim()) user.name = name.trim();
+      if (typeof email === "string") user.email = email.trim();
+      await user.save();
+      return res.json(shape(user, req.user));
+    }
 
     if (typeof name === "string" && name.trim()) user.name = name.trim();
     if (typeof email === "string") user.email = email.trim();
 
+    // --- role change ---------------------------------------------------
     if (role && ROLES.includes(role) && role !== user.role) {
-      if (isSelf && user.role === "admin")
-        return res.status(400).json({ message: "You cannot change your own role" });
-      if (user.role === "admin") {
-        const admins = await User.countDocuments({ role: "admin", isActive: true });
-        if (admins <= 1)
-          return res.status(400).json({ message: "There must be at least one active admin" });
-      }
+      if (!assignableRoles(req.user).includes(role))
+        return res.status(403).json({ message: "Only a super admin can change roles to admin" });
+      if (isSelf) return res.status(400).json({ message: "You cannot change your own role" });
+      if (user.role === "super_admin" && (await activeSuperAdmins()) <= 1)
+        return res.status(400).json({ message: "There must be at least one active super admin" });
+
       user.role = role;
-      user.permissions = [...DEFAULT_PERMISSIONS[role]];
+      user.permissions = role === "user" ? [...DEFAULT_PERMISSIONS.user] : [...PERMISSION_KEYS];
+      user.revokedPermissions = []; // a fresh start at the new level
     }
 
-    if (Array.isArray(permissions)) user.permissions = clean(permissions, user.role);
+    // --- rights ---------------------------------------------------------
+    if (Array.isArray(permissions)) {
+      if (isSelf) return res.status(400).json({ message: "You cannot change your own rights" });
+      applyPermissions(user, permissions, req.user);
+    }
 
+    // --- active flag ----------------------------------------------------
     if (typeof isActive === "boolean" && isActive !== user.isActive) {
       if (isSelf) return res.status(400).json({ message: "You cannot deactivate yourself" });
-      if (!isActive && user.role === "admin") {
-        const admins = await User.countDocuments({ role: "admin", isActive: true });
-        if (admins <= 1)
-          return res.status(400).json({ message: "There must be at least one active admin" });
-      }
+      if (!isActive && user.role === "super_admin" && (await activeSuperAdmins()) <= 1)
+        return res.status(400).json({ message: "There must be at least one active super admin" });
       user.isActive = isActive;
     }
 
@@ -140,7 +213,7 @@ export const updateUser = async (req, res) => {
       actor: req.user?._id || null,
     });
 
-    res.json(shape(user));
+    res.json(shape(user, req.user));
   } catch (err) {
     res.status(500).json({ message: err.message || "Could not update the user" });
   }
@@ -155,6 +228,8 @@ export const resetPassword = async (req, res) => {
 
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
+    if (!canManageUser(req.user, user))
+      return res.status(403).json({ message: "Only a super admin can reset an admin's password" });
 
     await user.setPassword(newPassword);
     user.mustChangePassword = true;
@@ -173,3 +248,6 @@ export const resetPassword = async (req, res) => {
     res.status(500).json({ message: err.message || "Could not reset the password" });
   }
 };
+
+// Re-exported for callers that only need the role check.
+export { isAdminRole };

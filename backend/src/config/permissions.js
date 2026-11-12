@@ -71,6 +71,7 @@ export const APPROVAL_PERMISSIONS = PERMISSION_KEYS.filter((k) => k.endsWith(".a
 
 /** What a brand-new account of each role gets by default. */
 export const DEFAULT_PERMISSIONS = {
+  super_admin: [...PERMISSION_KEYS],
   admin: [...PERMISSION_KEYS],
   user: [
     "po.create",
@@ -85,16 +86,49 @@ export const DEFAULT_PERMISSIONS = {
   ],
 };
 
-export const ROLES = ["admin", "user"];
+/**
+ * Three levels:
+ *  - super_admin : top level. Holds every right, and is the only level that can
+ *                  create / edit / deactivate admins and control their rights.
+ *  - admin       : holds every right unless a super admin revoked some. Manages
+ *                  normal users only.
+ *  - user        : only the rights an admin ticked for them.
+ */
+export const ROLES = ["super_admin", "admin", "user"];
+export const ADMIN_ROLES = ["super_admin", "admin"];
+export const ROLE_LEVEL = { super_admin: 3, admin: 2, user: 1 };
+export const ROLE_LABEL = { super_admin: "Super admin", admin: "Admin", user: "User" };
+
+export const isAdminRole = (role) => ADMIN_ROLES.includes(role);
+export const isSuperAdmin = (user) => user?.role === "super_admin";
+export const roleLevel = (role) => ROLE_LEVEL[role] || 0;
+
+/**
+ * Can `actor` edit `target` (profile, rights, active flag, password)?
+ * Super admins manage everyone; admins manage normal users only.
+ */
+export function canManageUser(actor, target) {
+  if (!actor || !target) return false;
+  if (actor.role === "super_admin") return true;
+  if (actor.role === "admin") return target.role === "user";
+  return false;
+}
 
 /**
  * Effective permissions for a user document.
- * Admins always hold every permission. Non-admins can never hold an
+ * Super admins always hold every permission; admins hold all but the revoked ones. Non-admins can never hold an
  * admin-only right, even if one was stored on their record earlier.
  */
 export function effectivePermissions(user) {
   if (!user) return [];
-  if (user.role === "admin") return [...PERMISSION_KEYS];
+  if (user.role === "super_admin") return [...PERMISSION_KEYS];
+  // Admins hold everything except what a super admin revoked. Storing the
+  // revoked list (not the granted list) means rights added to the system later
+  // reach existing admins automatically.
+  if (user.role === "admin") {
+    const revoked = new Set(user.revokedPermissions || []);
+    return PERMISSION_KEYS.filter((p) => !revoked.has(p));
+  }
   return (user.permissions || []).filter(
     (p) => PERMISSION_KEYS.includes(p) && !ADMIN_ONLY_PERMISSIONS.includes(p)
   );

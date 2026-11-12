@@ -363,6 +363,9 @@ function editLetterSuffix(n) {
 --------------------------------------------------------------------- */
 const escapeRegExp = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Kit revision text ("B", "REV 1.03"): trimmed, upper-cased like the template's.
+const cleanRevision = (v) => String(v ?? "").trim().toUpperCase().slice(0, 20);
+
 // Trim, collapse inner whitespace, cap the length. "" when nothing usable.
 const cleanIssueCode = (v) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
 
@@ -407,26 +410,22 @@ function sumIssuedByPart(docs) {
 // "Prev. issued" column of the Issued kits view.
 async function attachPreviouslyIssued(list) {
   if (!list.length) return list;
-  const templateIds = new Set();
-  const codes = new Set();
-  for (const iss of list) {
-    if (iss.kitTemplate) templateIds.add(String(iss.kitTemplate));
-    const c = codeKey(iss.kitCode);
-    if (c) codes.add(c);
-  }
-  const or = [];
-  if (templateIds.size) or.push({ kitTemplate: { $in: [...templateIds] } });
-  for (const c of codes) or.push({ kitCode: new RegExp(`^${escapeRegExp(c)}$`, "i") });
+  // A kit and its edits (KIT 13, 13-A, 13-B …) form one chain tied together by
+  // the root issue. Every fresh issue from a template is its own chain, so
+  // "Prev. issued" never mixes two different kits made from the same template.
+  const rootOf = (d) => String(d.rootIssue?._id || d.rootIssue || d._id);
+  const roots = new Set(list.map(rootOf));
+  const rootIds = [...roots];
+  const or = rootIds.length ? [{ _id: { $in: rootIds } }, { rootIssue: { $in: rootIds } }] : [];
 
   const pool = or.length
     ? await KitIssue.find({ status: "issued", $or: or })
-        .select("kitTemplate kitCode issueCode createdAt lines.ttUniquePartNumber lines.qtyIssued lines.manuallyCompleted lines.manuallyCompletedReason lines.manuallyCompletedBy lines.manuallyCompletedAt lines.batchBreakdown")
+        .select("rootIssue createdAt issueCode lines.ttUniquePartNumber lines.qtyIssued lines.manuallyCompleted lines.manuallyCompletedReason lines.manuallyCompletedBy lines.manuallyCompletedAt lines.batchBreakdown")
         .lean()
     : [];
   const entries = pool.map((d) => ({
     id: String(d._id),
-    tpl: d.kitTemplate ? String(d.kitTemplate) : "",
-    code: codeKey(d.kitCode),
+    root: rootOf(d),
     at: d.createdAt ? new Date(d.createdAt).getTime() : 0,
     totals: sumIssuedByPart([d]),
     manual: new Set(
@@ -463,8 +462,7 @@ async function attachPreviouslyIssued(list) {
   }));
 
   for (const iss of list) {
-    const tpl = iss.kitTemplate ? String(iss.kitTemplate._id || iss.kitTemplate) : "";
-    const code = codeKey(iss.kitCode);
+    const root = rootOf(iss);
     const at = iss.createdAt ? new Date(iss.createdAt).getTime() : 0;
     const prev = {};
     const manualEarlier = new Set();
@@ -472,7 +470,7 @@ async function attachPreviouslyIssued(list) {
     const batchesEarlier = new Map(); // part -> batch -> qty drawn on EARLIER entries
     for (const e of entries) {
       if (e.id === String(iss._id) || e.at >= at) continue;
-      if (!((tpl && e.tpl === tpl) || (code && e.code === code))) continue;
+      if (e.root !== root) continue;
       for (const [part, qty] of Object.entries(e.totals)) prev[part] = qr((prev[part] || 0) + qty);
       e.batches.forEach((per, part) => {
         const acc = batchesEarlier.get(part) || new Map();
@@ -565,17 +563,39 @@ async function assertIssueCodeFree(res, code, excludeId = null) {
   }
 }
 
-// Next code for a fresh (non-edit) issue of a template: the kit's own code
-// the first time, then KIT_05-A, KIT_05-B ... — the same letter series an
-// edit uses. A code can only belong to one issued kit, so a letter already
-// taken (by an earlier issue OR by an edit of one) is skipped and the next
-// free one is suggested.
+// Next code for a fresh (non-edit) issue of a template. A fresh issue is a NEW
+// kit, so it gets its own number rather than a -A / -B letter (those are only
+// for edits of an issued kit): the template's own code the first time ("KIT 13"),
+// then the next free number in the same series ("KIT 15", "KIT 16" …) — one
+// above the highest number already used by any issued kit OR any kit template
+// of that series. Codes without a trailing number get " 2", " 3" …
+// A code can only belong to one issued kit; the person issuing can overwrite it.
 async function suggestRootIssueCode(src) {
   const base = kitCodeBase(src);
   if (!(await issueCodeTaken(base))) return base;
-  for (let n = 1; n < 1000; n += 1) {
-    const candidate = `${base}-${editLetterSuffix(n)}`;
-    if (!(await issueCodeTaken(candidate))) return candidate;
+
+  const m = base.match(/^(.*?)(\d+)$/);
+  if (m) {
+    const [, prefix, digits] = m;
+    const rx = new RegExp(`^${escapeRegExp(prefix)}(\\d+)$`, "i");
+    const [issuedCodes, templateCodes] = await Promise.all([
+      KitIssue.distinct("issueCode", { issueCode: rx }),
+      KitTemplate.distinct("kitCode", { kitCode: rx }),
+    ]);
+    let max = Number(digits);
+    for (const c of [...issuedCodes, ...templateCodes]) {
+      const n = Number(String(c).match(rx)?.[1]);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    for (let n = max + 1; n < max + 1000; n += 1) {
+      const candidate = `${prefix}${String(n).padStart(digits.length, "0")}`;
+      if (!(await issueCodeTaken(candidate))) return candidate;
+    }
+  } else {
+    for (let n = 2; n < 1000; n += 1) {
+      const candidate = `${base} ${n}`;
+      if (!(await issueCodeTaken(candidate))) return candidate;
+    }
   }
   return `${base}-${Date.now()}`;
 }
@@ -1273,7 +1293,7 @@ export const getKitIssueById = asyncHandler(async (req, res) => {
   to surface.
 */
 export const issueKit = asyncHandler(async (req, res) => {
-  const { quantity, vendor, issuedBy, remarks, lines: overrideLines } = req.body;
+  const { quantity, vendor, issuedBy, remarks, lines: overrideLines, extraItems } = req.body;
   const requestedCode = cleanIssueCode(req.body.issueCode);
 
   const qty = Number(quantity);
@@ -1306,7 +1326,8 @@ export const issueKit = asyncHandler(async (req, res) => {
     throw new Error(`${vendorDoc.companyName} has been marked inactive — cannot issue a kit to them`);
   }
 
-  const items = issuableItems(template.items);
+  // Parts added to this one kit on top of the template (see editKitIssue).
+  const items = withExtraItems(issuableItems(template.items), [], extraItems);
   if (items.length === 0) {
     res.status(400);
     throw new Error("This kit template has no issuable (non-DNP) items");
@@ -1332,6 +1353,7 @@ export const issueKit = asyncHandler(async (req, res) => {
     kitTemplate: template._id,
     kitName: template.kitName,
     kitCode: template.kitCode,
+    revision: req.body.revision !== undefined ? cleanRevision(req.body.revision) : cleanRevision(template.revision),
     issueCode,
     editIndex: 0,
     quantity: qty,
@@ -1481,6 +1503,7 @@ export const editKitIssue = asyncHandler(async (req, res) => {
     kitTemplate: original.kitTemplate,
     kitName: original.kitName,
     kitCode: original.kitCode,
+    revision: req.body.revision !== undefined ? cleanRevision(req.body.revision) : cleanRevision(original.revision),
     // Only set when the person typed their own code; otherwise the next
     // "-A" / "-B" code is assigned when this is issued. editIndex too.
     issueCode: requestedCode,
@@ -1547,16 +1570,18 @@ export const getKitIssueChainTotals = asyncHandler(async (req, res) => {
   const baseId = entry.status === "draft" ? entry.editedFrom : entry._id;
   const chain = baseId ? Object.fromEntries(await previousTotalsFor(baseId)) : {};
 
-  // kit: EVERYTHING already issued of this kit — every earlier issue and its
-  // edits, any vendor — matched by template or kit code. This is what the
-  // "Prev. issued" column shows, so a fresh issue made against the same kit
-  // code is counted too, not just the edits of one chain.
-  const kitFilter = sameKitIssuedFilter(entry);
+  // kit: everything issued in THIS kit's chain — the original issue and all
+  // its edits. A different kit made from the same template (another number,
+  // another vendor) is independent and isn't counted.
+  const rootId = entry.rootIssue || (entry.status === "issued" ? entry._id : entry.editedFrom);
+  const kitFilter = rootId
+    ? { status: "issued", $or: [{ _id: rootId }, { rootIssue: rootId }] }
+    : null;
   const kit = kitFilter
     ? sumIssuedByPart(await KitIssue.find(kitFilter).select("lines.ttUniquePartNumber lines.qtyIssued").lean())
     : {};
   // The chain is always part of the kit; guard against a chain entry the
-  // template / code match could not see.
+  // filter could not see.
   for (const [part, qty] of Object.entries(chain)) {
     if ((kit[part] || 0) < qty) kit[part] = qty;
   }
@@ -1821,7 +1846,7 @@ export const revertKitIssueStock = asyncHandler(async (req, res) => {
 // can be saved with only a template chosen and nothing else filled in
 // yet.
 export const saveKitDraft = asyncHandler(async (req, res) => {
-  const { quantity, vendor, remarks, lines: overrideLines } = req.body;
+  const { quantity, vendor, remarks, lines: overrideLines, extraItems } = req.body;
   const requestedCode = cleanIssueCode(req.body.issueCode);
   await assertIssueCodeFree(res, requestedCode);
 
@@ -1831,7 +1856,7 @@ export const saveKitDraft = asyncHandler(async (req, res) => {
     throw new Error("Kit template not found");
   }
 
-  const items = issuableItems(template.items);
+  const items = withExtraItems(issuableItems(template.items), [], extraItems);
   if (items.length === 0) {
     res.status(400);
     throw new Error("This kit template has no issuable (non-DNP) items");
@@ -1854,6 +1879,7 @@ export const saveKitDraft = asyncHandler(async (req, res) => {
     kitTemplate: template._id,
     kitName: template.kitName,
     kitCode: template.kitCode,
+    revision: req.body.revision !== undefined ? cleanRevision(req.body.revision) : cleanRevision(template.revision),
     issueCode: requestedCode, // blank = auto-assigned when issued
     quantity: qty,
     vendor: vendorDoc ? vendorDoc._id : null,
@@ -1936,6 +1962,7 @@ export const updateKitDraft = asyncHandler(async (req, res) => {
   );
 
   if (codeSent) draft.issueCode = requestedCode;
+  if (req.body.revision !== undefined) draft.revision = cleanRevision(req.body.revision);
   draft.quantity = qty;
   draft.vendor = vendorDoc ? vendorDoc._id : null;
   draft.remarks = remarks || "";
@@ -2073,8 +2100,9 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
       value: l.itemDescription,
     }));
   }
-  // Parts added to this one kit on top of the template (see editKitIssue).
-  items = withExtraItems(items, draft.lines);
+  // Parts added to this one kit on top of the template (see editKitIssue),
+  // including any added in the form right now.
+  items = withExtraItems(items, draft.lines, req.body.extraItems);
   if (items.length === 0) {
     res.status(400);
     throw new Error("This kit has no issuable items to issue");
@@ -2149,6 +2177,7 @@ export const issueKitDraft = asyncHandler(async (req, res) => {
   }
 
   if (editMeta) draft.editIndex = editMeta.nextIndex;
+  if (req.body.revision !== undefined) draft.revision = cleanRevision(req.body.revision);
 
   draft.status = "issued";
   draft.issueCode = issueCode;

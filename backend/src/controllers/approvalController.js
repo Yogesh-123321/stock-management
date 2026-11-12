@@ -1,3 +1,4 @@
+import { isAdminRole } from "../config/permissions.js";
 import mongoose from "mongoose";
 import ApprovalRequest from "../models/ApprovalRequest.js";
 import { notifyApprovers, notifyRequester } from "../utils/notify.js";
@@ -165,7 +166,7 @@ export const listApprovals = async (req, res) => {
     if (entityType && entityType !== "all") filter.entityType = entityType;
 
     // Approving is an admin-only power.
-    const held = req.user.role === "admin" ? effectivePermissions(req.user) : [];
+    const held = isAdminRole(req.user.role) ? effectivePermissions(req.user) : [];
     const approverOf = Object.entries(ENTITY)
       .filter(([, m]) => held.includes(m.permission))
       .map(([k]) => k);
@@ -192,7 +193,7 @@ export const listApprovals = async (req, res) => {
 /** GET /api/approvals/pending-count */
 export const pendingApprovalCount = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.json({ count: 0 });
+    if (!isAdminRole(req.user.role)) return res.json({ count: 0 });
     const held = effectivePermissions(req.user);
     const approverOf = Object.entries(ENTITY)
       .filter(([, m]) => held.includes(m.permission))
@@ -217,7 +218,7 @@ async function decide(req, res, approved) {
 
     const meta = ENTITY[doc.entityType];
     // Only the central admin decides — users can raise requests, never approve.
-    if (req.user.role !== "admin")
+    if (!isAdminRole(req.user.role) || !effectivePermissions(req.user).includes(meta.permission))
       return res
         .status(403)
         .json({ message: `Only an admin can approve or reject a ${meta.label.toLowerCase()}` });

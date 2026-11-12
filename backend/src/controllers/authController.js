@@ -37,8 +37,8 @@ export const bootstrapAdmin = async (req, res) => {
       name,
       username,
       email,
-      role: "admin",
-      permissions: [...DEFAULT_PERMISSIONS.admin],
+      role: "super_admin",
+      permissions: [...DEFAULT_PERMISSIONS.super_admin],
     });
     await admin.setPassword(password);
     await admin.save();

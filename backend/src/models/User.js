@@ -20,6 +20,11 @@ const userSchema = new mongoose.Schema(
       type: [{ type: String, enum: PERMISSION_KEYS }],
       default: () => [...DEFAULT_PERMISSIONS.user],
     },
+    // Admins hold every right except these (set by a super admin).
+    revokedPermissions: {
+      type: [{ type: String, enum: PERMISSION_KEYS }],
+      default: [],
+    },
     isActive: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
     lastLoginAt: { type: Date, default: null },

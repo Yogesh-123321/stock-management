@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
-import { effectivePermissions } from "../config/permissions.js";
+import { effectivePermissions, isAdminRole } from "../config/permissions.js";
 
 const SECRET = () => process.env.JWT_SECRET || "tispl-dev-secret-change-me";
 
@@ -54,8 +54,16 @@ export async function attachUser(req, _res, next) {
 
 export function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ message: "Please sign in to continue" });
-  if (req.user.role !== "admin")
+  if (!isAdminRole(req.user.role))
     return res.status(403).json({ message: "Only an admin can do this" });
+  next();
+}
+
+/** Only a super admin — the top level — may pass. */
+export function requireSuperAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ message: "Please sign in to continue" });
+  if (req.user.role !== "super_admin")
+    return res.status(403).json({ message: "Only a super admin can do this" });
   next();
 }
 

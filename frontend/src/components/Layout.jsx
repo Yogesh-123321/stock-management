@@ -180,7 +180,7 @@ export default function Layout() {
         <div className="border-t border-white/[0.08] px-4 py-3">
           <p className="truncate text-[12px] font-medium text-white">{user?.name}</p>
           <p className="text-[11px] capitalize text-sidebar-muted">
-            {user?.role === "admin" ? "Central admin" : "User"}
+            {user?.role === "super_admin" ? "Super admin" : user?.role === "admin" ? "Admin" : "User"}
           </p>
           <div className="mt-2 flex gap-1.5">
             <button
