@@ -54,6 +54,25 @@ export const fmtIssueDateTime = (d) => {
 
 const fmt = (n) => formatIndianNumber(n);
 
+// Helvetica (a built-in PDF font) has no rupee sign, so it is drawn as a vector.
+// (x, y) is the top-left corner of the glyph; `size` is the font size it sits beside.
+const drawRupee = (doc, x, y, size) => {
+  const w = size * 0.55;
+  const h = size * 0.72;
+  doc.save().lineWidth(size * 0.11).lineCap("butt").lineJoin("miter").strokeColor("#000");
+  doc.moveTo(x, y).lineTo(x + w, y).stroke(); // top bar
+  doc.moveTo(x, y + h * 0.22).lineTo(x + w, y + h * 0.22).stroke(); // second bar
+  doc
+    .moveTo(x + w * 0.12, y)
+    .lineTo(x + w * 0.5, y)
+    .bezierCurveTo(x + w * 0.98, y, x + w * 0.98, y + h * 0.48, x + w * 0.5, y + h * 0.48)
+    .lineTo(x + w * 0.12, y + h * 0.48)
+    .lineTo(x + w * 0.72, y + h)
+    .stroke(); // bowl + leg
+  doc.restore();
+  return w;
+};
+
 // Total quantity is shown with its unit only when every line uses the same one.
 export const totalQuantityLabel = (items = []) => {
   const total = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
@@ -99,7 +118,7 @@ export function generateChallanPdf(ch) {
     const H_THEAD = 16;
     const H_TOTAL = 18;
     const H_WORDS = 28;
-    const H_TAXTBL = 48;
+    const H_TAXTBL = 38;
     const H_TAXWORDS = 26;
     const H_SIGN = 70;
     const H_BODY = YB - Y0 - H_TOP - H_THEAD - H_TOTAL - H_WORDS - H_TAXTBL - H_TAXWORDS - H_SIGN;
@@ -324,7 +343,17 @@ export function generateChallanPdf(ch) {
       if (isLast) {
         put("Total", xDesc, y + 4, colW.desc, { size: 8, bold: false, align: "right" });
         put(totalQuantityLabel(ch.items), xQty, y + 4, colW.qty, { size: 8 });
-        put(`Rs. ${fmt(ch.totalAmount)}`, xAmount - 20, y + 3, colW.amount + 20, { size: 10, align: "right" });
+        const totalTxt = fmt(ch.totalAmount);
+        let tSize = 10;
+        doc.font("Helvetica-Bold").fontSize(tSize);
+        while (tSize > 6 && doc.widthOfString(totalTxt) + tSize * 0.55 + 4 > colW.amount - 7) {
+          tSize -= 0.5;
+          doc.fontSize(tSize);
+        }
+        const tW = doc.widthOfString(totalTxt);
+        const tx = xEnd - 4 - tW;
+        doc.fillColor("#000").text(totalTxt, tx, y + 4.5, { lineBreak: false });
+        drawRupee(doc, tx - tSize * 0.55 - 3, y + 5.5, tSize);
       }
       y += H_TOTAL;
 
@@ -338,56 +367,60 @@ export function generateChallanPdf(ch) {
       y += H_WORDS;
 
       // ===== Tax summary =====
+      // Same arrangement as the printed challan: "Taxable Value" | tax group(s) | "Total Tax
+      // Amount" on two header rows, then the values row and a bold Total row.
       rect(X, y, W, H_TAXTBL);
       if (isLast && showTax) {
-        const cLabel = 50;
-        const cTaxable = 75;
-        const cRate = 38;
-        const cAmt = 62;
-        const cTotal = 70;
-        const Wt = cLabel + cTaxable + breakup.length * (cRate + cAmt) + cTotal;
+        const cTaxable = 50;
+        const cRate = 32;
+        const cAmt = 52;
+        const cTotal = 54;
+        const Wt = cTaxable + breakup.length * (cRate + cAmt) + cTotal;
         const xt = xEnd - Wt;
-        const rH = 12;
+        const rH = H_TAXTBL / 4;
 
-        const xTaxable = xt + cLabel;
-        const xGroups = xTaxable + cTaxable;
+        const xGroups = xt + cTaxable;
         const xTotal = xGroups + breakup.length * (cRate + cAmt);
 
-        rect(xt, y, Wt, H_TAXTBL);
-        // horizontal lines
-        line(xTaxable, y + rH, xEnd, y + rH); // under group titles
-        line(xGroups, y + 2 * rH, xTotal, y + 2 * rH); // under Rate / Amount
-        line(xt, y + 2 * rH, xEnd, y + 2 * rH); // above the values row
-        line(xt, y + 3 * rH, xEnd, y + 3 * rH); // above the Total row
-        // vertical lines
-        line(xTaxable, y, xTaxable, y + H_TAXTBL);
+        // horizontal rules: values row and Total row run the full width of the box
+        line(xGroups, y + rH, xTotal, y + rH); // under the tax-group titles
+        line(X, y + 2 * rH, xEnd, y + 2 * rH); // above the values row
+        line(X, y + 3 * rH, xEnd, y + 3 * rH); // above the Total row
+        // vertical rules
+        line(xt, y, xt, y + H_TAXTBL);
         line(xGroups, y, xGroups, y + H_TAXTBL);
         line(xTotal, y, xTotal, y + H_TAXTBL);
         breakup.forEach((_, k) => {
           const gx = xGroups + k * (cRate + cAmt);
-          line(gx, y, gx, y + H_TAXTBL);
+          if (k > 0) line(gx, y, gx, y + H_TAXTBL);
           line(gx + cRate, y + rH, gx + cRate, y + H_TAXTBL);
         });
 
-        put("Taxable Value", xTaxable, y + 8, cTaxable, { size: 7, bold: false, align: "center" });
-        put("Total Tax Amount", xTotal, y + 8, cTotal, { size: 7, bold: false, align: "center" });
+        const small = { size: 7, bold: false, align: "center", pad: 1 };
+        // header cells that span both header rows wrap onto two lines
+        put("Taxable", xt, y + 1, cTaxable, small);
+        put("Value", xt, y + 1 + rH, cTaxable, small);
+        put("Total", xTotal, y + 1, cTotal, small);
+        put("Tax Amount", xTotal, y + 1 + rH, cTotal, small);
 
+        const vSize = 7.5;
+        const vy = y + 2 * rH + 1;
+        const ty = y + 3 * rH + 1;
         breakup.forEach((t, k) => {
           const gx = xGroups + k * (cRate + cAmt);
-          put(t.name, gx, y, cRate + cAmt, { size: 7, bold: false, align: "center", pad: 2 });
-          put("Rate", gx, y + rH, cRate, { size: 7, bold: false, align: "center", pad: 2 });
-          put("Amount", gx + cRate, y + rH, cAmt, { size: 7, bold: false, align: "center", pad: 2 });
-          put(`${t.rate}%`, gx, y + 2 * rH, cRate, { size: 7.5, bold: false, align: "right", pad: 2 });
-          put(fmt(t.amount), gx + cRate, y + 2 * rH, cAmt, { size: 7.5, bold: false, align: "right", pad: 2 });
-          put(fmt(t.amount), gx + cRate, y + 3 * rH, cAmt, { size: 7.5, align: "right", pad: 2 });
+          put(t.name, gx, y + 1, cRate + cAmt, small);
+          put("Rate", gx, y + rH + 1, cRate, small);
+          put("Amount", gx + cRate, y + rH + 1, cAmt, small);
+          put(`${t.rate}%`, gx, vy, cRate, { size: vSize, bold: false, align: "right", pad: 2 });
+          put(fmt(t.amount), gx + cRate, vy, cAmt, { size: vSize, bold: false, align: "right", pad: 2 });
+          put(fmt(t.amount), gx + cRate, ty, cAmt, { size: vSize, align: "right", pad: 2 });
         });
-
-        put(fmt(subTotal), xTaxable, y + 2 * rH, cTaxable, { size: 7.5, bold: false, align: "right", pad: 2 });
-        put("Total:", xt, y + 3 * rH, cLabel + cTaxable - 2, { size: 7.5, align: "right", pad: 2 });
-        // the Total row prints the taxable total in the taxable column
-        put(fmt(subTotal), xTaxable, y + 3 * rH, cTaxable, { size: 7.5, align: "right", pad: 2 });
-        put(fmt(ch.taxAmount), xTotal, y + 2 * rH, cTotal, { size: 7.5, bold: false, align: "right", pad: 2 });
-        put(fmt(ch.taxAmount), xTotal, y + 3 * rH, cTotal, { size: 7.5, align: "right", pad: 2 });
+        put(fmt(subTotal), xt, vy, cTaxable, { size: vSize, bold: false, align: "right", pad: 2 });
+        put(fmt(ch.taxAmount), xTotal, vy, cTotal, { size: vSize, bold: false, align: "right", pad: 2 });
+        // Total row
+        put("Total:", X, ty, xt - X - 2, { size: vSize, align: "right", pad: 2 });
+        put(fmt(subTotal), xt, ty, cTaxable, { size: vSize, align: "right", pad: 2 });
+        put(fmt(ch.taxAmount), xTotal, ty, cTotal, { size: vSize, align: "right", pad: 2 });
       }
       y += H_TAXTBL;
 

@@ -232,9 +232,11 @@ function PartyBlockForm({ title, description, party, onChange, onPick, extra }) 
 
 export default function ChallanGenerator() {
   const [form, setForm] = useState(emptyForm());
-  const [dispatchTo, setDispatchTo] = useState(emptyParty());
+  // "Party" = the company the challan is for. "Dispatch to" = where the goods actually go; it is
+  // the same as the party unless the box below is unticked, so its address can differ.
   const [party, setParty] = useState(emptyParty());
-  const [sameParty, setSameParty] = useState(true);
+  const [dispatchTo, setDispatchTo] = useState(emptyParty());
+  const [sameDispatch, setSameDispatch] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
   const [generated, setGenerated] = useState(null);
@@ -247,7 +249,7 @@ export default function ChallanGenerator() {
   const { sort, toggle, apply } = useSort();
   const sortedHistory = apply(history, {
     challanNo: (r) => r.challanNo,
-    party: (r) => r.dispatchTo?.name,
+    party: (r) => r.party?.name || r.dispatchTo?.name,
     date: (r) => (r.challanDate ? new Date(r.challanDate).getTime() : null),
     status: (r) => r.status,
     total: (r) => Number(r.totalAmount),
@@ -299,7 +301,7 @@ export default function ChallanGenerator() {
     setter({ name: p.name, address: p.address || "", gstin: p.gstin || "", stateName: p.stateName || "", stateCode: p.stateCode || "" });
 
   // GSTIN of the party drives the tax type (unless the challan is no-tax)
-  const taxGstin = (sameParty ? dispatchTo.gstin : party.gstin) || dispatchTo.gstin;
+  const taxGstin = party.gstin || (sameDispatch ? "" : dispatchTo.gstin);
   useEffect(() => {
     const derived = taxTypeForGstin(taxGstin);
     if (derived) setForm((f) => (f.taxType === "NONE" ? f : { ...f, taxType: derived }));
@@ -342,9 +344,9 @@ export default function ChallanGenerator() {
 
   const resetForm = () => {
     setForm(emptyForm());
-    setDispatchTo(emptyParty());
     setParty(emptyParty());
-    setSameParty(true);
+    setDispatchTo(emptyParty());
+    setSameDispatch(true);
     setGenerated(null);
     setCopiedFrom(null);
     loadNextNo(todayISO());
@@ -382,10 +384,16 @@ export default function ChallanGenerator() {
             }))
           : [emptyItem()],
       });
-      setDispatchTo({ ...emptyParty(), ...(data.dispatchTo || {}) });
-      const same = !data.party?.name || data.party.name === data.dispatchTo?.name;
-      setSameParty(same);
-      setParty(same ? emptyParty() : { ...emptyParty(), ...data.party });
+      const copiedParty = { ...emptyParty(), ...(data.party?.name ? data.party : data.dispatchTo || {}) };
+      const copiedDispatch = { ...emptyParty(), ...(data.dispatchTo || {}) };
+      const same =
+        !copiedDispatch.name ||
+        (copiedDispatch.name === copiedParty.name &&
+          copiedDispatch.address === copiedParty.address &&
+          copiedDispatch.gstin === copiedParty.gstin);
+      setParty(copiedParty);
+      setDispatchTo(same ? emptyParty() : copiedDispatch);
+      setSameDispatch(same);
       setGenerated(null);
       setCopiedFrom(c.challanNo);
       toast.success(`Copied ${c.challanNo} → ${data.challanNo}`);
@@ -398,7 +406,8 @@ export default function ChallanGenerator() {
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!form.challanNo.trim()) return toast.error("Challan no. is required");
-    if (!dispatchTo.name.trim()) return toast.error("Dispatch-to party name is required");
+    if (!party.name.trim()) return toast.error("Party name is required");
+    if (!sameDispatch && !dispatchTo.name.trim()) return toast.error("Dispatch-to name is required");
     if (noTaken) return toast.error(`${form.challanNo.trim()} already exists — use a different number`);
     if (form.items.some((it) => !it.description.trim() || !it.quantity)) {
       return toast.error("Every item needs a description and quantity");
@@ -411,8 +420,8 @@ export default function ChallanGenerator() {
         // the picker is in local time — send an absolute instant
         dateTimeOfIssue: form.dateTimeOfIssue ? new Date(form.dateTimeOfIssue).toISOString() : undefined,
         buyersOrderDate: form.buyersOrderDate || undefined,
-        dispatchTo,
-        party: sameParty ? dispatchTo : party,
+        party,
+        dispatchTo: sameDispatch ? party : dispatchTo,
         items: form.items.map((it) => ({
           description: it.description,
           hsnSac: it.hsnSac,
@@ -471,8 +480,8 @@ export default function ChallanGenerator() {
       <div className="mb-6">
         <h1 className="font-display text-2xl font-semibold">Challan generator</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Fill in the party and item details to generate a Delivery Challan in the standard TISPL format — preview
-          it below, then download the PDF.
+          Fill in the party and item details to generate a Delivery Challan in the standard Technotrendz format —
+          preview it below, then download the PDF.
         </p>
       </div>
 
@@ -493,8 +502,8 @@ export default function ChallanGenerator() {
           <CardHeader>
             <CardTitle className="text-base font-display">Challan details</CardTitle>
             <CardDescription>
-              The number follows the TISPL/&lt;no.&gt;/&lt;FY&gt; series for the financial year and increments with every challan — edit
-              it if you need a different one.
+              The number follows the TTZ/SPL&lt;FY&gt;/&lt;no.&gt; series for the financial year and increments with every challan —
+              edit it if you need a different one.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -503,7 +512,7 @@ export default function ChallanGenerator() {
               <Input
                 value={form.challanNo}
                 onChange={set("challanNo")}
-                placeholder="TISPL/12/26-27"
+                placeholder="TTZ/SPL26-27/156"
                 aria-invalid={noTaken}
                 className={noTaken ? "border-destructive focus-visible:ring-destructive" : undefined}
                 required
@@ -534,31 +543,36 @@ export default function ChallanGenerator() {
         </Card>
 
         <PartyBlockForm
-          title="Dispatch to"
-          description="Where the goods are being sent. Search registered buyers and vendors — details fill in automatically and stay editable."
-          party={dispatchTo}
-          onChange={changeParty(setDispatchTo)}
-          onPick={pickParty(setDispatchTo)}
+          title="Party"
+          description="The company the challan is made out to. Search registered buyers and vendors — details fill in automatically and stay editable."
+          party={party}
+          onChange={changeParty(setParty)}
+          onPick={pickParty(setParty)}
           extra={
             <label className="sm:col-span-2 flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={sameParty}
-                onChange={(e) => setSameParty(e.target.checked)}
+                checked={sameDispatch}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setSameDispatch(checked);
+                  // start the separate dispatch block from the party's details so only the address needs changing
+                  if (!checked && !dispatchTo.name && !dispatchTo.address) setDispatchTo({ ...party });
+                }}
                 className="h-4 w-4"
               />
-              The “Party” on the challan is the same as the dispatch-to party
+              The goods are dispatched to the same address as the party
             </label>
           }
         />
 
-        {!sameParty && (
+        {!sameDispatch && (
           <PartyBlockForm
-            title="Party"
-            description="The billing party printed in the “Party” box, when different from where the goods go."
-            party={party}
-            onChange={changeParty(setParty)}
-            onPick={pickParty(setParty)}
+            title="Dispatch to"
+            description="Where the goods are actually being sent — printed in the “Dispatch To” box, and can differ from the party's address."
+            party={dispatchTo}
+            onChange={changeParty(setDispatchTo)}
+            onPick={pickParty(setDispatchTo)}
           />
         )}
 
@@ -762,7 +776,7 @@ export default function ChallanGenerator() {
                       <TableCell>
                         <span className="id-chip">{c.challanNo}</span>
                       </TableCell>
-                      <TableCell className="font-medium">{c.dispatchTo?.name}</TableCell>
+                      <TableCell className="font-medium">{c.party?.name || c.dispatchTo?.name}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(c.challanDate).toLocaleDateString()}
                       </TableCell>

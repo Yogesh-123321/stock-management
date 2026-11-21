@@ -219,7 +219,7 @@ export default function ChallanPreview({ challan: ch }) {
               <td className="border-r border-black px-1 font-bold">{totalQty(ch.items)}</td>
               <td className="border-r border-black" />
               <td className="border-r border-black" />
-              <td className="px-1 text-right font-bold text-[12px]">Rs. {fmtIndian(ch.totalAmount)}</td>
+              <td className="px-1 text-right font-bold text-[12px]">₹ {fmtIndian(ch.totalAmount)}</td>
             </tr>
           </tfoot>
         </table>

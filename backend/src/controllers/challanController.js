@@ -9,11 +9,14 @@ import { stateFromGstin } from "../utils/gstStates.js";
 const escapeRegex = (s = "") => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /* ---------------------------------------------------------------------------
-   Challan numbering — TISPL/<seq>/<FY>, e.g. TISPL/12/26-27.
+   Challan numbering — <prefix><FY>/<seq>, e.g. TTZ/SPL26-27/156.
    The sequence restarts for every financial year (April–March). For a brand
    new financial year / fresh database the first number is CHALLAN_START_SEQ
    (env, default 1); afterwards it is simply the highest number on record + 1.
+   The prefix defaults to "TTZ/SPL" and can be changed with CHALLAN_PREFIX.
 --------------------------------------------------------------------------- */
+const CHALLAN_PREFIX = process.env.CHALLAN_PREFIX || "TTZ/SPL";
+
 function fyString(date = new Date()) {
   const y = date.getFullYear();
   const start = date.getMonth() >= 3 ? y : y - 1;
@@ -22,16 +25,17 @@ function fyString(date = new Date()) {
 
 async function suggestChallanNo(date = new Date()) {
   const fy = fyString(date);
+  const head = `${CHALLAN_PREFIX}${fy}/`;
   const docs = await DeliveryChallan.find(
-    { challanNo: new RegExp(`^TISPL/\\d+/${escapeRegex(fy)}$`) },
+    { challanNo: new RegExp(`^${escapeRegex(head)}\\d+$`) },
     "challanNo"
   ).lean();
   let maxSeq = (Number(process.env.CHALLAN_START_SEQ) || 1) - 1;
   for (const d of docs) {
-    const m = String(d.challanNo).match(/^TISPL\/(\d+)\//);
+    const m = String(d.challanNo).slice(head.length).match(/^(\d+)$/);
     if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
   }
-  return `TISPL/${String(maxSeq + 1).padStart(2, "0")}/${fy}`;
+  return `${head}${maxSeq + 1}`;
 }
 
 // "INR Eighteen Thousand Four Hundred Eight Only" (paise handled too)
@@ -107,10 +111,14 @@ export async function generateChallan(req, res) {
     const challanNo = String(body.challanNo || "").trim();
     if (!challanNo) return res.status(400).json({ message: "Challan number is required" });
 
-    const dispatchTo = cleanParty(body.dispatchTo);
-    if (!dispatchTo.name) return res.status(400).json({ message: "Dispatch-to party name is required" });
-    // "Party" defaults to the dispatch-to party when left blank.
-    const party = body.party?.name?.trim() ? cleanParty(body.party) : { ...dispatchTo };
+    // "Dispatch To" (where the goods go) and "Party" (the company the challan is for) are
+    // independent blocks, so the dispatch address can differ from the party's address.
+    // Whichever one is left blank is copied from the other.
+    const hasDispatch = Boolean(body.dispatchTo?.name?.trim());
+    const hasParty = Boolean(body.party?.name?.trim());
+    if (!hasDispatch && !hasParty) return res.status(400).json({ message: "Party name is required" });
+    const party = hasParty ? cleanParty(body.party) : cleanParty(body.dispatchTo);
+    const dispatchTo = hasDispatch ? cleanParty(body.dispatchTo) : { ...party };
 
     if (await DeliveryChallan.exists({ challanNo })) {
       return res.status(409).json({ message: `Challan ${challanNo} already exists. Use a different number.` });
