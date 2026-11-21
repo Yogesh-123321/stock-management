@@ -10,6 +10,7 @@ export const PERMISSIONS = [
   { key: "po.approve", group: "Purchase orders", label: "Approve PO", adminOnly: true },
   { key: "pi.create", group: "Proforma invoices", label: "Create / generate PI" },
   { key: "pi.approve", group: "Proforma invoices", label: "Approve PI", adminOnly: true },
+  { key: "challan.create", group: "Delivery challans", label: "Create / generate delivery challan" },
   { key: "part.request", group: "Parts", label: "Raise new / alternate part request" },
   { key: "part.approve", group: "Parts", label: "Approve part numbers", adminOnly: true },
   { key: "payment.pay", group: "Billing", label: "Billing — view stock-entry invoices, mark them paid & enter UTR" },

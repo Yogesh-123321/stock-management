@@ -11,6 +11,7 @@ import IssueKit from "@/pages/IssueKit";
 import IssueSamples from "@/pages/IssueSamples";
 import Documents from "@/pages/Documents";
 import PiGenerator from "@/pages/PiGenerator";
+import ChallanGenerator from "@/pages/ChallanGenerator";
 import PoGenerator from "@/pages/PoGenerator";
 import Login from "@/pages/Login";
 import Users from "@/pages/Users";
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/documents" element={guard("documents.view", <Documents />)} />
           <Route path="/purchase-orders" element={<Navigate to="/documents" replace />} />
           <Route path="/pi-generator" element={guard("pi.create", <PiGenerator />)} />
+          <Route path="/challan-generator" element={guard("challan.create", <ChallanGenerator />)} />
           <Route path="/po-generator" element={guard("po.create", <PoGenerator />)} />
           <Route path="/approvals" element={<Approvals />} />
           <Route path="/payments" element={<Payments />} />

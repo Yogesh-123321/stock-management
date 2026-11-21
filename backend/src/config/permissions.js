@@ -15,6 +15,8 @@ export const PERMISSIONS = [
   // Proforma invoices
   { key: "pi.create", group: "Proforma invoices", label: "Create / generate PI" },
   { key: "pi.approve", group: "Proforma invoices", label: "Approve PI", adminOnly: true },
+  // Delivery challans
+  { key: "challan.create", group: "Delivery challans", label: "Create / generate delivery challan" },
   // Parts
   { key: "part.request", group: "Parts", label: "Raise new / alternate part request" },
   { key: "part.approve", group: "Parts", label: "Approve part numbers", adminOnly: true },
@@ -76,6 +78,7 @@ export const DEFAULT_PERMISSIONS = {
   user: [
     "po.create",
     "pi.create",
+    "challan.create",
     "part.request",
     "vendor.create",
     "buyer.create",

@@ -21,6 +21,7 @@ import {
   Layers,
   Wallet,
   PackageCheck,
+  Truck,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -34,6 +35,7 @@ const navItems = [
   { to: "/activity-log", label: "Activity log", icon: ScrollText, permission: "logs.view" },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck, permission: null, badge: "approvals" },
   { to: "/buyers", label: "Buyers", icon: UserCheck, permission: "buyer.create" },
+  { to: "/challan-generator", label: "Challan generator", icon: Truck, permission: "challan.create" },
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: null },
   {
     to: "/issue-kit",
